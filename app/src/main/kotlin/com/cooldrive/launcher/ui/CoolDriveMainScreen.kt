@@ -87,6 +87,7 @@ fun CoolDriveRootScreen(
     externalNavCommand: String?,
     onExternalNavConsumed: () -> Unit,
     onRequestRuntimePermissions: () -> Unit,
+    onRequestSetDefaultHome: () -> Unit,
     onStartVoiceReply: (CarMessageItem) -> Unit
 ) {
     val context = LocalContext.current
@@ -98,6 +99,7 @@ fun CoolDriveRootScreen(
     val location by app.locationTracker.location.collectAsState()
     val media by app.mediaControlBridge.mediaState.collectAsState()
     val installedApps by app.installedAppsRepository.apps.collectAsState()
+    val homeLaunchers by app.installedAppsRepository.homeLaunchers.collectAsState()
     val activeCall by app.notificationCenter.activeCall.collectAsState()
     val popupMessage by app.notificationCenter.popupMessage.collectAsState()
     val messages by app.notificationCenter.messages.collectAsState()
@@ -113,6 +115,13 @@ fun CoolDriveRootScreen(
     var gestureHudText by remember { mutableStateOf<String?>(null) }
     var permissionHealth by remember { mutableStateOf(PermissionHelper.check(context)) }
     var pairedBtDevices by remember { mutableStateOf(app.systemStatusMonitor.getPairedBluetoothDevices()) }
+
+    // Refresh permission health & home launchers automatically when entering Settings or returning from RoleManager
+    LaunchedEffect(destination, homeLaunchers) {
+        if (destination == LauncherDestination.SETTINGS) {
+            permissionHealth = PermissionHelper.check(context)
+        }
+    }
 
     // Clear Gesture HUD pill automatically after 1.6s
     LaunchedEffect(gestureHudText) {
@@ -487,12 +496,34 @@ fun CoolDriveRootScreen(
                             SettingsScreen(
                                 config = config,
                                 layoutSpec = layoutSpec,
+                                homeLaunchers = homeLaunchers,
                                 permissionHealth = permissionHealth,
                                 bridgeStatus = bridgeStatus,
                                 updateState = updateState,
                                 onUpdateConfig = { transform -> app.preferences.update(transform) },
+                                onRequestSetDefaultHome = {
+                                    onRequestSetDefaultHome()
+                                    app.installedAppsRepository.refreshHomeLaunchers()
+                                },
+                                onSwitchToLauncher = { targetLauncher ->
+                                    val launched = app.installedAppsRepository.launchHomeLauncher(targetLauncher)
+                                    gestureHudText = if (launched) {
+                                        "🏠 正在切換至 ${targetLauncher.label}"
+                                    } else {
+                                        "無法啟動 ${targetLauncher.label}"
+                                    }
+                                },
+                                onRefreshHomeLaunchers = {
+                                    app.installedAppsRepository.refreshHomeLaunchers()
+                                    permissionHealth = PermissionHelper.check(context)
+                                },
+                                onResetSettingsToDefaults = {
+                                    app.preferences.resetToDefaults()
+                                    gestureHudText = "↺ 已恢復所有啟動器設定為預設值"
+                                },
                                 onRefreshPermissions = {
                                     permissionHealth = PermissionHelper.check(context)
+                                    app.installedAppsRepository.refreshHomeLaunchers()
                                     app.locationTracker.startIfPermitted()
                                     app.mediaControlBridge.refreshSessions()
                                 },

@@ -1,6 +1,7 @@
 package com.cooldrive.launcher
 
 import android.Manifest
+import android.app.role.RoleManager
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -14,6 +15,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.cooldrive.launcher.comms.CarMessageItem
+import com.cooldrive.launcher.system.SystemStatusMonitor
 import com.cooldrive.launcher.ui.CoolDriveRootScreen
 import java.util.Locale
 
@@ -28,6 +30,12 @@ class MainActivity : ComponentActivity() {
         val app = application as CoolDriveApp
         app.locationTracker.startIfPermitted()
         app.systemStatusMonitor.refreshAll()
+    }
+
+    private val homeRoleLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        (application as CoolDriveApp).installedAppsRepository.refreshHomeLaunchers()
     }
 
     private val voiceReplyLauncher = registerForActivityResult(
@@ -71,6 +79,7 @@ class MainActivity : ComponentActivity() {
                 externalNavCommand = externalNavCommand.value,
                 onExternalNavConsumed = { externalNavCommand.value = null },
                 onRequestRuntimePermissions = ::requestNeededRuntimePermissions,
+                onRequestSetDefaultHome = ::requestSetDefaultHomeLauncher,
                 onStartVoiceReply = ::launchVoiceReply
             )
         }
@@ -89,6 +98,7 @@ class MainActivity : ComponentActivity() {
         app.systemStatusMonitor.refreshAll()
         app.locationTracker.startIfPermitted()
         app.mediaControlBridge.refreshSessions()
+        app.installedAppsRepository.refreshHomeLaunchers()
         hideSystemBarsForCar()
     }
 
@@ -118,6 +128,24 @@ class MainActivity : ComponentActivity() {
             perms += Manifest.permission.POST_NOTIFICATIONS
         }
         permissionLauncher.launch(perms.toTypedArray())
+    }
+
+    private fun requestSetDefaultHomeLauncher() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val roleManager = getSystemService(RoleManager::class.java)
+            if (roleManager != null &&
+                roleManager.isRoleAvailable(RoleManager.ROLE_HOME) &&
+                !roleManager.isRoleHeld(RoleManager.ROLE_HOME)
+            ) {
+                val roleIntent = roleManager.createRequestRoleIntent(RoleManager.ROLE_HOME)
+                val launched = runCatching {
+                    homeRoleLauncher.launch(roleIntent)
+                    true
+                }.getOrDefault(false)
+                if (launched) return
+            }
+        }
+        SystemStatusMonitor.openHomeLauncherSettings(this)
     }
 
     private fun launchVoiceReply(target: CarMessageItem) {

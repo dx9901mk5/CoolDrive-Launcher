@@ -150,6 +150,12 @@ class LauncherPreferences(context: Context) {
         prefs.edit().putString(KEY_CONFIG_JSON, json.encodeToString(next)).apply()
     }
 
+    fun resetToDefaults() {
+        val defaults = LauncherConfig()
+        _config.value = defaults
+        prefs.edit().putString(KEY_CONFIG_JSON, json.encodeToString(defaults)).apply()
+    }
+
     fun togglePinnedPackage(packageName: String) {
         update { current ->
             val list = current.pinnedDockPackages.toMutableList()

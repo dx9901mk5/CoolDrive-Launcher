@@ -2,6 +2,7 @@ package com.cooldrive.launcher.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,12 +33,15 @@ import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.DisplaySettings
 import androidx.compose.material.icons.rounded.Gesture
+import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -52,25 +56,30 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cooldrive.launcher.BuildConfig
 import com.cooldrive.launcher.comms.BridgeStatusState
-import com.cooldrive.launcher.data.DeviceRole
 import com.cooldrive.launcher.data.DockPositionMode
 import com.cooldrive.launcher.data.LauncherConfig
 import com.cooldrive.launcher.data.LauncherStylePreset
 import com.cooldrive.launcher.data.MapEngineStyle
 import com.cooldrive.launcher.data.ThemeMode
 import com.cooldrive.launcher.layout.CoolwalkLayoutSpec
+import com.cooldrive.launcher.system.HomeLauncherInfo
 import com.cooldrive.launcher.system.PermissionHealth
 import com.cooldrive.launcher.system.PermissionHelper
 import com.cooldrive.launcher.system.SystemStatusMonitor
@@ -98,10 +107,15 @@ import kotlin.math.roundToInt
 fun SettingsScreen(
     config: LauncherConfig,
     layoutSpec: CoolwalkLayoutSpec,
+    homeLaunchers: List<HomeLauncherInfo>,
     permissionHealth: PermissionHealth,
     bridgeStatus: BridgeStatusState,
     updateState: UpdateUiState,
     onUpdateConfig: ((LauncherConfig) -> LauncherConfig) -> Unit,
+    onRequestSetDefaultHome: () -> Unit,
+    onSwitchToLauncher: (HomeLauncherInfo) -> Unit,
+    onRefreshHomeLaunchers: () -> Unit,
+    onResetSettingsToDefaults: () -> Unit,
     onRefreshPermissions: () -> Unit,
     onRequestRuntimePermissions: () -> Unit,
     onSimulateCall: () -> Unit,
@@ -114,6 +128,7 @@ fun SettingsScreen(
 ) {
     val colors = LocalCoolDriveColors.current
     val context = LocalContext.current
+    var confirmResetPending by remember { mutableStateOf(false) }
 
     val solarPreview = remember(config.lastKnownLat, config.lastKnownLon) {
         val zone = ZoneId.systemDefault()
@@ -155,7 +170,7 @@ fun SettingsScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "風格主題 · 日夜自動切換 · DPI 常駐 Dock · 多指手勢 · 更新與 GitHub",
+                        text = "啟動器切換與預設 · 風格與日夜 · DPI 常駐 Dock · 多指手勢 · 更新與 GitHub",
                         color = colors.secondaryText,
                         fontSize = 12.sp
                     )
@@ -180,6 +195,216 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // SECTION 0: 啟動器切換與設為系統預設主畫面（支援切換原廠 AI Box 啟動器／其他啟動器＋選成預設值）
+            SettingsSectionCard(
+                icon = Icons.Rounded.Home,
+                title = "啟動器切換與預設主畫面設定"
+            ) {
+                val currentDefaultLauncher = homeLaunchers.firstOrNull { it.isDefault }
+                Surface(
+                    color = colors.cardSurfaceElevated,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = if (permissionHealth.isDefaultHome) Icons.Rounded.CheckCircle else Icons.Rounded.WarningAmber,
+                                contentDescription = null,
+                                tint = if (permissionHealth.isDefaultHome) colors.statusConnected else Color(0xFFF59E0B),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = if (permissionHealth.isDefaultHome) {
+                                        "目前預設啟動器：CoolDrive 車機啟動器（已設為預設）"
+                                    } else {
+                                        "目前預設啟動器：${currentDefaultLauncher?.label ?: "系統預設啟動器（非 CoolDrive）"}"
+                                    },
+                                    color = colors.primaryText,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "可一鍵將 CoolDrive 設為預設啟動器，或切換至車機原廠／其他已安裝的啟動器並變更系統預設值",
+                                    color = colors.secondaryText,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+                }
+
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = onRequestSetDefaultHome,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colors.accent,
+                            contentColor = colors.onAccent
+                        ),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Icon(Icons.Rounded.Home, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (permissionHealth.isDefaultHome) "重新選擇預設啟動器" else "設 CoolDrive 為系統預設")
+                    }
+
+                    OutlinedButton(
+                        onClick = { SystemStatusMonitor.openHomeLauncherSettings(context) },
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Icon(Icons.Rounded.SwapHoriz, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("變更系統預設啟動器（選擇其他預設）")
+                    }
+
+                    OutlinedButton(
+                        onClick = onRefreshHomeLaunchers,
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("重新掃描")
+                    }
+                }
+
+                if (homeLaunchers.isNotEmpty()) {
+                    Text(
+                        text = "已安裝的車機／系統啟動器（點擊即可立即切換）",
+                        color = colors.primaryText,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        homeLaunchers.forEach { launcher ->
+                            val iconBmp = remember(launcher.icon) { launcher.icon.asImageBitmap() }
+                            Surface(
+                                color = colors.cardSurfaceElevated,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .border(
+                                        width = if (launcher.isDefault) 1.5.dp else 1.dp,
+                                        color = if (launcher.isDefault) colors.accent else colors.cardBorder,
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Image(
+                                            bitmap = iconBmp,
+                                            contentDescription = launcher.label,
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                        )
+                                        Spacer(Modifier.width(12.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Text(
+                                                    text = launcher.label,
+                                                    color = colors.primaryText,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                if (launcher.isDefault) {
+                                                    Surface(
+                                                        color = colors.statusConnected.copy(alpha = 0.2f),
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "系統預設",
+                                                            color = colors.statusConnected,
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        )
+                                                    }
+                                                }
+                                                if (launcher.isSelf) {
+                                                    Surface(
+                                                        color = colors.accent.copy(alpha = 0.2f),
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "目前使用",
+                                                            color = colors.accent,
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            Text(
+                                                text = launcher.packageName,
+                                                color = colors.secondaryText,
+                                                fontSize = 11.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(Modifier.width(8.dp))
+
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        if (!launcher.isSelf) {
+                                            Button(
+                                                onClick = { onSwitchToLauncher(launcher) },
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = colors.accent,
+                                                    contentColor = colors.onAccent
+                                                ),
+                                                shape = RoundedCornerShape(12.dp)
+                                            ) {
+                                                Text("立即切換", fontSize = 12.sp)
+                                            }
+                                        }
+                                        if (!launcher.isDefault) {
+                                            OutlinedButton(
+                                                onClick = {
+                                                    if (launcher.isSelf) onRequestSetDefaultHome()
+                                                    else SystemStatusMonitor.openHomeLauncherSettings(context)
+                                                },
+                                                shape = RoundedCornerShape(12.dp)
+                                            ) {
+                                                Text("選成預設", fontSize = 12.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // SECTION 1: 風格與日夜模式（Style Presets + Day/Night Schedule + Accent + Map + Split Ratio）
             SettingsSectionCard(
                 icon = Icons.Rounded.Palette,
@@ -678,6 +903,30 @@ fun SettingsScreen(
                             imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
                             contentDescription = "開啟 GitHub",
                             tint = colors.accent
+                        )
+                    }
+                }
+                // Reset all CoolDrive settings to factory defaults
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            if (confirmResetPending) {
+                                onResetSettingsToDefaults()
+                                confirmResetPending = false
+                            } else {
+                                confirmResetPending = true
+                            }
+                        },
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Icon(Icons.Rounded.RestartAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (confirmResetPending) "再次點擊確認恢復所有設定為預設值"
+                            else "恢復啟動器設定為預設值"
                         )
                     }
                 }

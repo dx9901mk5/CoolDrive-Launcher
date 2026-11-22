@@ -2,6 +2,7 @@ package com.cooldrive.launcher.system
 
 import android.app.ActivityOptions
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -37,6 +38,15 @@ data class InstalledAppInfo(
     val category: AppCategory
 )
 
+data class HomeLauncherInfo(
+    val packageName: String,
+    val activityName: String,
+    val label: String,
+    val icon: Bitmap,
+    val isSelf: Boolean,
+    val isDefault: Boolean
+)
+
 class InstalledAppsRepository(private val context: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -44,6 +54,9 @@ class InstalledAppsRepository(private val context: Context) {
 
     private val _apps = MutableStateFlow<List<InstalledAppInfo>>(emptyList())
     val apps: StateFlow<List<InstalledAppInfo>> = _apps.asStateFlow()
+
+    private val _homeLaunchers = MutableStateFlow<List<HomeLauncherInfo>>(emptyList())
+    val homeLaunchers: StateFlow<List<HomeLauncherInfo>> = _homeLaunchers.asStateFlow()
 
     private val _recentPackages = MutableStateFlow<List<String>>(emptyList())
     val recentPackages: StateFlow<List<String>> = _recentPackages.asStateFlow()
@@ -81,7 +94,7 @@ class InstalledAppsRepository(private val context: Context) {
             val loaded = resolved.mapNotNull { info ->
                 val pkg = info.activityInfo?.packageName ?: return@mapNotNull null
                 if (pkg == selfPkg || !seen.add(pkg)) return@mapNotNull null
-                val label = info.loadLabel(pm)?.toString()?.takeIf { it.isNotBlank() } ?: pkg
+                val label = info.loadLabel(pm).toString().takeIf { it.isNotBlank() } ?: pkg
                 val drawable = runCatching { info.loadIcon(pm) }.getOrNull()
                 val bitmap = drawableToBitmap(drawable, 128)
                 InstalledAppInfo(
@@ -93,7 +106,69 @@ class InstalledAppsRepository(private val context: Context) {
             }.sortedBy { it.label.lowercase() }
 
             _apps.value = loaded
+            loadHomeLaunchersSync()
         }
+    }
+
+    fun refreshHomeLaunchers() {
+        scope.launch { loadHomeLaunchersSync() }
+    }
+
+    private fun loadHomeLaunchersSync() {
+        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+        }
+        val defaultPkg = runCatching {
+            pm.resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
+                ?.activityInfo?.packageName
+        }.getOrNull()
+
+        val resolved = runCatching {
+            pm.queryIntentActivities(homeIntent, PackageManager.MATCH_ALL)
+        }.getOrDefault(emptyList())
+
+        val selfPkg = context.packageName
+        val seen = HashSet<String>()
+        val list = resolved.mapNotNull { info ->
+            val ai = info.activityInfo ?: return@mapNotNull null
+            val pkg = ai.packageName ?: return@mapNotNull null
+            val act = ai.name ?: return@mapNotNull null
+            // Filter out Android's internal FallbackHome / ResolverActivity placeholders
+            if (pkg == "android" || act.contains("ResolverActivity") || act.contains("FallbackHome")) {
+                return@mapNotNull null
+            }
+            if (!seen.add("$pkg/$act")) return@mapNotNull null
+            val label = info.loadLabel(pm).toString().takeIf { it.isNotBlank() } ?: pkg
+            val drawable = runCatching { info.loadIcon(pm) }.getOrNull()
+            HomeLauncherInfo(
+                packageName = pkg,
+                activityName = act,
+                label = label,
+                icon = drawableToBitmap(drawable, 128),
+                isSelf = pkg == selfPkg,
+                isDefault = pkg == defaultPkg
+            )
+        }.sortedWith(
+            compareByDescending<HomeLauncherInfo> { it.isDefault }
+                .thenByDescending { it.isSelf }
+                .thenBy { it.label.lowercase() }
+        )
+
+        _homeLaunchers.value = list
+    }
+
+    fun launchHomeLauncher(launcher: HomeLauncherInfo): Boolean {
+        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            component = ComponentName(launcher.packageName, launcher.activityName)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        }
+        val started = runCatching {
+            context.startActivity(homeIntent)
+            true
+        }.getOrDefault(false)
+        if (started) return true
+        return launchAppFullscreen(launcher.packageName)
     }
 
     fun findApp(packageName: String): InstalledAppInfo? =
