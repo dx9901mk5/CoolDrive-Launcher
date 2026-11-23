@@ -423,9 +423,6 @@ fun CoolDriveRootScreen(
                     onGoDashboard = { destination = LauncherDestination.DASHBOARD_SPLIT },
                     onSlotClick = { slot ->
                         when {
-                            slot.packageName == "com.google.android.apps.maps" && destination != LauncherDestination.FULLSCREEN_MAP -> {
-                                destination = LauncherDestination.FULLSCREEN_MAP
-                            }
                             slot.id == "youtube" -> launchYoutubeBest()
                             slot.packageName == "ACTION_DIAL" -> app.installedAppsRepository.launchDialer()
                             !slot.packageName.isNullOrBlank() -> {

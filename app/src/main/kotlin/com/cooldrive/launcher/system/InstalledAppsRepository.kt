@@ -14,6 +14,7 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
+import android.view.Display
 import androidx.core.content.ContextCompat
 import com.cooldrive.launcher.accessibility.CoolDriveAccessibilityService
 import com.cooldrive.launcher.data.SplitLaunchEngine
@@ -37,6 +38,7 @@ enum class AppCategory(val labelZh: String) {
 
 data class InstalledAppInfo(
     val packageName: String,
+    val activityName: String = "",
     val label: String,
     val icon: Bitmap,
     val category: AppCategory
@@ -96,13 +98,16 @@ class InstalledAppsRepository(private val context: Context) {
             val selfPkg = context.packageName
             val seen = HashSet<String>()
             val loaded = resolved.mapNotNull { info ->
-                val pkg = info.activityInfo?.packageName ?: return@mapNotNull null
+                val ai = info.activityInfo ?: return@mapNotNull null
+                val pkg = ai.packageName ?: return@mapNotNull null
+                val act = ai.name.orEmpty()
                 if (pkg == selfPkg || !seen.add(pkg)) return@mapNotNull null
                 val label = info.loadLabel(pm).toString().takeIf { it.isNotBlank() } ?: pkg
                 val drawable = runCatching { info.loadIcon(pm) }.getOrNull()
                 val bitmap = drawableToBitmap(drawable, 128)
                 InstalledAppInfo(
                     packageName = pkg,
+                    activityName = act,
                     label = label,
                     icon = bitmap,
                     category = classifyCategory(pkg, label)
@@ -213,19 +218,60 @@ class InstalledAppsRepository(private val context: Context) {
     }
 
     /**
-     * Launches an app full-screen immediately (used by Dock & App Drawer).
+     * Launches an app full-screen on the primary car display (Display.DEFAULT_DISPLAY = 0).
+     * Explicitly forces Display 0 & Fullscreen windowing mode so apps previously trapped inside
+     * an AI Box stock launcher's VirtualDisplay / ActivityView (like Google Maps!) are cleanly
+     * pulled back onto the main car display instead of silently resuming on a hidden display.
      */
     fun launchAppFullscreen(packageName: String): Boolean {
-        val intent = pm.getLaunchIntentForPackage(packageName) ?: return false
+        val knownActivity = findApp(packageName)?.activityName.orEmpty()
+        val intent = if (knownActivity.isNotBlank()) {
+            Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+                component = ComponentName(packageName, knownActivity)
+            }
+        } else {
+            pm.getLaunchIntentForPackage(packageName)
+        } ?: return false
+
         intent.addFlags(
             Intent.FLAG_ACTIVITY_NEW_TASK or
-                Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED or
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
         )
-        return runCatching {
-            context.startActivity(intent)
+
+        // Special rescue for Google Maps if trapped inside AI Box stock launcher's hidden VirtualDisplay
+        if (packageName == "com.google.android.apps.maps") {
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+
+        val options = ActivityOptions.makeBasic().apply {
+            launchDisplayId = Display.DEFAULT_DISPLAY
+            runCatching {
+                val method = ActivityOptions::class.java.getMethod(
+                    "setLaunchWindowingMode",
+                    Int::class.javaPrimitiveType
+                )
+                method.invoke(this, 1) // WINDOWING_MODE_FULLSCREEN
+            }
+        }
+
+        val ok = runCatching {
+            context.startActivity(intent, options.toBundle())
             recordRecent(packageName)
             true
-        }.getOrDefault(false)
+        }.getOrElse {
+            runCatching {
+                context.startActivity(intent)
+                recordRecent(packageName)
+                true
+            }.getOrDefault(false)
+        }
+
+        if (!ok && packageName == "com.google.android.apps.maps") {
+            return launchGoogleMapsNavigation(null)
+        }
+        return ok
     }
 
     /**
@@ -261,10 +307,20 @@ class InstalledAppsRepository(private val context: Context) {
         }
         val intent = Intent(Intent.ACTION_VIEW, uri).apply {
             setPackage("com.google.android.apps.maps")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        val options = ActivityOptions.makeBasic().apply {
+            launchDisplayId = Display.DEFAULT_DISPLAY
+            runCatching {
+                val method = ActivityOptions::class.java.getMethod(
+                    "setLaunchWindowingMode",
+                    Int::class.javaPrimitiveType
+                )
+                method.invoke(this, 1)
+            }
         }
         val ok = runCatching {
-            context.startActivity(intent)
+            context.startActivity(intent, options.toBundle())
             recordRecent("com.google.android.apps.maps")
             true
         }.getOrDefault(false)
