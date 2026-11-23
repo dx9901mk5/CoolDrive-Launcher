@@ -33,7 +33,11 @@ class MainActivity : ComponentActivity() {
         app.locationTracker.startIfPermitted()
         app.systemStatusMonitor.refreshAll()
         if (app.preferences.config.value.companionAutoConnect) {
-            BluetoothCompanionService.startOrReconnect(this)
+            if (BluetoothCompanionService.shouldPhoneBridgeRunNow(this)) {
+                BluetoothCompanionService.startOrReconnect(this)
+            } else {
+                BluetoothCompanionService.markStandby(this)
+            }
         }
         PermissionHelper.requestNotificationListenerRebind(this)
     }
@@ -107,7 +111,11 @@ class MainActivity : ComponentActivity() {
         app.installedAppsRepository.refreshHomeLaunchers()
         PermissionHelper.requestNotificationListenerRebind(this)
         if (app.preferences.config.value.companionAutoConnect) {
-            BluetoothCompanionService.startOrReconnect(this)
+            if (BluetoothCompanionService.shouldPhoneBridgeRunNow(this)) {
+                BluetoothCompanionService.startOrReconnect(this)
+            } else {
+                BluetoothCompanionService.markStandby(this)
+            }
         }
         hideSystemBarsForCar()
     }

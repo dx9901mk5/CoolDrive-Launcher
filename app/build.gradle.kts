@@ -12,8 +12,8 @@ android {
     applicationId = "com.dxcar.launcher"
     minSdk = 28
     targetSdk = 35
-    versionCode = 9
-    versionName = "1.4.1"
+    versionCode = 10
+    versionName = "1.4.2"
   }
 
   signingConfigs {

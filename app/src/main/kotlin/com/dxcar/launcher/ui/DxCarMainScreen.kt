@@ -209,7 +209,11 @@ fun DxCarRootScreen(
 
     LaunchedEffect(config.deviceRole, config.companionTargetDeviceAddress, config.companionAutoConnect) {
         if (config.companionAutoConnect) {
-            BluetoothCompanionService.startOrReconnect(context)
+            if (BluetoothCompanionService.shouldPhoneBridgeRunNow(context)) {
+                BluetoothCompanionService.startOrReconnect(context)
+            } else {
+                BluetoothCompanionService.markStandby(context)
+            }
         }
     }
 
@@ -413,7 +417,7 @@ fun DxCarRootScreen(
                             companionTargetDeviceName = dev.name
                         )
                     }
-                    BluetoothCompanionService.startOrReconnect(context)
+                    BluetoothCompanionService.forceReconnect(context)
                 },
                 onToggleAllowedPackage = { pkg ->
                     app.preferences.update { current ->
@@ -426,7 +430,7 @@ fun DxCarRootScreen(
                     app.preferences.update { it.copy(companionSyncAllApps = checked) }
                 },
                 onRequestRuntimePermissions = onRequestRuntimePermissions,
-                onReconnectBridge = { BluetoothCompanionService.startOrReconnect(context) },
+                onReconnectBridge = { BluetoothCompanionService.forceReconnect(context) },
                 onSwitchToAiBoxMode = {
                     app.preferences.update {
                         it.copy(deviceRole = DeviceRole.AI_BOX_LAUNCHER, roleUserPinned = true)
@@ -819,7 +823,11 @@ fun DxCarRootScreen(
                                     app.preferences.update {
                                         it.copy(deviceRole = DeviceRole.PHONE_COMPANION, roleUserPinned = true)
                                     }
-                                    BluetoothCompanionService.startOrReconnect(context)
+                                    if (BluetoothCompanionService.shouldPhoneBridgeRunNow(context)) {
+                                        BluetoothCompanionService.startOrReconnect(context)
+                                    } else {
+                                        BluetoothCompanionService.markStandby(context)
+                                    }
                                 },
                                 onClose = { destination = LauncherDestination.APP_DRAWER }
                             )

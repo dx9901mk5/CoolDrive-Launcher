@@ -23,20 +23,47 @@ class BluetoothCallReceiver : BroadcastReceiver() {
                         PersistentDockOverlayService.start(context)
                     }
                     if (cfg.companionAutoConnect) {
-                        BluetoothCompanionService.startOrReconnect(context)
+                        if (cfg.deviceRole == DeviceRole.AI_BOX_LAUNCHER ||
+                            BluetoothCompanionService.shouldPhoneBridgeRunNow(context)
+                        ) {
+                            BluetoothCompanionService.startOrReconnect(context)
+                        } else {
+                            BluetoothCompanionService.markStandby(context)
+                        }
                     }
                 }
             }
 
             BluetoothDevice.ACTION_ACL_CONNECTED -> {
                 app?.systemStatusMonitor?.refreshBluetoothState()
-                if (app?.preferences?.config?.value?.companionAutoConnect == true) {
-                    BluetoothCompanionService.startOrReconnect(context)
+                val cfg = app?.preferences?.config?.value
+                if (cfg?.companionAutoConnect == true) {
+                    if (cfg.deviceRole == DeviceRole.AI_BOX_LAUNCHER) {
+                        BluetoothCompanionService.startOrReconnect(context)
+                    } else {
+                        val connectedDevice = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                        }
+                        val targetAddr = cfg.companionTargetDeviceAddress.trim()
+                        val matchesTarget = targetAddr.isBlank() ||
+                            connectedDevice?.address.equals(targetAddr, ignoreCase = true)
+                        if (matchesTarget) {
+                            BluetoothCompanionService.appendExternalLog("偵測到車機藍牙連線，自動喚醒通知同步")
+                            BluetoothCompanionService.startOrReconnect(context)
+                        }
+                    }
                 }
             }
 
             BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
                 app?.systemStatusMonitor?.refreshBluetoothState()
+                val cfg = app?.preferences?.config?.value
+                if (cfg?.deviceRole == DeviceRole.PHONE_COMPANION) {
+                    BluetoothCompanionService.onBluetoothDisconnected(context)
+                }
             }
 
             TelephonyManager.ACTION_PHONE_STATE_CHANGED -> {

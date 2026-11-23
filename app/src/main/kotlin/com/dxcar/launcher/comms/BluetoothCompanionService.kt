@@ -91,6 +91,9 @@ class BluetoothCompanionService : Service() {
     private val lanWriteLock = Any()
     private val seenPacketIds = Collections.synchronizedSet(LinkedHashSet<String>())
 
+    @Volatile
+    private var forceOneShotUntilMs: Long = 0L
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -105,6 +108,26 @@ class BluetoothCompanionService : Service() {
             ACTION_STOP -> {
                 stopSelf()
                 return START_NOT_STICKY
+            }
+            ACTION_BT_DISCONNECTED -> {
+                closeBtSocketsOnlyClient()
+                val app = DxCarApp.instance
+                val role = app?.preferences?.config?.value?.deviceRole ?: DeviceRole.AI_BOX_LAUNCHER
+                if (role == DeviceRole.PHONE_COMPANION &&
+                    lanSocket?.isConnected != true &&
+                    !shouldPhoneBridgeRunNow(this)
+                ) {
+                    appendLog("車機藍牙已斷開，進入待機省電模式（下次連線自動喚醒）")
+                    markStandby(this)
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+                updateConnectionSnapshot()
+            }
+            ACTION_FORCE_SCAN -> {
+                forceOneShotUntilMs = System.currentTimeMillis() + 15_000L
+                startForegroundSafe("正在搜尋 AI Box（藍牙／Wi-Fi 熱點）…")
+                restartWorkers()
             }
             ACTION_RECONNECT -> {
                 startForegroundSafe("通知同步橋接運作中…")
@@ -282,7 +305,25 @@ class BluetoothCompanionService : Service() {
 
         while (scope.isActive) {
             val cfg = app.preferences.config.value
+            if (cfg.deviceRole != DeviceRole.PHONE_COMPANION) break
+
             val targetAddress = cfg.companionTargetDeviceAddress
+            val btLinkAlive = targetAddress.isNotBlank() && isTargetBluetoothConnected(this, targetAddress)
+            val manualScanActive = System.currentTimeMillis() < forceOneShotUntilMs
+
+            // Event-triggered power saving: do NOT spam RFCOMM connect() when car BT is not connected!
+            if (!btLinkAlive && !manualScanActive) {
+                if (lanSocket?.isConnected != true && !isWifiHotspotActive(this)) {
+                    appendLog("未連接車機藍牙或熱點，進入待機省電模式（連上藍牙自動啟動）")
+                    markStandby(this)
+                    stopSelf()
+                    return
+                }
+                updateConnectionSnapshot()
+                delay(10_000L)
+                continue
+            }
+
             if (targetAddress.isBlank() || adapter == null || !adapter.isEnabled || !hasBluetoothConnectPermission()) {
                 updateConnectionSnapshot()
                 delay(4_000L)
@@ -395,6 +436,12 @@ class BluetoothCompanionService : Service() {
         while (scope.isActive) {
             if (lanSocket?.isConnected == true) {
                 delay(2_500L)
+                continue
+            }
+
+            val shouldScanLan = shouldPhoneBridgeRunNow(this) || System.currentTimeMillis() < forceOneShotUntilMs
+            if (!shouldScanLan) {
+                delay(6_000L)
                 continue
             }
 
@@ -725,7 +772,9 @@ class BluetoothCompanionService : Service() {
         val status = when {
             btConnected || lanConnected -> BridgeConnectionStatus.CONNECTED
             role == DeviceRole.AI_BOX_LAUNCHER -> BridgeConnectionStatus.LISTENING
-            else -> BridgeConnectionStatus.CONNECTING
+            shouldPhoneBridgeRunNow(this) || System.currentTimeMillis() < forceOneShotUntilMs ->
+                BridgeConnectionStatus.CONNECTING
+            else -> BridgeConnectionStatus.STANDBY
         }
         val currentPeer = overridePeer.ifBlank { _bridgeState.value.peerName }
         _bridgeState.value = _bridgeState.value.copy(
@@ -738,7 +787,8 @@ class BluetoothCompanionService : Service() {
         val notifMsg = when (status) {
             BridgeConnectionStatus.CONNECTED -> "已透過 $transport 連線：$currentPeer"
             BridgeConnectionStatus.LISTENING -> "等待手機藍牙／熱點連線…"
-            else -> "正在尋找 AI Box（藍牙／Wi-Fi 熱點）…"
+            BridgeConnectionStatus.STANDBY -> "待機省電中（藍牙連上車機自動啟動）"
+            else -> "正在連線 AI Box（藍牙／Wi-Fi 熱點）…"
         }
         updateNotification(notifMsg)
     }
@@ -811,6 +861,8 @@ class BluetoothCompanionService : Service() {
 
         const val ACTION_START = "com.dxcar.launcher.bt.START"
         const val ACTION_RECONNECT = "com.dxcar.launcher.bt.RECONNECT"
+        const val ACTION_FORCE_SCAN = "com.dxcar.launcher.bt.FORCE_SCAN"
+        const val ACTION_BT_DISCONNECTED = "com.dxcar.launcher.bt.BT_DISCONNECTED"
         const val ACTION_STOP = "com.dxcar.launcher.bt.STOP"
 
         @Volatile
@@ -826,6 +878,74 @@ class BluetoothCompanionService : Service() {
             runCatching {
                 ContextCompat.startForegroundService(context, intent)
             }
+        }
+
+        /** Manual trigger from Phone UI "立即搜尋重連" button (runs a 15s scan then returns to standby if idle). */
+        fun forceReconnect(context: Context) {
+            val intent = Intent(context, BluetoothCompanionService::class.java).apply {
+                action = ACTION_FORCE_SCAN
+            }
+            runCatching {
+                ContextCompat.startForegroundService(context, intent)
+            }
+        }
+
+        fun onBluetoothDisconnected(context: Context) {
+            if (activeService == null) {
+                markStandby(context)
+                return
+            }
+            val intent = Intent(context, BluetoothCompanionService::class.java).apply {
+                action = ACTION_BT_DISCONNECTED
+            }
+            runCatching { context.startService(intent) }
+        }
+
+        fun markStandby(context: Context) {
+            _bridgeState.value = _bridgeState.value.copy(
+                status = BridgeConnectionStatus.STANDBY,
+                transportLabel = "",
+                isListenerBound = BoxNotificationListenerService.instance != null
+            )
+        }
+
+        @SuppressLint("MissingPermission")
+        fun isTargetBluetoothConnected(context: Context, targetAddress: String): Boolean {
+            if (targetAddress.isBlank()) return false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                return false
+            }
+            val btManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager ?: return false
+            val adapter = btManager.adapter ?: return false
+            if (!adapter.isEnabled) return false
+
+            return runCatching {
+                val device = adapter.getRemoteDevice(targetAddress)
+                val method = device.javaClass.getMethod("isConnected")
+                (method.invoke(device) as? Boolean) == true
+            }.getOrDefault(false)
+        }
+
+        fun isWifiHotspotActive(context: Context): Boolean {
+            val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+                ?: return false
+            return runCatching {
+                val m = wm.javaClass.getDeclaredMethod("isWifiApEnabled")
+                m.isAccessible = true
+                (m.invoke(wm) as? Boolean) == true
+            }.getOrDefault(false)
+        }
+
+        /** Returns true on Phone only when target car BT is connected OR Wi-Fi Hotspot is active (saves battery!). */
+        fun shouldPhoneBridgeRunNow(context: Context): Boolean {
+            val app = DxCarApp.instance ?: return false
+            val cfg = app.preferences.config.value
+            if (cfg.deviceRole == DeviceRole.AI_BOX_LAUNCHER) return true
+            return isTargetBluetoothConnected(context, cfg.companionTargetDeviceAddress) ||
+                isWifiHotspotActive(context)
         }
 
         fun stop(context: Context) {

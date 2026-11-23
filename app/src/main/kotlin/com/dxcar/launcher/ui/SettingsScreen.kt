@@ -1079,6 +1079,42 @@ fun SettingsScreen(
                         Text("測試模擬 LINE 訊息與朗讀")
                     }
                 }
+
+                // 車機端配對與抓通知設定提醒卡片
+                Surface(
+                    color = colors.accent.copy(alpha = 0.09f),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, colors.accent.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Text(
+                            text = "📖 手機與車機「抓通知」快速設定提醒",
+                            color = colors.primaryText,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "1. 車機端：下方「AI Box 權限健檢」請開啟【顯示在其他應用程式上層】與【通知存取權】。",
+                            color = colors.secondaryText,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = "2. 手機端：安裝同一支 APK 開啟會自動進入手機同步端，請開啟【通知讀取權限】（若遇「受限制的設定」可點畫面提示到應用程式資訊右上角 ⋮ 解鎖）、【藍牙／通話權限】與【忽略電池最佳化】。",
+                            color = colors.secondaryText,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = "3. 省電連線機制：手機端平常待機不搜尋不耗電，會在「手機連上車機藍牙」時自動喚醒同步；亦可開手機 Wi-Fi 熱點給車機連網作為雙備援。",
+                            color = colors.secondaryText,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
             }
 
             // SECTION 5: AI Box 權限健檢

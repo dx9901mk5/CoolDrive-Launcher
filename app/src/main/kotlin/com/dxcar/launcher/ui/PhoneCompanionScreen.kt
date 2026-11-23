@@ -151,7 +151,7 @@ fun PhoneCompanionScreen(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "透過藍牙 SPP ＋ Wi-Fi 熱點雙通道，即時同步來電、LINE、簡訊至車機",
+                    text = "藍牙連上車機時自動喚醒同步（平時待機省電不搜尋）＋ Wi-Fi 熱點雙備援",
                     color = colors.secondaryText,
                     fontSize = 12.sp
                 )
@@ -164,6 +164,60 @@ fun PhoneCompanionScreen(
                     Icon(Icons.Rounded.DirectionsCar, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("切換車機模式")
+                }
+            }
+        }
+
+        // FIRST-TIME / ALWAYS-HANDY PAIRING & NOTIFICATION SETUP GUIDE
+        var showGuideExpanded by remember(listenerAlive, bridgeStatus.status) {
+            mutableStateOf(!listenerAlive || bridgeStatus.status != BridgeConnectionStatus.CONNECTED)
+        }
+        Surface(
+            color = colors.accent.copy(alpha = 0.10f),
+            shape = RoundedCornerShape(18.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, colors.accent.copy(alpha = 0.40f), RoundedCornerShape(18.dp))
+                .clickable { showGuideExpanded = !showGuideExpanded }
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "📖 配對與抓通知設定步驟（點此${if (showGuideExpanded) "收合" else "展開"}）",
+                        color = colors.primaryText,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                if (showGuideExpanded) {
+                    Text(
+                        text = "步驟 1｜開啟下方【通知讀取權限】（若顯示「受限制的設定」，點下方黃字前往應用程式資訊 → 右上角 ⋮ → 允許受限制的設定）、【藍牙權限】與【忽略電池最佳化】。",
+                        color = colors.secondaryText,
+                        fontSize = 12.sp
+                    )
+                    Text(
+                        text = "步驟 2｜先於手機系統藍牙配對車機 AI Box，並在下方「2. 選擇配對的 AI Box」點選車機（或開手機 Wi-Fi 熱點給車機連網）。",
+                        color = colors.secondaryText,
+                        fontSize = 12.sp
+                    )
+                    Text(
+                        text = "步驟 3｜開啟下方「3. 同步手機所有 App 通知（不限清單）」，即可抓取 LINE、簡訊與所有通知。",
+                        color = colors.secondaryText,
+                        fontSize = 12.sp
+                    )
+                    Text(
+                        text = "步驟 4｜完成後手機平時會待機省電不搜尋藍牙，每次「連上車機藍牙」即自動觸發同步；上車前可點「推播測試通知」驗證。",
+                        color = colors.accent,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
         }
