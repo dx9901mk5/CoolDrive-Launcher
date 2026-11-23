@@ -224,19 +224,32 @@ object DeviceFormFactor {
     }
 
     /**
-     * Tablet or unfolded foldable screen (>= 580dp width).
+     * Unfolded Foldable inner display (nearly square / large inner screen in either orientation).
+     * Car AI Box head units are wide landscape (aspect >= 1.45), so they are never misclassified.
      */
-    fun isTabletOrExpandedScreen(configuration: Configuration): Boolean {
-        return configuration.screenWidthDp >= 580
+    fun isFoldableInnerDisplay(configuration: Configuration): Boolean {
+        val minSide = minOf(configuration.screenWidthDp, configuration.screenHeightDp)
+        val maxSide = maxOf(configuration.screenWidthDp, configuration.screenHeightDp)
+        if (minSide < 500) return false
+        val aspect = maxSide.toFloat() / minSide.toFloat()
+        return aspect < 1.45f
     }
 
     /**
-     * Auto-selects Phone Companion mode on first launch when opened on a portrait phone
-     * that is NOT configured as the system HOME launcher.
+     * Tablet or unfolded foldable screen (>= 580dp width or unfolded foldable inner display).
+     * When true, the Phone Companion header reveals a tap toggle to switch to Car Launcher mode.
+     */
+    fun isTabletOrExpandedScreen(configuration: Configuration): Boolean {
+        return configuration.screenWidthDp >= 580 || isFoldableInnerDisplay(configuration)
+    }
+
+    /**
+     * Auto-selects Phone Companion mode on first launch when opened on a smartphone or foldable
+     * (whether folded cover screen OR unfolded inner screen) that is NOT set as system HOME launcher.
      */
     fun shouldAutoDefaultToPhone(context: Context, configuration: Configuration, config: LauncherConfig): Boolean {
         if (config.roleUserPinned) return false
-        if (!isCompactPhoneScreen(configuration)) return false
+        if (!isCompactPhoneScreen(configuration) && !isFoldableInnerDisplay(configuration)) return false
         val homeIntent = android.content.Intent(android.content.Intent.ACTION_MAIN)
             .addCategory(android.content.Intent.CATEGORY_HOME)
         val defaultPkg = runCatching {
