@@ -24,6 +24,6 @@ plugins {
   id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
-rootProject.name = "CoolDrive-Launcher"
+rootProject.name = "DX-Car-Launcher"
 
 include(":app")

@@ -65,7 +65,7 @@
         android:required="false" />
 
     <application
-        android:name=".CoolDriveApp"
+        android:name=".DxCarApp"
         android:allowBackup="true"
         android:hardwareAccelerated="true"
         android:icon="@mipmap/ic_launcher"
@@ -73,7 +73,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
-        android:theme="@style/Theme.CoolDrive">
+        android:theme="@style/Theme.DxCarLauncher">
 
         <!-- FileProvider for GitHub OTA Auto-Updater -->
         <provider
@@ -110,8 +110,8 @@
             android:exported="false"
             android:launchMode="singleTask"
             android:resizeableActivity="true"
-            android:taskAffinity="com.cooldrive.launcher.splitpanel"
-            android:theme="@style/Theme.CoolDrive" />
+            android:taskAffinity="com.dxcar.launcher.splitpanel"
+            android:theme="@style/Theme.DxCarLauncher" />
 
         <!-- Notification Listener: Media Sessions, Google Maps Turn-by-Turn, Local Box & Phone Companion Messages -->
         <service
@@ -126,7 +126,7 @@
 
         <!-- Accessibility Service: Global Foreground Tracking, Home/Back/Recents & Split-Screen -->
         <service
-            android:name=".accessibility.CoolDriveAccessibilityService"
+            android:name=".accessibility.DxCarAccessibilityService"
             android:exported="true"
             android:label="@string/accessibility_service_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">

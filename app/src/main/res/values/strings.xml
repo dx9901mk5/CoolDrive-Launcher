@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">CoolDrive 車機啟動器</string>
-    <string name="notification_listener_label">CoolDrive 媒體、導航與來電訊息監聽</string>
-    <string name="accessibility_service_label">CoolDrive 全域常駐 Dock 與多指手勢輔助</string>
+    <string name="app_name">DX-Car Launcher</string>
+    <string name="notification_listener_label">DX-Car Launcher 媒體、導航與來電訊息監聽</string>
+    <string name="accessibility_service_label">DX-Car Launcher 全域常駐 Dock 與多指手勢輔助</string>
     <string name="accessibility_service_description">提供 AI Box 車機全螢幕開啟 YouTube／地圖時的常駐 Dock 連動、返回首頁、分割視窗與全域手勢控制。</string>
 </resources>

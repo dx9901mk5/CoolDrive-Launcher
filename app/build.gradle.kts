@@ -5,33 +5,33 @@ plugins {
 }
 
 android {
-  namespace = "com.cooldrive.launcher"
+  namespace = "com.dxcar.launcher"
   compileSdk = 36
 
   defaultConfig {
-    applicationId = "com.cooldrive.launcher"
+    applicationId = "com.dxcar.launcher"
     minSdk = 28
     targetSdk = 35
-    versionCode = 6
-    versionName = "1.3.0"
+    versionCode = 7
+    versionName = "1.3.1"
   }
 
   signingConfigs {
-    create("cooldrive") {
-      storeFile = file("signing/cooldrive.p12")
-      storePassword = "cooldrive2026"
-      keyAlias = "cooldrive"
-      keyPassword = "cooldrive2026"
+    create("dxcar") {
+      storeFile = file("signing/dxcar.p12")
+      storePassword = "dxcar2026"
+      keyAlias = "dxcar"
+      keyPassword = "dxcar2026"
     }
   }
 
   buildTypes {
     debug {
-      signingConfig = signingConfigs.getByName("cooldrive")
+      signingConfig = signingConfigs.getByName("dxcar")
     }
     release {
       isMinifyEnabled = false
-      signingConfig = signingConfigs.getByName("cooldrive")
+      signingConfig = signingConfigs.getByName("dxcar")
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
   }

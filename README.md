@@ -1,12 +1,12 @@
-# CoolDrive 車機啟動器 (CoolDrive-Launcher)
+# DX-Car Launcher
 
 **專為 Android AI Box 車機盒打造的 Android Auto (Coolwalk) 風格車機啟動器 ＋ 手機藍牙來電／訊息即時同步橋接**
 
-[![Latest Release](https://img.shields.io/github/v/release/dx9901mk5/CoolDrive-Launcher?label=Latest%20APK)](https://github.com/dx9901mk5/CoolDrive-Launcher/releases/latest)
+[![Latest Release](https://img.shields.io/github/v/release/dx9901mk5/DX-Car-Launcher?label=Latest%20APK)](https://github.com/dx9901mk5/DX-Car-Launcher/releases/latest)
 
 ---
 
-## ✨ 核心功能特色（最新 `v1.3.0`）
+## ✨ 核心功能特色（最新 `v1.3.1`）
 
 ### 1. 仿 Android Auto (Coolwalk) 首頁分割、左／右駕鏡像與 6 格客製捷徑
 - **黃金分割比例（預設 63% / 37%，可於設定微調 `55%–72%`）**：主卡片即時呈現 **免 API Key 互動地圖**，副卡片呈現 **全系統媒體控制卡片**（相容網易雲音樂、YouTube、YouTube Music、Spotify、KKBOX 等，支援專輯封面流光背景與切歌）。
@@ -43,7 +43,7 @@
 - **單一 APK 雙模式（AI Box 啟動器 ＋ 手機同步端）**：同一支 APK 裝於手機切換為「手機同步端」並配對藍牙，即可即時同步 **LINE / Messenger / WhatsApp / Telegram / 簡訊 / 來電** 至車機頂部懸浮橫幅，支援 **繁中 TTS 語音朗讀**、**快速回覆**、**語音回覆（RemoteInput）** 與 **接聽／掛斷**。
 
 ### 7. GitHub 自動檢測與自動下載更新
-- 啟動時自動背景檢查 `dx9901mk5/CoolDrive-Launcher` GitHub Releases 最新版本；發現新版自動下載並提示一鍵覆蓋更新。
+- 啟動時自動背景檢查 `dx9901mk5/DX-Car-Launcher` GitHub Releases 最新版本；發現新版自動下載並提示一鍵覆蓋更新。
 
 ---
 
