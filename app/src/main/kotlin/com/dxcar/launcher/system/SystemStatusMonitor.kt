@@ -74,7 +74,7 @@ class SystemStatusMonitor(private val context: Context) {
     val status: StateFlow<SystemStatus> = _status.asStateFlow()
 
     private val time24Fmt = DateTimeFormatter.ofPattern("HH:mm", Locale.TAIWAN)
-    private val time12Fmt = DateTimeFormatter.ofPattern("h:mm", Locale.TAIWAN)
+    private val time12Fmt = DateTimeFormatter.ofPattern("h:mm a", Locale.US)
     private val dateFmt = DateTimeFormatter.ofPattern("M月d日 E", Locale.TRADITIONAL_CHINESE)
 
     private var started = false

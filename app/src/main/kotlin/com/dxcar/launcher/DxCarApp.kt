@@ -4,6 +4,7 @@ import android.app.Application
 import com.dxcar.launcher.comms.CarNotificationCenter
 import com.dxcar.launcher.comms.TtsAnnouncer
 import com.dxcar.launcher.data.LauncherPreferences
+import com.dxcar.launcher.map.BuiltInNavEngine
 import com.dxcar.launcher.map.LocationTracker
 import com.dxcar.launcher.media.MediaControlBridge
 import com.dxcar.launcher.system.InstalledAppsRepository
@@ -28,6 +29,8 @@ class DxCarApp : Application() {
         private set
     lateinit var ttsAnnouncer: TtsAnnouncer
         private set
+    lateinit var builtInNavEngine: BuiltInNavEngine
+        private set
     lateinit var notificationCenter: CarNotificationCenter
         private set
     lateinit var updateManager: UpdateManager
@@ -48,6 +51,7 @@ class DxCarApp : Application() {
         locationTracker = LocationTracker(this, preferences).apply { startIfPermitted() }
         mediaControlBridge = MediaControlBridge(this).apply { start() }
         ttsAnnouncer = TtsAnnouncer(this)
+        builtInNavEngine = BuiltInNavEngine(ttsAnnouncer)
         notificationCenter = CarNotificationCenter(preferences, ttsAnnouncer)
         updateManager = UpdateManager(this)
     }

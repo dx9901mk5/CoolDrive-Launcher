@@ -5,16 +5,20 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -23,12 +27,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.BluetoothConnected
 import androidx.compose.material.icons.rounded.BluetoothDisabled
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.Dashboard
+import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Notifications
@@ -42,21 +48,35 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dxcar.launcher.layout.ResolvedDockPlacement
 import com.dxcar.launcher.system.InstalledAppInfo
 import com.dxcar.launcher.system.SystemStatus
 import com.dxcar.launcher.theme.LocalDxCarColors
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 data class DockAppSlot(
     val id: String,
@@ -99,6 +119,8 @@ fun CoolwalkDock(
     onBluetoothLongClick: () -> Unit = onBluetoothClick,
     onClockClick: () -> Unit,
     onNotificationsClick: () -> Unit,
+    onBackClick: () -> Unit = {},
+    onRecentsClick: () -> Unit = {},
     onCollapseOverlay: (() -> Unit)? = null,
     onTogglePinOverlay: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -117,6 +139,11 @@ fun CoolwalkDock(
                     isDashboardActive = isDashboardActive,
                     onClick = if (isAppDrawerOpen) onGoDashboard else onToggleAppDrawer,
                     onLongClick = onGoDashboard
+                )
+                BackRecentsComboButton(
+                    compact = true,
+                    onBackClick = onBackClick,
+                    onRecentsClick = onRecentsClick
                 )
                 if (isOverlayMode && onTogglePinOverlay != null) {
                     SmallDockUtilityIcon(
@@ -155,26 +182,51 @@ fun CoolwalkDock(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                NotificationBellButton(
-                    unreadCount = unreadCount,
-                    onClick = onNotificationsClick
-                )
-                WifiStatusChip(
-                    connected = systemStatus.wifiConnected,
-                    enabled = systemStatus.wifiEnabled,
-                    onClick = onWifiClick
-                )
-                BluetoothStatusChip(
-                    connected = systemStatus.bluetoothConnected,
-                    enabled = systemStatus.bluetoothEnabled,
-                    onClick = onBluetoothClick,
-                    onLongClick = onBluetoothLongClick
-                )
-                ClockChip(
-                    timeText = timeText,
-                    compact = false,
-                    onClick = onClockClick
-                )
+                if (rightHandDrive) {
+                    ClockChip(
+                        timeText = timeText,
+                        compact = false,
+                        onClick = onClockClick
+                    )
+                    NotificationBellButton(
+                        unreadCount = unreadCount,
+                        compact = true,
+                        onClick = onNotificationsClick
+                    )
+                    WifiStatusChip(
+                        connected = systemStatus.wifiConnected,
+                        enabled = systemStatus.wifiEnabled,
+                        onClick = onWifiClick
+                    )
+                    BluetoothStatusChip(
+                        connected = systemStatus.bluetoothConnected,
+                        enabled = systemStatus.bluetoothEnabled,
+                        onClick = onBluetoothClick,
+                        onLongClick = onBluetoothLongClick
+                    )
+                } else {
+                    BluetoothStatusChip(
+                        connected = systemStatus.bluetoothConnected,
+                        enabled = systemStatus.bluetoothEnabled,
+                        onClick = onBluetoothClick,
+                        onLongClick = onBluetoothLongClick
+                    )
+                    WifiStatusChip(
+                        connected = systemStatus.wifiConnected,
+                        enabled = systemStatus.wifiEnabled,
+                        onClick = onWifiClick
+                    )
+                    NotificationBellButton(
+                        unreadCount = unreadCount,
+                        compact = true,
+                        onClick = onNotificationsClick
+                    )
+                    ClockChip(
+                        timeText = timeText,
+                        compact = false,
+                        onClick = onClockClick
+                    )
+                }
             }
         }
 
@@ -228,15 +280,20 @@ fun CoolwalkDock(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // TOP: Exact AA Coolwalk Vertical Rail Status Cluster (Time + Wi-Fi + Bluetooth)
+                // TOP: Status Cluster [Time] -> [Notification Icon in middle] -> [Wi-Fi + Bluetooth]
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     ClockChip(
                         timeText = timeText,
                         compact = true,
                         onClick = onClockClick
+                    )
+                    NotificationBellButton(
+                        unreadCount = unreadCount,
+                        compact = true,
+                        onClick = onNotificationsClick
                     )
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -281,25 +338,26 @@ fun CoolwalkDock(
                 // MIDDLE: Pinned / Recent Car Apps (Maps, YouTube, Music, Phone)
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     pinnedSlots.take(4).forEach { slot ->
                         DockAppIconTile(
                             slot = slot,
-                            sizeDp = (thicknessDp - 24).coerceIn(46, 54),
+                            sizeDp = (thicknessDp - 24).coerceIn(44, 52),
                             onClick = { onSlotClick(slot) }
                         )
                     }
                 }
 
-                // BOTTOM-LEFT: Notification Bell + Classic AA 9-Dot App Menu Launcher Button
+                // BOTTOM-LEFT: Back/Recents Combo Button (Red zone above App Menu) + Classic AA 9-Dot App Menu Launcher Button
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    NotificationBellButton(
-                        unreadCount = unreadCount,
-                        onClick = onNotificationsClick
+                    BackRecentsComboButton(
+                        compact = false,
+                        onBackClick = onBackClick,
+                        onRecentsClick = onRecentsClick
                     )
                     DockLauncherButton(
                         isAppDrawerOpen = isAppDrawerOpen,
@@ -513,15 +571,19 @@ private fun ClockChip(
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(10.dp))
             .bouncyClickable(pressedScale = 0.90f, onClick = onClick)
-            .padding(horizontal = if (compact) 2.dp else 8.dp, vertical = 4.dp)
+            .padding(horizontal = if (compact) 1.dp else 8.dp, vertical = 3.dp)
     ) {
         Text(
             text = timeText,
             color = colors.primaryText,
-            fontSize = if (compact) 16.sp else 18.sp,
-            fontWeight = FontWeight.Bold
+            fontSize = if (compact) 12.sp else 17.sp,
+            letterSpacing = if (compact) (-0.3).sp else 0.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip
         )
     }
 }
@@ -529,37 +591,170 @@ private fun ClockChip(
 @Composable
 private fun NotificationBellButton(
     unreadCount: Int,
+    compact: Boolean = false,
     onClick: () -> Unit
 ) {
     val colors = LocalDxCarColors.current
+    val btnSize = if (compact) 28.dp else 36.dp
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
-            .size(38.dp)
+            .size(btnSize)
             .clip(CircleShape)
-            .background(colors.dockIconContainer)
+            .background(colors.dockIconContainer.copy(alpha = 0.9f))
             .bouncyClickable(pressedScale = 0.88f, onClick = onClick)
     ) {
         Icon(
             imageVector = Icons.Rounded.Notifications,
             contentDescription = "訊息通知中心",
             tint = if (unreadCount > 0) colors.accent else colors.secondaryText,
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size(if (compact) 16.dp else 19.dp)
         )
         if (unreadCount > 0) {
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .size(16.dp)
+                    .size(if (compact) 13.dp else 16.dp)
                     .clip(CircleShape)
                     .background(Color(0xFFEF4444))
             ) {
                 Text(
                     text = if (unreadCount > 9) "9+" else "$unreadCount",
                     color = Color.White,
-                    fontSize = 9.sp,
+                    fontSize = if (compact) 8.sp else 9.sp,
                     fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Dual-purpose Back & Recents button placed directly above the 9-dot App Menu button:
+ * - Single Tap (< 2.5s): System Back
+ * - Long Press 2.5 seconds (with circular progress ring): System Overview / Recents
+ */
+@Composable
+private fun BackRecentsComboButton(
+    compact: Boolean,
+    onBackClick: () -> Unit,
+    onRecentsClick: () -> Unit
+) {
+    val colors = LocalDxCarColors.current
+    val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    var holdProgress by remember { mutableFloatStateOf(0f) }
+    var isHolding by remember { mutableStateOf(false) }
+
+    val btnSize = if (compact) 40.dp else 44.dp
+    val scale by animateFloatAsState(
+        targetValue = if (isHolding) 0.92f else 1f,
+        animationSpec = spring(stiffness = Spring.StiffnessMedium),
+        label = "backComboScale"
+    )
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(btnSize)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(CircleShape)
+            .background(
+                if (holdProgress > 0.05f) colors.accent.copy(alpha = 0.22f)
+                else colors.dockIconContainer
+            )
+            .border(
+                width = 1.2.dp,
+                color = if (holdProgress > 0.05f) colors.accent else colors.cardBorder,
+                shape = CircleShape
+            )
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    isHolding = true
+                    var recentsTriggered = false
+                    var cancelled = false
+
+                    val timerJob = scope.launch {
+                        val startMs = System.currentTimeMillis()
+                        val targetMs = 2500L
+                        while (true) {
+                            val elapsed = System.currentTimeMillis() - startMs
+                            val progress = (elapsed.toFloat() / targetMs.toFloat()).coerceIn(0f, 1f)
+                            holdProgress = progress
+                            if (elapsed >= targetMs) {
+                                recentsTriggered = true
+                                isHolding = false
+                                holdProgress = 0f
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onRecentsClick()
+                                break
+                            }
+                            delay(24L)
+                        }
+                    }
+
+                    val startPos = down.position
+                    val maxMoveSq = (size.width * 0.9f) * (size.width * 0.9f)
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Main)
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: event.changes.firstOrNull()
+                        if (change == null) {
+                            cancelled = true
+                            break
+                        }
+                        val dx = change.position.x - startPos.x
+                        val dy = change.position.y - startPos.y
+                        if (dx * dx + dy * dy > maxMoveSq) {
+                            cancelled = true
+                            break
+                        }
+                        if (change.changedToUpIgnoreConsumed()) {
+                            change.consume()
+                            break
+                        }
+                    }
+
+                    timerJob.cancel()
+                    isHolding = false
+                    holdProgress = 0f
+                    if (!cancelled && !recentsTriggered) {
+                        onBackClick()
+                    }
+                }
+            }
+    ) {
+        if (holdProgress > 0f) {
+            Canvas(modifier = Modifier.fillMaxSize().padding(2.dp)) {
+                drawArc(
+                    color = colors.accent,
+                    startAngle = -90f,
+                    sweepAngle = 360f * holdProgress,
+                    useCenter = false,
+                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                )
+            }
+        }
+
+        val showRecentsMorph = holdProgress >= 0.35f
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = if (showRecentsMorph) Icons.Rounded.Layers else Icons.AutoMirrored.Rounded.ArrowBack,
+                contentDescription = "點一下返回 · 長按 2.5 秒進入多工",
+                tint = if (showRecentsMorph) colors.accent else colors.primaryText,
+                modifier = Modifier.size(if (compact) 18.dp else 20.dp)
+            )
+            if (!showRecentsMorph) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .size(7.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(colors.accent.copy(alpha = 0.85f))
                 )
             }
         }

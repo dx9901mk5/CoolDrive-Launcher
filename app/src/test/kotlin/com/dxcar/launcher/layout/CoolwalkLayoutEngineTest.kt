@@ -1,6 +1,8 @@
 package com.dxcar.launcher.layout
 
 import com.dxcar.launcher.data.DockPositionMode
+import com.dxcar.launcher.data.MapEngineStyle
+import com.dxcar.launcher.map.MapStyleFactory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -67,5 +69,29 @@ class CoolwalkLayoutEngineTest {
             ResolvedDockPlacement.RIGHT,
             CoolwalkLayoutEngine.compute(wideMetrics, DockPositionMode.FORCE_RIGHT, false).dockPlacement
         )
+    }
+
+    @Test
+    fun `default primary split ratio is 70 percent and map styles support traffic toggle`() {
+        val wideMetrics = ScreenMetrics(widthPx = 1920, heightPx = 720, densityDpi = 240)
+        val spec = CoolwalkLayoutEngine.compute(wideMetrics, DockPositionMode.AUTO_GOOGLE_DPI, false)
+        assertEquals(0.70f, spec.primaryWeight, 0.001f)
+        assertEquals(0.30f, spec.secondaryWeight, 0.001f)
+
+        val gTrafficOn = MapStyleFactory.resolve(MapEngineStyle.GOOGLE_TRAFFIC_TILES, isNight = false, trafficEnabled = true)
+            as MapStyleFactory.ResolvedMapStyle.StyleJson
+        assertTrue(gTrafficOn.json.contains("lyrs=m,traffic"))
+
+        val gTrafficOff = MapStyleFactory.resolve(MapEngineStyle.GOOGLE_TRAFFIC_TILES, isNight = false, trafficEnabled = false)
+            as MapStyleFactory.ResolvedMapStyle.StyleJson
+        assertTrue(gTrafficOff.json.contains("lyrs=m&"))
+
+        val satOn = MapStyleFactory.resolve(MapEngineStyle.GOOGLE_SATELLITE_HYBRID, isNight = true, trafficEnabled = true)
+            as MapStyleFactory.ResolvedMapStyle.StyleJson
+        assertTrue(satOn.json.contains("lyrs=y,traffic"))
+
+        val darkVector = MapStyleFactory.resolve(MapEngineStyle.OPENFREEMAP_DARK, isNight = false, trafficEnabled = true)
+            as MapStyleFactory.ResolvedMapStyle.StyleUrl
+        assertEquals(MapStyleFactory.OPENFREEMAP_NIGHT_URL, darkVector.url)
     }
 }

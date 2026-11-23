@@ -12,13 +12,15 @@ import android.graphics.PixelFormat
 import android.os.Build
 import android.provider.Settings
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.widget.FrameLayout
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.height
@@ -29,14 +31,20 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
@@ -90,7 +98,7 @@ class PersistentDockOverlayService :
     override val viewModelStore: ViewModelStore = ViewModelStore()
 
     private lateinit var windowManager: WindowManager
-    private var dockView: ComposeView? = null
+    private var dockView: View? = null
     private var bannerView: ComposeView? = null
     private var dockParams: WindowManager.LayoutParams? = null
     private var bannerParams: WindowManager.LayoutParams? = null
@@ -100,6 +108,10 @@ class PersistentDockOverlayService :
     private val interactionTick = MutableStateFlow(0L)
     private val metricsFlow = MutableStateFlow(ScreenMetrics(1280, 720, 240))
     private var lastHomeForeground = true
+    @Volatile
+    private var lastRawX = 0f
+    @Volatile
+    private var lastRawY = 0f
 
     override fun onCreate() {
         super.onCreate()
@@ -157,10 +169,7 @@ class PersistentDockOverlayService :
     }
 
     private fun setupDockWindow(app: DxCarApp) {
-        val view = ComposeView(this).apply {
-            setViewTreeLifecycleOwner(this@PersistentDockOverlayService)
-            setViewTreeSavedStateRegistryOwner(this@PersistentDockOverlayService)
-            setViewTreeViewModelStoreOwner(this@PersistentDockOverlayService)
+        val composeView = ComposeView(this).apply {
             setContent {
                 val config by app.preferences.config.collectAsState()
                 val sysStatus by app.systemStatusMonitor.status.collectAsState()
@@ -173,7 +182,7 @@ class PersistentDockOverlayService :
                 val tick by interactionTick.collectAsState()
                 val metrics by metricsFlow.collectAsState()
 
-                // Auto-retract back to slim edge handle after idle seconds (when auto-collapse is ON & not pinned)
+                // Auto-retract back to edge handle after idle seconds (when auto-collapse is ON & not pinned)
                 LaunchedEffect(collapsed, pinnedOpen, tick, config.overlayAutoCollapseEnabled, config.overlayAutoRetractSeconds) {
                     if (!collapsed &&
                         config.overlayAutoCollapseEnabled &&
@@ -213,30 +222,88 @@ class PersistentDockOverlayService :
                 ) {
                     val palette = LocalDxCarColors.current
                     if (collapsed) {
-                        // Ultra-slim translucent edge handle (14dp) — ZERO blocking of Google Maps / YT / NaviKing!
+                        // Adjustable thickness translucent edge handle (default 26dp, 16-48dp) + Long-press drag to reposition!
+                        val handleThicknessDp = config.overlayHandleThicknessDp.coerceIn(16, 48)
+                        val handleLengthDp = 120
                         val handleShape = when (spec.dockPlacement) {
-                            ResolvedDockPlacement.LEFT -> RoundedCornerShape(topEnd = 12.dp, bottomEnd = 12.dp)
-                            ResolvedDockPlacement.RIGHT -> RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp)
-                            ResolvedDockPlacement.BOTTOM -> RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
+                            ResolvedDockPlacement.LEFT -> RoundedCornerShape(topEnd = 14.dp, bottomEnd = 14.dp)
+                            ResolvedDockPlacement.RIGHT -> RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp)
+                            ResolvedDockPlacement.BOTTOM -> RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)
                         }
                         val isBottom = spec.dockPlacement == ResolvedDockPlacement.BOTTOM
-                        val swipeModifier = if (isBottom) {
-                            Modifier.pointerInput(spec.dockPlacement) {
-                                detectVerticalDragGestures { _, dragAmount ->
-                                    if (dragAmount < -14f) {
-                                        isCollapsed.value = false
-                                        interactionTick.value++
+                        val haptic = LocalHapticFeedback.current
+                        var isDraggingPosition by remember { mutableStateOf(false) }
+
+                        val handleGestureModifier = Modifier.pointerInput(
+                            spec.dockPlacement,
+                            metrics,
+                            config.overlayHandlePositionPercent
+                        ) {
+                            val handleLenPx = handleLengthDp * metrics.density
+                            val maxTravelPx = ((if (isBottom) metrics.widthPx else metrics.heightPx) - handleLenPx)
+                                .coerceAtLeast(1f)
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                val downTime = System.currentTimeMillis()
+                                val downRawX = lastRawX
+                                val downRawY = lastRawY
+                                val startPercent = config.overlayHandlePositionPercent.coerceIn(0.05f, 0.95f)
+                                var draggingPos = false
+                                var expandedBySwipe = false
+                                var movedSignificant = false
+                                var latestPercent = startPercent
+
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Main)
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: event.changes.firstOrNull()
+                                    if (change == null) break
+
+                                    val curRawX = lastRawX
+                                    val curRawY = lastRawY
+                                    val dx = curRawX - downRawX
+                                    val dy = curRawY - downRawY
+                                    val elapsed = System.currentTimeMillis() - downTime
+
+                                    if (!draggingPos && !expandedBySwipe) {
+                                        val inwardTrigger = when (spec.dockPlacement) {
+                                            ResolvedDockPlacement.LEFT -> dx > 22f && abs(dx) > abs(dy)
+                                            ResolvedDockPlacement.RIGHT -> dx < -22f && abs(dx) > abs(dy)
+                                            ResolvedDockPlacement.BOTTOM -> dy < -22f && abs(dy) > abs(dx)
+                                        }
+                                        if (inwardTrigger) {
+                                            expandedBySwipe = true
+                                            isCollapsed.value = false
+                                            interactionTick.value++
+                                            change.consume()
+                                            break
+                                        }
+                                        if (elapsed >= 340L || abs(if (isBottom) dx else dy) > 24f) {
+                                            draggingPos = true
+                                            isDraggingPosition = true
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        }
+                                    }
+
+                                    if (draggingPos) {
+                                        movedSignificant = true
+                                        val axisDelta = if (isBottom) dx else dy
+                                        latestPercent = (startPercent + axisDelta / maxTravelPx).coerceIn(0.05f, 0.95f)
+                                        updateCollapsedHandlePosition(spec.dockPlacement, metrics, handleLengthDp, latestPercent)
+                                        change.consume()
+                                    }
+
+                                    if (change.changedToUpIgnoreConsumed()) {
+                                        change.consume()
+                                        break
                                     }
                                 }
-                            }
-                        } else {
-                            Modifier.pointerInput(spec.dockPlacement) {
-                                detectHorizontalDragGestures { _, dragAmount ->
-                                    val inward = if (spec.dockPlacement == ResolvedDockPlacement.LEFT) dragAmount > 14f else dragAmount < -14f
-                                    if (inward) {
-                                        isCollapsed.value = false
-                                        interactionTick.value++
-                                    }
+
+                                isDraggingPosition = false
+                                if (draggingPos && movedSignificant) {
+                                    app.preferences.update { it.copy(overlayHandlePositionPercent = latestPercent) }
+                                } else if (!expandedBySwipe && !draggingPos) {
+                                    isCollapsed.value = false
+                                    interactionTick.value++
                                 }
                             }
                         }
@@ -245,26 +312,29 @@ class PersistentDockOverlayService :
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
                                 .then(
-                                    if (isBottom) Modifier.width(108.dp).height(15.dp)
-                                    else Modifier.width(15.dp).height(108.dp)
+                                    if (isBottom) Modifier.width(handleLengthDp.dp).height(handleThicknessDp.dp)
+                                    else Modifier.width(handleThicknessDp.dp).height(handleLengthDp.dp)
                                 )
                                 .clip(handleShape)
-                                .background(palette.glassOverlay.copy(alpha = 0.72f))
-                                .border(1.dp, palette.accent.copy(alpha = 0.55f), handleShape)
-                                .then(swipeModifier)
-                                .clickable {
-                                    isCollapsed.value = false
-                                    interactionTick.value++
-                                }
+                                .background(
+                                    if (isDraggingPosition) palette.accent.copy(alpha = 0.35f)
+                                    else palette.glassOverlay.copy(alpha = 0.78f)
+                                )
+                                .border(
+                                    width = if (isDraggingPosition) 2.dp else 1.2.dp,
+                                    color = palette.accent.copy(alpha = if (isDraggingPosition) 0.95f else 0.65f),
+                                    shape = handleShape
+                                )
+                                .then(handleGestureModifier)
                         ) {
                             Box(
                                 modifier = Modifier
                                     .then(
-                                        if (isBottom) Modifier.width(44.dp).height(4.dp)
-                                        else Modifier.width(4.dp).height(44.dp)
+                                        if (isBottom) Modifier.width(48.dp).height((handleThicknessDp * 0.22f).coerceIn(4f, 8f).dp)
+                                        else Modifier.width((handleThicknessDp * 0.22f).coerceIn(4f, 8f).dp).height(48.dp)
                                     )
                                     .clip(CircleShape)
-                                    .background(palette.accent.copy(alpha = 0.9f))
+                                    .background(palette.accent.copy(alpha = 0.92f))
                             )
                         }
                     } else {
@@ -335,6 +405,14 @@ class PersistentDockOverlayService :
                                 },
                                 onClockClick = { bringDxCarToFront(MainActivity.EXTRA_OPEN_QUICK_PANEL) },
                                 onNotificationsClick = { bringDxCarToFront(MainActivity.EXTRA_OPEN_NOTIFICATIONS) },
+                                onBackClick = {
+                                    interactionTick.value++
+                                    DxCarAccessibilityService.instance?.goBack()
+                                },
+                                onRecentsClick = {
+                                    interactionTick.value++
+                                    DxCarAccessibilityService.instance?.openRecents()
+                                },
                                 onCollapseOverlay = {
                                     isPinnedOpen.value = false
                                     isCollapsed.value = true
@@ -350,14 +428,62 @@ class PersistentDockOverlayService :
             }
         }
 
+        val container = object : FrameLayout(this) {
+            override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
+                if (ev != null) {
+                    lastRawX = ev.rawX
+                    lastRawY = ev.rawY
+                }
+                return super.dispatchTouchEvent(ev)
+            }
+        }.apply {
+            setViewTreeLifecycleOwner(this@PersistentDockOverlayService)
+            setViewTreeSavedStateRegistryOwner(this@PersistentDockOverlayService)
+            setViewTreeViewModelStoreOwner(this@PersistentDockOverlayService)
+            addView(composeView)
+        }
+
         val params = createOverlayParams(
             width = WindowManager.LayoutParams.WRAP_CONTENT,
-            height = WindowManager.LayoutParams.MATCH_PARENT,
-            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            height = WindowManager.LayoutParams.WRAP_CONTENT,
+            gravity = Gravity.START or Gravity.TOP
         )
-        dockView = view
+        dockView = container
         dockParams = params
-        runCatching { windowManager.addView(view, params) }
+        runCatching { windowManager.addView(container, params) }
+    }
+
+    private fun updateCollapsedHandlePosition(
+        placement: ResolvedDockPlacement,
+        metrics: ScreenMetrics,
+        handleLengthDp: Int,
+        percent: Float
+    ) {
+        val view = dockView ?: return
+        val params = dockParams ?: return
+        val handleLenPx = (handleLengthDp * metrics.density).toInt()
+        val p = percent.coerceIn(0.05f, 0.95f)
+        when (placement) {
+            ResolvedDockPlacement.BOTTOM -> {
+                val maxX = (metrics.widthPx - handleLenPx).coerceAtLeast(0)
+                params.gravity = Gravity.BOTTOM or Gravity.START
+                params.x = (maxX * p).toInt()
+                params.y = 0
+            }
+            ResolvedDockPlacement.RIGHT -> {
+                val maxY = (metrics.heightPx - handleLenPx).coerceAtLeast(0)
+                params.gravity = Gravity.END or Gravity.TOP
+                params.x = 0
+                params.y = (maxY * p).toInt()
+            }
+            ResolvedDockPlacement.LEFT -> {
+                val maxY = (metrics.heightPx - handleLenPx).coerceAtLeast(0)
+                params.gravity = Gravity.START or Gravity.TOP
+                params.x = 0
+                params.y = (maxY * p).toInt()
+            }
+        }
+        runCatching { windowManager.updateViewLayout(view, params) }
     }
 
     private fun setupBannerWindow(app: DxCarApp) {
@@ -450,24 +576,42 @@ class PersistentDockOverlayService :
                             rightHandDrive = config.rightHandDrive,
                             customPrimaryRatio = config.primarySplitRatio
                         )
-                        when (spec.dockPlacement) {
-                            ResolvedDockPlacement.BOTTOM -> {
-                                params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                                params.width = if (collapsed) WindowManager.LayoutParams.WRAP_CONTENT else WindowManager.LayoutParams.MATCH_PARENT
-                                params.height = WindowManager.LayoutParams.WRAP_CONTENT
+                        if (collapsed) {
+                            updateCollapsedHandlePosition(
+                                placement = spec.dockPlacement,
+                                metrics = metrics,
+                                handleLengthDp = 120,
+                                percent = config.overlayHandlePositionPercent
+                            )
+                            params.width = WindowManager.LayoutParams.WRAP_CONTENT
+                            params.height = WindowManager.LayoutParams.WRAP_CONTENT
+                            runCatching { windowManager.updateViewLayout(view, params) }
+                        } else {
+                            when (spec.dockPlacement) {
+                                ResolvedDockPlacement.BOTTOM -> {
+                                    params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                                    params.x = 0
+                                    params.y = 0
+                                    params.width = WindowManager.LayoutParams.MATCH_PARENT
+                                    params.height = WindowManager.LayoutParams.WRAP_CONTENT
+                                }
+                                ResolvedDockPlacement.RIGHT -> {
+                                    params.gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                                    params.x = 0
+                                    params.y = 0
+                                    params.width = WindowManager.LayoutParams.WRAP_CONTENT
+                                    params.height = WindowManager.LayoutParams.MATCH_PARENT
+                                }
+                                ResolvedDockPlacement.LEFT -> {
+                                    params.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                                    params.x = 0
+                                    params.y = 0
+                                    params.width = WindowManager.LayoutParams.WRAP_CONTENT
+                                    params.height = WindowManager.LayoutParams.MATCH_PARENT
+                                }
                             }
-                            ResolvedDockPlacement.RIGHT -> {
-                                params.gravity = Gravity.END or Gravity.CENTER_VERTICAL
-                                params.width = WindowManager.LayoutParams.WRAP_CONTENT
-                                params.height = if (collapsed) WindowManager.LayoutParams.WRAP_CONTENT else WindowManager.LayoutParams.MATCH_PARENT
-                            }
-                            ResolvedDockPlacement.LEFT -> {
-                                params.gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                                params.width = WindowManager.LayoutParams.WRAP_CONTENT
-                                params.height = if (collapsed) WindowManager.LayoutParams.WRAP_CONTENT else WindowManager.LayoutParams.MATCH_PARENT
-                            }
+                            runCatching { windowManager.updateViewLayout(view, params) }
                         }
-                        runCatching { windowManager.updateViewLayout(view, params) }
                     }
                 }
             }

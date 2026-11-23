@@ -74,6 +74,7 @@ class BluetoothCallReceiver : BroadcastReceiver() {
 
             // Hidden AOSP/Automotive HFP Client broadcast on AI Boxes
             "android.bluetooth.headsetclient.profile.action.CALL_CHANGED" -> {
+                @Suppress("DEPRECATION")
                 val callObj = intent.extras?.get("android.bluetooth.headsetclient.extra.CALL")
                 if (callObj != null && app != null) {
                     val number = runCatching {

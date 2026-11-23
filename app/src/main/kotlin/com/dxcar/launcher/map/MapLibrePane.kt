@@ -14,31 +14,47 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Navigation
 import androidx.compose.material.icons.rounded.OpenInFull
+import androidx.compose.material.icons.rounded.Place
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Splitscreen
 import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material.icons.rounded.Traffic
 import androidx.compose.material.icons.rounded.TurnRight
 import androidx.compose.material.icons.rounded.Work
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import com.dxcar.launcher.ui.bouncyClickable
 import androidx.compose.runtime.Composable
@@ -66,6 +82,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.dxcar.launcher.comms.ActiveNavBanner
+import com.dxcar.launcher.data.HomeExperimentMode
 import com.dxcar.launcher.data.MapEngineStyle
 import com.dxcar.launcher.theme.LocalDxCarColors
 import org.maplibre.android.camera.CameraPosition
@@ -75,18 +92,32 @@ import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapLibreMapOptions
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.Property
+import org.maplibre.android.style.layers.PropertyFactory
+import org.maplibre.android.style.sources.GeoJsonSource
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LiveMapCard(
     location: VehicleLocationState,
     activeNav: ActiveNavBanner?,
     isNight: Boolean,
     mapEngineStyle: MapEngineStyle,
+    trafficEnabled: Boolean = true,
+    experimentMode: HomeExperimentMode = HomeExperimentMode.PLAN_A_MULTI_LAYER,
+    builtInNavState: BuiltInNavState = BuiltInNavState(),
     isPrimary: Boolean,
     isFullscreen: Boolean,
     homeAddress: String,
     workAddress: String,
+    onSelectMapStyle: (MapEngineStyle) -> Unit = {},
+    onToggleTraffic: () -> Unit = {},
     onToggleStyle: () -> Unit,
+    onSearchBuiltInPlaces: (String) -> Unit = {},
+    onStartBuiltInNav: (NavSearchResult) -> Unit = {},
+    onStopBuiltInNav: () -> Unit = {},
     onSwapRequested: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onLaunchGoogleMapsApp: (String?) -> Unit,
@@ -100,8 +131,11 @@ fun LiveMapCard(
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
     var followVehicle by remember { mutableStateOf(true) }
     var currentZoom by remember { mutableDoubleStateOf(15.6) }
+    var showLayerPicker by remember { mutableStateOf(false) }
+    var showBuiltInSearchPanel by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
 
-    // GPU Hue-Preserving Night Mode Paint for authentic Google Maps HD tiles
+    // GPU Hue-Preserving Night Mode Paint for authentic Google Maps HD Standard tiles
     val googleNightPaint = remember {
         Paint().apply {
             colorFilter = ColorMatrixColorFilter(
@@ -125,7 +159,7 @@ fun LiveMapCard(
         }
     }
 
-    // Toggle GPU Night Mode filter cleanly when Google Maps HD style is active
+    // Toggle GPU Night Mode filter only for Google Standard HD tiles (not Satellite Hybrid)
     LaunchedEffect(mapView, isNight, mapEngineStyle) {
         if (isNight && mapEngineStyle == MapEngineStyle.GOOGLE_TRAFFIC_TILES) {
             mapView.setLayerType(View.LAYER_TYPE_HARDWARE, googleNightPaint)
@@ -154,22 +188,36 @@ fun LiveMapCard(
         }
     }
 
-    // Apply Day/Night or Engine Style changes seamlessly
-    LaunchedEffect(mapLibreMap, mapEngineStyle, isNight) {
+    // Apply Day/Night, Traffic, or Engine Style changes seamlessly + re-attach built-in Nav route if active
+    LaunchedEffect(mapLibreMap, mapEngineStyle, isNight, trafficEnabled) {
         val map = mapLibreMap ?: return@LaunchedEffect
-        val resolved = MapStyleFactory.resolve(mapEngineStyle, isNight)
+        val resolved = MapStyleFactory.resolve(mapEngineStyle, isNight, trafficEnabled)
         val builder = when (resolved) {
             is MapStyleFactory.ResolvedMapStyle.StyleUrl -> Style.Builder().fromUri(resolved.url)
             is MapStyleFactory.ResolvedMapStyle.StyleJson -> Style.Builder().fromJson(resolved.json)
         }
-        runCatching { map.setStyle(builder) }
+        runCatching {
+            map.setStyle(builder) { style ->
+                applyRouteOverlayToStyle(style, builtInNavState)
+            }
+        }
+    }
+
+    // Update Plan B OSRM blue route polyline whenever builtInNavState route changes
+    LaunchedEffect(mapLibreMap, builtInNavState.isNavigating, builtInNavState.routePoints) {
+        val map = mapLibreMap ?: return@LaunchedEffect
+        map.getStyle { style ->
+            applyRouteOverlayToStyle(style, builtInNavState)
+        }
     }
 
     // Smooth GPS follow camera
     LaunchedEffect(mapLibreMap, location, followVehicle, isPrimary, mapEngineStyle) {
         val map = mapLibreMap ?: return@LaunchedEffect
         if (!followVehicle) return@LaunchedEffect
-        val tilt = if (mapEngineStyle == MapEngineStyle.OPENFREEMAP_VECTOR_3D) 46.0 else 32.0
+        val tilt = if (mapEngineStyle == MapEngineStyle.OPENFREEMAP_VECTOR_3D ||
+            mapEngineStyle == MapEngineStyle.OPENFREEMAP_DARK
+        ) 44.0 else 32.0
         val cam = CameraPosition.Builder()
             .target(LatLng(location.latitude, location.longitude))
             .zoom(currentZoom)
@@ -240,7 +288,7 @@ fun LiveMapCard(
             )
         }
 
-        // TOP HUD: Active Google Maps Turn-by-Turn Green Banner OR AA Search / Quick Nav Bar
+        // TOP HUD: Plan B Built-In Navigation Banner OR Google Maps Green Banner OR Search / Quick Nav Bar
         Column(
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -248,7 +296,60 @@ fun LiveMapCard(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (activeNav != null) {
+            if (experimentMode == HomeExperimentMode.PLAN_B_BUILTIN_NAV && builtInNavState.isNavigating) {
+                val remDistText = if (builtInNavState.remainingDistanceMeters >= 1000) {
+                    "%.1f km".format(builtInNavState.remainingDistanceMeters / 1000f)
+                } else {
+                    "${builtInNavState.remainingDistanceMeters} m"
+                }
+                val remMin = (builtInNavState.remainingDurationSeconds / 60).coerceAtLeast(1)
+                val nextTurnText = if (builtInNavState.distanceToNextTurnMeters >= 1000) {
+                    "%.1f km".format(builtInNavState.distanceToNextTurnMeters / 1000f)
+                } else {
+                    "${builtInNavState.distanceToNextTurnMeters} m"
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(colors.navGreenBanner)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.TurnRight,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "$nextTurnText · ${builtInNavState.currentInstructionZh}",
+                            color = Color.White,
+                            fontSize = if (isPrimary) 17.sp else 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "前往 ${builtInNavState.destinationName} · 剩 $remDistText · 約 $remMin 分鐘",
+                            color = Color(0xFFD1FAE5),
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    IconButton(onClick = onStopBuiltInNav) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "結束導航",
+                            tint = Color.White
+                        )
+                    }
+                }
+            } else if (activeNav != null) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -286,12 +387,12 @@ fun LiveMapCard(
                     }
                 }
             } else if (isPrimary || isFullscreen) {
+                val isPlanB = experimentMode == HomeExperimentMode.PLAN_B_BUILTIN_NAV
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // AA Search Pill -> Launches Real Google Maps Search / Navigation
                     Surface(
                         color = colors.glassOverlay,
                         shape = RoundedCornerShape(24.dp),
@@ -299,7 +400,13 @@ fun LiveMapCard(
                         modifier = Modifier
                             .weight(1f, fill = false)
                             .border(1.dp, colors.cardBorder, RoundedCornerShape(24.dp))
-                            .bouncyClickable { onLaunchGoogleMapsApp(null) }
+                            .bouncyClickable {
+                                if (isPlanB) {
+                                    showBuiltInSearchPanel = !showBuiltInSearchPanel
+                                } else {
+                                    onLaunchGoogleMapsApp(null)
+                                }
+                            }
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -313,9 +420,9 @@ fun LiveMapCard(
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                text = "Google 地圖導航搜尋…",
+                                text = if (isPlanB) "搜尋目的地（首頁內建導航）…" else "Google 地圖導航搜尋…",
                                 color = colors.primaryText,
-                                fontSize = 14.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -325,8 +432,15 @@ fun LiveMapCard(
 
                     Spacer(Modifier.width(8.dp))
 
-                    // Home / Split Real Google Maps / Launch Real Google Maps buttons
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        MapChipButton(
+                            icon = Icons.Rounded.Traffic,
+                            label = if (trafficEnabled) "路況 開" else "路況 關",
+                            highlight = trafficEnabled &&
+                                (mapEngineStyle == MapEngineStyle.GOOGLE_TRAFFIC_TILES ||
+                                    mapEngineStyle == MapEngineStyle.GOOGLE_SATELLITE_HYBRID),
+                            onClick = onToggleTraffic
+                        )
                         MapChipButton(
                             icon = Icons.Rounded.Home,
                             label = "回家",
@@ -493,9 +607,9 @@ fun LiveMapCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SmallGlassCircleButton(
                         icon = Icons.Rounded.Layers,
-                        contentDescription = "切換地圖引擎",
-                        active = mapEngineStyle == MapEngineStyle.OPENFREEMAP_VECTOR_3D,
-                        onClick = onToggleStyle
+                        contentDescription = "切換底圖圖層與即時路況",
+                        active = showLayerPicker || mapEngineStyle != MapEngineStyle.GOOGLE_TRAFFIC_TILES,
+                        onClick = { showLayerPicker = !showLayerPicker }
                     )
                     SmallGlassCircleButton(
                         icon = Icons.Rounded.MyLocation,
@@ -511,6 +625,239 @@ fun LiveMapCard(
                     )
                 }
             }
+        }
+
+        // LAYER PICKER POPUP (Plan A / B Multi-Layer + Traffic Toggle)
+        AnimatedVisibility(
+            visible = showLayerPicker && (isPrimary || isFullscreen),
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 12.dp, bottom = 68.dp)
+        ) {
+            Surface(
+                color = colors.glassOverlay,
+                shape = RoundedCornerShape(20.dp),
+                shadowElevation = 10.dp,
+                modifier = Modifier
+                    .width(290.dp)
+                    .border(1.dp, colors.cardBorder, RoundedCornerShape(20.dp))
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "地圖圖層與路況",
+                            color = colors.primaryText,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        IconButton(onClick = { showLayerPicker = false }, modifier = Modifier.size(26.dp)) {
+                            Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.secondaryText, modifier = Modifier.size(18.dp))
+                        }
+                    }
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        MapEngineStyle.entries.forEach { styleItem ->
+                            val selected = mapEngineStyle == styleItem
+                            Surface(
+                                color = if (selected) colors.accent else colors.cardSurfaceElevated,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .border(1.dp, if (selected) colors.accent else colors.cardBorder, RoundedCornerShape(12.dp))
+                                    .bouncyClickable {
+                                        onSelectMapStyle(styleItem)
+                                        showLayerPicker = false
+                                    }
+                            ) {
+                                Text(
+                                    text = styleItem.labelZh,
+                                    color = if (selected) colors.onAccent else colors.primaryText,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(colors.cardSurfaceElevated)
+                            .clickable { onToggleTraffic() }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("疊加 Google 即時路況", color = colors.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("適用於標準與衛星混合圖層", color = colors.secondaryText, fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = trafficEnabled,
+                            onCheckedChange = { onToggleTraffic() },
+                            colors = SwitchDefaults.colors(checkedThumbColor = colors.onAccent, checkedTrackColor = colors.accent)
+                        )
+                    }
+                }
+            }
+        }
+
+        // PLAN B BUILT-IN PLACE SEARCH PANEL (Photon + OSRM Route Launch)
+        AnimatedVisibility(
+            visible = showBuiltInSearchPanel && experimentMode == HomeExperimentMode.PLAN_B_BUILTIN_NAV,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(top = 64.dp, start = 12.dp, end = 12.dp)
+        ) {
+            Surface(
+                color = colors.glassOverlay,
+                shape = RoundedCornerShape(20.dp),
+                shadowElevation = 12.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, colors.cardBorder, RoundedCornerShape(20.dp))
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("輸入地點名稱（如：台北101、中正紀念堂）", fontSize = 13.sp) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = colors.primaryText,
+                                unfocusedTextColor = colors.primaryText,
+                                focusedBorderColor = colors.accent,
+                                unfocusedBorderColor = colors.cardBorder
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = { onSearchBuiltInPlaces(searchQuery) },
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            if (builtInNavState.isSearching || builtInNavState.isRouting) {
+                                CircularProgressIndicator(color = colors.onAccent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                            } else {
+                                Text("搜尋")
+                            }
+                        }
+                        IconButton(onClick = { showBuiltInSearchPanel = false }) {
+                            Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.secondaryText)
+                        }
+                    }
+
+                    if (builtInNavState.errorMessage.isNotBlank()) {
+                        Text(builtInNavState.errorMessage, color = Color(0xFFEF4444), fontSize = 12.sp)
+                    }
+
+                    if (builtInNavState.searchResults.isNotEmpty()) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 220.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(builtInNavState.searchResults) { place ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(colors.cardSurfaceElevated)
+                                        .clickable {
+                                            showBuiltInSearchPanel = false
+                                            onStartBuiltInNav(place)
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Rounded.Place, contentDescription = null, tint = colors.accent, modifier = Modifier.size(20.dp))
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(place.name, color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(place.subtitle, color = colors.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    Text("導航", color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun applyRouteOverlayToStyle(style: Style, navState: BuiltInNavState) {
+    val srcId = "dxcar-nav-route-src"
+    val layerId = "dxcar-nav-route-layer"
+    val destSrcId = "dxcar-nav-dest-src"
+    val destLayerId = "dxcar-nav-dest-layer"
+
+    if (!navState.isNavigating || navState.routePoints.size < 2) {
+        runCatching { style.removeLayer(layerId) }
+        runCatching { style.removeSource(srcId) }
+        runCatching { style.removeLayer(destLayerId) }
+        runCatching { style.removeSource(destSrcId) }
+        return
+    }
+
+    val coordsJson = navState.routePoints.joinToString(",") { "[${it.longitude},${it.latitude}]" }
+    val lineGeoJson = """{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"LineString","coordinates":[$coordsJson]}}]}"""
+    val destGeoJson = """{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[${navState.destinationLon},${navState.destinationLat}]}}]}"""
+
+    runCatching {
+        val existing = style.getSourceAs<GeoJsonSource>(srcId)
+        if (existing != null) {
+            existing.setGeoJson(lineGeoJson)
+        } else {
+            style.addSource(GeoJsonSource(srcId, lineGeoJson))
+            style.addLayer(
+                LineLayer(layerId, srcId).withProperties(
+                    PropertyFactory.lineColor(android.graphics.Color.parseColor("#2563EB")),
+                    PropertyFactory.lineWidth(8.0f),
+                    PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                    PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
+                )
+            )
+        }
+
+        val existingDest = style.getSourceAs<GeoJsonSource>(destSrcId)
+        if (existingDest != null) {
+            existingDest.setGeoJson(destGeoJson)
+        } else {
+            style.addSource(GeoJsonSource(destSrcId, destGeoJson))
+            style.addLayer(
+                CircleLayer(destLayerId, destSrcId).withProperties(
+                    PropertyFactory.circleColor(android.graphics.Color.parseColor("#EF4444")),
+                    PropertyFactory.circleRadius(8.0f),
+                    PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
+                    PropertyFactory.circleStrokeWidth(2.5f)
+                )
+            )
         }
     }
 }

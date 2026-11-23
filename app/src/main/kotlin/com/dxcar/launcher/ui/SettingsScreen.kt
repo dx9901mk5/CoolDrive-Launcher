@@ -34,12 +34,14 @@ import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.DisplaySettings
 import androidx.compose.material.icons.rounded.Gesture
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Splitscreen
 import androidx.compose.material.icons.rounded.SwapHoriz
@@ -75,13 +77,16 @@ import androidx.compose.ui.unit.sp
 import com.dxcar.launcher.BuildConfig
 import com.dxcar.launcher.comms.BridgeStatusState
 import com.dxcar.launcher.data.DockPositionMode
+import com.dxcar.launcher.data.HomeExperimentMode
 import com.dxcar.launcher.data.HomeMapDisplayMode
 import com.dxcar.launcher.data.LauncherConfig
 import com.dxcar.launcher.data.LauncherStylePreset
 import com.dxcar.launcher.data.MapEngineStyle
 import com.dxcar.launcher.data.ThemeMode
 import com.dxcar.launcher.layout.CoolwalkLayoutSpec
+import com.dxcar.launcher.system.AppCategory
 import com.dxcar.launcher.system.HomeLauncherInfo
+import com.dxcar.launcher.system.InstalledAppInfo
 import com.dxcar.launcher.system.PermissionHealth
 import com.dxcar.launcher.system.PermissionHelper
 import com.dxcar.launcher.system.SystemStatusMonitor
@@ -109,6 +114,7 @@ import kotlin.math.roundToInt
 fun SettingsScreen(
     config: LauncherConfig,
     layoutSpec: CoolwalkLayoutSpec,
+    installedApps: List<InstalledAppInfo>,
     homeLaunchers: List<HomeLauncherInfo>,
     permissionHealth: PermissionHealth,
     bridgeStatus: BridgeStatusState,
@@ -201,6 +207,162 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // TOP SECTION: 首頁實驗方案切換開關（方案 A / B / C / D 保留）
+            SettingsSectionCard(
+                icon = Icons.Rounded.Science,
+                title = "首頁方案實驗切換（方案 A / B / C / D）"
+            ) {
+                Text(
+                    text = "可一鍵切換並實車比較不同首頁架構，預設分割比例為 70% / 30%。",
+                    color = colors.secondaryText,
+                    fontSize = 12.sp
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HomeExperimentMode.entries.forEach { mode ->
+                        val selected = config.homeExperimentMode == mode
+                        Surface(
+                            color = when {
+                                !mode.isAvailable -> colors.cardSurfaceElevated.copy(alpha = 0.5f)
+                                selected -> colors.accent.copy(alpha = 0.18f)
+                                else -> colors.cardSurfaceElevated
+                            },
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(
+                                    width = if (selected) 1.5.dp else 1.dp,
+                                    color = if (selected) colors.accent else colors.cardBorder,
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .clickable(enabled = mode.isAvailable) {
+                                    onUpdateConfig { it.copy(homeExperimentMode = mode) }
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = mode.titleZh,
+                                            color = if (mode.isAvailable) colors.primaryText else colors.secondaryText,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        if (!mode.isAvailable) {
+                                            Surface(
+                                                color = colors.cardBorder.copy(alpha = 0.6f),
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(Icons.Rounded.Lock, contentDescription = null, tint = colors.secondaryText, modifier = Modifier.size(11.dp))
+                                                    Spacer(Modifier.width(3.dp))
+                                                    Text("待 Root 保留", color = colors.secondaryText, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = mode.descZh,
+                                        color = colors.secondaryText,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                                if (mode.isAvailable) {
+                                    Spacer(Modifier.width(10.dp))
+                                    Switch(
+                                        checked = selected,
+                                        onCheckedChange = { onUpdateConfig { it.copy(homeExperimentMode = mode) } },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = colors.onAccent,
+                                            checkedTrackColor = colors.accent
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 方案 C 專屬：左側預設導航 App 選擇（顯示 App 圖示＋名稱）
+                if (config.homeExperimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "方案 C 左側預設導航 App（顯示圖示與名稱，點擊選定）",
+                        color = colors.primaryText,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    val orderedNavApps = remember(installedApps) {
+                        val navFirst = installedApps.filter { it.category == AppCategory.NAVIGATION }
+                        val others = installedApps.filterNot { it.category == AppCategory.NAVIGATION }
+                        navFirst + others.take(12)
+                    }
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        orderedNavApps.forEach { appInfo ->
+                            val isSelected = config.planCNavPackage == appInfo.packageName
+                            val bmp = remember(appInfo.icon) { appInfo.icon.asImageBitmap() }
+                            Surface(
+                                color = if (isSelected) colors.accent else colors.cardSurfaceElevated,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (isSelected) colors.accent else colors.cardBorder,
+                                        shape = RoundedCornerShape(14.dp)
+                                    )
+                                    .clickable {
+                                        onUpdateConfig { it.copy(planCNavPackage = appInfo.packageName) }
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Image(
+                                        bitmap = bmp,
+                                        contentDescription = appInfo.label,
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                    )
+                                    Spacer(Modifier.width(7.dp))
+                                    Text(
+                                        text = appInfo.label,
+                                        color = if (isSelected) colors.onAccent else colors.primaryText,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                SettingsToggleRow(
+                    title = "媒體控制器下方整合顯示 6 格快捷 App",
+                    subtitle = "開啟後於右側媒體控制器底部呈現 6 格自訂捷徑；關閉則將右側全部空間留給大專輯封面與純音樂操控",
+                    checked = config.showSixShortcutsInMediaPanel,
+                    onCheckedChange = { checked -> onUpdateConfig { it.copy(showSixShortcutsInMediaPanel = checked) } }
+                )
+            }
+
             // SECTION 0: 啟動器切換與設為系統預設主畫面（支援切換原廠 AI Box 啟動器／其他啟動器＋選成預設值）
             SettingsSectionCard(
                 icon = Icons.Rounded.Home,
@@ -539,7 +701,7 @@ fun SettingsScreen(
                 }
 
                 Spacer(Modifier.height(6.dp))
-                Text("首頁地圖模式（保留原 63% / 37% 分頁比例）", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text("首頁地圖模式（預設 70% / 30% 分割比例）", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -558,22 +720,26 @@ fun SettingsScreen(
                     fontSize = 11.sp
                 )
 
-                Text("內建免 Key 地圖引擎風格", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text("內建免 Key 地圖圖層風格", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    SelectablePill(
-                        text = "Google 即時路況圖磚（繁中）",
-                        selected = config.mapEngineStyle == MapEngineStyle.GOOGLE_TRAFFIC_TILES,
-                        onClick = { onUpdateConfig { it.copy(mapEngineStyle = MapEngineStyle.GOOGLE_TRAFFIC_TILES) } }
-                    )
-                    SelectablePill(
-                        text = "OpenFreeMap 3D 向量地圖",
-                        selected = config.mapEngineStyle == MapEngineStyle.OPENFREEMAP_VECTOR_3D,
-                        onClick = { onUpdateConfig { it.copy(mapEngineStyle = MapEngineStyle.OPENFREEMAP_VECTOR_3D) } }
-                    )
+                    MapEngineStyle.entries.forEach { styleItem ->
+                        SelectablePill(
+                            text = styleItem.labelZh,
+                            selected = config.mapEngineStyle == styleItem,
+                            onClick = { onUpdateConfig { it.copy(mapEngineStyle = styleItem) } }
+                        )
+                    }
                 }
+
+                SettingsToggleRow(
+                    title = "疊加 Google 即時路況圖層",
+                    subtitle = "於 Google 標準繁中與 Google 衛星混合底圖顯示即時紅黃綠車流",
+                    checked = config.mapTrafficEnabled,
+                    onCheckedChange = { checked -> onUpdateConfig { it.copy(mapTrafficEnabled = checked) } }
+                )
 
                 Surface(
                     color = colors.cardSurfaceElevated,
@@ -591,7 +757,7 @@ fun SettingsScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "原廠 AI Box 系統內建啟動器因具系統簽章可直接呼叫私有 ActivityView；一般安裝版啟動器可透過下方「真實 G 地圖貼合（63%）」或「原生分割／分屏設定」直接使用真正的 Google 地圖本體！",
+                            text = "原廠 AI Box 系統內建啟動器因具系統簽章可直接呼叫私有 ActivityView；一般安裝版啟動器可透過「真實 G 地圖貼合（70%）」或「原生分割／分屏設定」直接使用真正的 Google 地圖本體！",
                             color = colors.secondaryText,
                             fontSize = 11.sp
                         )
@@ -615,7 +781,7 @@ fun SettingsScreen(
                                 onClick = onLaunchRealMapsFreeform,
                                 shape = RoundedCornerShape(14.dp)
                             ) {
-                                Text("立即以 Freeform 貼合 63%")
+                                Text("立即以 Freeform 貼合 70%")
                             }
                             OutlinedButton(
                                 onClick = onOpenSplitShortcutCreator,
@@ -641,7 +807,7 @@ fun SettingsScreen(
                     Slider(
                         value = config.primarySplitRatio,
                         onValueChange = { ratio -> onUpdateConfig { it.copy(primarySplitRatio = ratio) } },
-                        valueRange = 0.55f..0.72f,
+                        valueRange = 0.55f..0.75f,
                         colors = SliderDefaults.colors(thumbColor = colors.accent, activeTrackColor = colors.accent),
                         modifier = Modifier.weight(1f)
                     )
@@ -721,8 +887,8 @@ fun SettingsScreen(
 
                 if (config.persistentOverlayDockEnabled) {
                     SettingsToggleRow(
-                        title = "全螢幕 App 自動收合為極細邊緣拉條（推薦）",
-                        subtitle = "進入 Google 地圖、YouTube 或導航王時自動縮成 15dp 微透明邊條完全不擋畫面，從邊緣一滑或輕點即展開",
+                        title = "全螢幕 App 自動收合為邊緣拉條（推薦）",
+                        subtitle = "進入 Google 地圖、YouTube 或導航王時自動縮成透明邊緣拉條，從邊緣一滑或輕點即展開，長按可沿邊緣拖曳挪動位置",
                         checked = config.overlayAutoCollapseEnabled,
                         onCheckedChange = { checked -> onUpdateConfig { it.copy(overlayAutoCollapseEnabled = checked) } }
                     )
@@ -740,6 +906,48 @@ fun SettingsScreen(
                                     onClick = { onUpdateConfig { it.copy(overlayAutoRetractSeconds = sec) } }
                                 )
                             }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "收起拉條厚度：${config.overlayHandleThicknessDp} dp",
+                                color = colors.primaryText,
+                                fontSize = 13.sp,
+                                modifier = Modifier.width(175.dp)
+                            )
+                            Slider(
+                                value = config.overlayHandleThicknessDp.toFloat(),
+                                onValueChange = { v ->
+                                    onUpdateConfig { it.copy(overlayHandleThicknessDp = v.roundToInt().coerceIn(16, 48)) }
+                                },
+                                valueRange = 16f..48f,
+                                colors = SliderDefaults.colors(thumbColor = colors.accent, activeTrackColor = colors.accent),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "拉條位置偏移：${(config.overlayHandlePositionPercent * 100).roundToInt()}%",
+                                color = colors.primaryText,
+                                fontSize = 13.sp,
+                                modifier = Modifier.width(175.dp)
+                            )
+                            Slider(
+                                value = config.overlayHandlePositionPercent,
+                                onValueChange = { v ->
+                                    onUpdateConfig { it.copy(overlayHandlePositionPercent = v.coerceIn(0.05f, 0.95f)) }
+                                },
+                                valueRange = 0.05f..0.95f,
+                                colors = SliderDefaults.colors(thumbColor = colors.accent, activeTrackColor = colors.accent),
+                                modifier = Modifier.weight(1f)
+                            )
                         }
                     }
                 }
@@ -760,7 +968,7 @@ fun SettingsScreen(
 
                 SettingsToggleRow(
                     title = "24 小時制時鐘",
-                    subtitle = "關閉則顯示 12 小時制時間",
+                    subtitle = "關閉則預設顯示 12 小時制時間（含 AM / PM，如 8:20 PM）",
                     checked = config.is24HourClock,
                     onCheckedChange = { checked -> onUpdateConfig { it.copy(is24HourClock = checked) } }
                 )

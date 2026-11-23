@@ -33,15 +33,47 @@ enum class ThemeMode {
 }
 
 @Serializable
-enum class MapEngineStyle {
-    GOOGLE_TRAFFIC_TILES,
-    OPENFREEMAP_VECTOR_3D
+enum class MapEngineStyle(val labelZh: String) {
+    GOOGLE_TRAFFIC_TILES("Google 繁中地圖"),
+    GOOGLE_SATELLITE_HYBRID("Google 衛星混合"),
+    OPENFREEMAP_VECTOR_3D("OpenFreeMap 3D 向量"),
+    OPENFREEMAP_DARK("深色極簡向量")
+}
+
+@Serializable
+enum class HomeExperimentMode(
+    val shortTitleZh: String,
+    val titleZh: String,
+    val descZh: String,
+    val isAvailable: Boolean = true
+) {
+    PLAN_A_MULTI_LAYER(
+        shortTitleZh = "方案 A",
+        titleZh = "方案 A：多圖層 ＋ 即時路況開關",
+        descZh = "左側 70% 內建免 Key 地圖，自由切換繁中標準／衛星混合／3D 向量／深色向量與即時路況開關"
+    ),
+    PLAN_B_BUILTIN_NAV(
+        shortTitleZh = "方案 B",
+        titleZh = "方案 B：方案 A ＋ 免 Key 內建導航試做",
+        descZh = "整合 Photon 繁中地點搜尋與 OSRM 路線規劃，直接於首頁 70% 繪製藍線導航與中文 TTS 語音提示"
+    ),
+    PLAN_C_APP_AND_MEDIA(
+        shortTitleZh = "方案 C",
+        titleZh = "方案 C：指定導航 App ＋ 純粹音樂封面控制",
+        descZh = "左側 70% 指定真實導航 App（Google 地圖／導航王等），右側 30% 專注大專輯封面、自動音源辨識與 6 格整合"
+    ),
+    PLAN_D_ROOT_RESERVED(
+        shortTitleZh = "方案 D（保留）",
+        titleZh = "方案 D：Root 特權進階模式（保留開發中）",
+        descZh = "需取得車機 Root (su) 權限後啟用全域真常駐 Dock 避讓與系統級雙視窗，敬請期待",
+        isAvailable = false
+    )
 }
 
 @Serializable
 enum class HomeMapDisplayMode(val labelZh: String, val descZh: String) {
-    BUILTIN_LIVE_MAP("內建免 Key 即時地圖（穩固）", "於 63% 主畫面渲染即時路況／3D 向量地圖，點 G地圖 展開原版"),
-    REAL_GMAPS_FREEFORM_EMBED("真實 Google 地圖本體貼合（63%）", "以 Freeform 視窗將真實 Google 地圖 App 貼合至首頁 63% 比例位置")
+    BUILTIN_LIVE_MAP("內建免 Key 即時地圖（穩固）", "於 70% 主畫面渲染即時路況／多圖層地圖，點 G地圖 展開原版"),
+    REAL_GMAPS_FREEFORM_EMBED("真實 Google 地圖本體貼合（70%）", "以 Freeform 視窗將真實 Google 地圖 App 貼合至首頁 70% 比例位置")
 }
 
 @Serializable
@@ -102,15 +134,21 @@ data class LauncherConfig(
     val nightStartMinute: Int = 30,
     val stylePreset: LauncherStylePreset = LauncherStylePreset.COOLWALK_CLASSIC,
     val accentColorIndex: Int = 0,
+    val homeExperimentMode: HomeExperimentMode = HomeExperimentMode.PLAN_A_MULTI_LAYER,
     val mapEngineStyle: MapEngineStyle = MapEngineStyle.GOOGLE_TRAFFIC_TILES,
+    val mapTrafficEnabled: Boolean = true,
     val homeMapDisplayMode: HomeMapDisplayMode = HomeMapDisplayMode.BUILTIN_LIVE_MAP,
-    val primarySplitRatio: Float = 0.63f,
-    val is24HourClock: Boolean = true,
+    val planCNavPackage: String = "com.google.android.apps.maps",
+    val showSixShortcutsInMediaPanel: Boolean = true,
+    val primarySplitRatio: Float = 0.70f,
+    val is24HourClock: Boolean = false,
     val autoCheckAndDownloadUpdate: Boolean = true,
     val showHomeDock: Boolean = true,
     val persistentOverlayDockEnabled: Boolean = true,
     val overlayAutoCollapseEnabled: Boolean = true,
     val overlayAutoRetractSeconds: Int = 4,
+    val overlayHandleThicknessDp: Int = 26,
+    val overlayHandlePositionPercent: Float = 0.50f,
     val launchAppsAvoidDockFreeform: Boolean = false,
     val globalCallMessageBannerEnabled: Boolean = true,
     val autoReadMessagesTts: Boolean = false,
@@ -178,9 +216,32 @@ class LauncherPreferences(context: Context) {
     val config: StateFlow<LauncherConfig> = _config.asStateFlow()
 
     private fun loadConfig(): LauncherConfig {
-        val raw = prefs.getString(KEY_CONFIG_JSON, null) ?: return LauncherConfig()
-        return runCatching { json.decodeFromString<LauncherConfig>(raw) }
+        val raw = prefs.getString(KEY_CONFIG_JSON, null)
+        if (raw == null) {
+            prefs.edit().putBoolean(KEY_MIGRATED_V140, true).apply()
+            return LauncherConfig()
+        }
+        val decoded = runCatching { json.decodeFromString<LauncherConfig>(raw) }
             .getOrElse { LauncherConfig() }
+
+        if (!prefs.getBoolean(KEY_MIGRATED_V140, false)) {
+            val migratedRatio = if (kotlin.math.abs(decoded.primarySplitRatio - 0.63f) < 0.005f) {
+                0.70f
+            } else {
+                decoded.primarySplitRatio
+            }
+            val migrated = decoded.copy(
+                primarySplitRatio = migratedRatio,
+                is24HourClock = false,
+                overlayHandleThicknessDp = decoded.overlayHandleThicknessDp.coerceAtLeast(26)
+            )
+            prefs.edit()
+                .putString(KEY_CONFIG_JSON, json.encodeToString(migrated))
+                .putBoolean(KEY_MIGRATED_V140, true)
+                .apply()
+            return migrated
+        }
+        return decoded
     }
 
     fun update(transform: (LauncherConfig) -> LauncherConfig) {
@@ -252,5 +313,6 @@ class LauncherPreferences(context: Context) {
 
     companion object {
         private const val KEY_CONFIG_JSON = "config_json_v1"
+        private const val KEY_MIGRATED_V140 = "migrated_v140_defaults"
     }
 }

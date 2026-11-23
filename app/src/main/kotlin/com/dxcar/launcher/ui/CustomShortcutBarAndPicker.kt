@@ -16,6 +16,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -88,12 +89,181 @@ private fun builtInShortcuts(accent: Color): List<BuiltInShortcutMeta> = listOf(
 )
 
 /**
- * Right-bottom card featuring 6 user-customizable App Shortcut slots:
- * - Tap empty "+" slot -> opens AppPickerDialog with real App Icons to assign an app
- * - Tap assigned App Icon -> launches that app immediately (and records into Left Recent Dock)
- * - Long-press assigned App Icon -> removes it back to empty "+" slot with spring bounce!
+ * Adaptive 6-slot App Shortcut grid:
+ * - Wide containers (>= 295dp): classic 1x6 single horizontal row
+ * - Narrow 30% split containers (< 295dp): neat 2x3 rows so icons remain spacious & car-safe!
  */
 @OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun CustomSixShortcutsSection(
+    slots: List<String>,
+    installedApps: List<InstalledAppInfo>,
+    splitShortcuts: List<SplitScreenShortcut> = emptyList(),
+    onSlotEmptyClick: (Int) -> Unit,
+    onSlotLaunch: (String) -> Unit,
+    onSlotRemove: (Int, String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalDxCarColors.current
+    val byPkg = remember(installedApps) { installedApps.associateBy { it.packageName } }
+    val splitById = remember(splitShortcuts) { splitShortcuts.associateBy { it.id } }
+    val builtins = remember(colors.accent) { builtInShortcuts(colors.accent).associateBy { it.token } }
+    val normalizedSlots = remember(slots) { List(6) { idx -> slots.getOrElse(idx) { "" } } }
+    val allEmpty = remember(normalizedSlots) { normalizedSlots.all { it.isBlank() } }
+
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val twoRows = maxWidth < 295.dp
+        val tileDp = if (twoRows) 44 else ((maxWidth.value - 40f) / 6f).toInt().coerceIn(36, 48)
+        val rowGroups = if (twoRows) listOf(0..2, 3..5) else listOf(0..5)
+
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (allEmpty) {
+                Text(
+                    text = "自訂捷徑（點 ＋ 新增 · 長按移除）",
+                    color = colors.secondaryText,
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(start = 2.dp)
+                )
+            }
+
+            rowGroups.forEach { range ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    range.forEach { index ->
+                        val token = normalizedSlots[index]
+                        val installed = byPkg[token]
+                        val builtin = builtins[token]
+                        val splitSc = if (token.startsWith(BuiltInShortcutTokens.SPLIT_PREFIX)) {
+                            splitById[token.removePrefix(BuiltInShortcutTokens.SPLIT_PREFIX)]
+                        } else null
+                        val isAssigned = installed != null || builtin != null || splitSc != null
+
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height((tileDp + 4).dp)
+                        ) {
+                            AnimatedContent(
+                                targetState = token to isAssigned,
+                                transitionSpec = {
+                                    (scaleIn(
+                                        initialScale = 0.72f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            stiffness = Spring.StiffnessMedium
+                                        )
+                                    ) + fadeIn(tween(180))) togetherWith
+                                        (scaleOut(targetScale = 0.72f, animationSpec = tween(140)) + fadeOut(tween(120)))
+                                },
+                                label = "customSlotAnim_$index"
+                            ) { (curToken, assigned) ->
+                                if (!assigned) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .size(tileDp.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(colors.cardSurfaceElevated.copy(alpha = 0.72f))
+                                            .border(
+                                                width = 1.dp,
+                                                color = colors.cardBorder,
+                                                shape = RoundedCornerShape(14.dp)
+                                            )
+                                            .bouncyClickable(pressedScale = 0.86f) {
+                                                onSlotEmptyClick(index)
+                                            }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Add,
+                                            contentDescription = "新增自訂 App",
+                                            tint = colors.secondaryText,
+                                            modifier = Modifier.size((tileDp * 0.44f).dp)
+                                        )
+                                    }
+                                } else if (installed != null) {
+                                    val bmp = remember(installed.icon) { installed.icon.asImageBitmap() }
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .size(tileDp.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(colors.cardSurfaceElevated)
+                                            .border(
+                                                width = 1.dp,
+                                                color = colors.cardBorder.copy(alpha = 0.75f),
+                                                shape = RoundedCornerShape(14.dp)
+                                            )
+                                            .bouncyCombinedClickable(
+                                                pressedScale = 0.86f,
+                                                onClick = { onSlotLaunch(curToken) },
+                                                onLongClick = { onSlotRemove(index, installed.label) }
+                                            )
+                                    ) {
+                                        Image(
+                                            bitmap = bmp,
+                                            contentDescription = installed.label,
+                                            modifier = Modifier
+                                                .size((tileDp - 10).dp)
+                                                .clip(RoundedCornerShape(9.dp))
+                                        )
+                                    }
+                                } else if (splitSc != null) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .size(tileDp.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .bouncyCombinedClickable(
+                                                pressedScale = 0.86f,
+                                                onClick = { onSlotLaunch(curToken) },
+                                                onLongClick = { onSlotRemove(index, splitSc.label.ifBlank { "分屏捷徑" }) }
+                                            )
+                                    ) {
+                                        DualSplitShortcutIcon(
+                                            shortcut = splitSc,
+                                            appsByPackage = byPkg,
+                                            sizeDp = (tileDp - 2).coerceAtLeast(32)
+                                        )
+                                    }
+                                } else if (builtin != null) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .size(tileDp.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(builtin.tint.copy(alpha = 0.18f))
+                                            .border(
+                                                width = 1.dp,
+                                                color = builtin.tint.copy(alpha = 0.55f),
+                                                shape = RoundedCornerShape(14.dp)
+                                            )
+                                            .bouncyCombinedClickable(
+                                                pressedScale = 0.86f,
+                                                onClick = { onSlotLaunch(curToken) },
+                                                onLongClick = { onSlotRemove(index, builtin.label) }
+                                            )
+                                    ) {
+                                        Icon(
+                                            imageVector = builtin.icon,
+                                            contentDescription = builtin.label,
+                                            tint = builtin.tint,
+                                            modifier = Modifier.size((tileDp * 0.5f).dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun CustomSixAppBarCard(
     slots: List<String>,
@@ -106,167 +276,23 @@ fun CustomSixAppBarCard(
 ) {
     val colors = LocalDxCarColors.current
     val cardShape = RoundedCornerShape(colors.cardCornerDp.dp)
-    val byPkg = remember(installedApps) { installedApps.associateBy { it.packageName } }
-    val splitById = remember(splitShortcuts) { splitShortcuts.associateBy { it.id } }
-    val builtins = remember(colors.accent) { builtInShortcuts(colors.accent).associateBy { it.token } }
-    val normalizedSlots = remember(slots) { List(6) { idx -> slots.getOrElse(idx) { "" } } }
-    val allEmpty = remember(normalizedSlots) { normalizedSlots.all { it.isBlank() } }
 
     Surface(
         color = colors.cardSurface,
         shape = cardShape,
         modifier = modifier
             .fillMaxWidth()
-            .height(if (allEmpty) 92.dp else 82.dp)
             .border(colors.cardBorderWidthDp.dp, colors.cardBorder, cardShape)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.Center
-        ) {
-            if (allEmpty) {
-                Text(
-                    text = "自訂捷徑列（點擊 ＋ 新增 App · 長按圖示移除）",
-                    color = colors.secondaryText,
-                    fontSize = 10.sp,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 5.dp)
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                normalizedSlots.forEachIndexed { index, token ->
-                    val installed = byPkg[token]
-                    val builtin = builtins[token]
-                    val splitSc = if (token.startsWith(BuiltInShortcutTokens.SPLIT_PREFIX)) {
-                        splitById[token.removePrefix(BuiltInShortcutTokens.SPLIT_PREFIX)]
-                    } else null
-                    val isAssigned = installed != null || builtin != null || splitSc != null
-
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(54.dp)
-                    ) {
-                        AnimatedContent(
-                            targetState = token to isAssigned,
-                            transitionSpec = {
-                                (scaleIn(
-                                    initialScale = 0.72f,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessMedium
-                                    )
-                                ) + fadeIn(tween(180))) togetherWith
-                                    (scaleOut(targetScale = 0.72f, animationSpec = tween(140)) + fadeOut(tween(120)))
-                            },
-                            label = "customSlotAnim_$index"
-                        ) { (curToken, assigned) ->
-                            if (!assigned) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(RoundedCornerShape(15.dp))
-                                        .background(colors.cardSurfaceElevated.copy(alpha = 0.75f))
-                                        .border(
-                                            width = 1.dp,
-                                            color = colors.cardBorder,
-                                            shape = RoundedCornerShape(15.dp)
-                                        )
-                                        .bouncyClickable(pressedScale = 0.86f) {
-                                            onSlotEmptyClick(index)
-                                        }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Add,
-                                        contentDescription = "新增自訂 App",
-                                        tint = colors.secondaryText,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                            } else if (installed != null) {
-                                val bmp = remember(installed.icon) { installed.icon.asImageBitmap() }
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .size(50.dp)
-                                        .clip(RoundedCornerShape(15.dp))
-                                        .background(colors.cardSurfaceElevated)
-                                        .border(
-                                            width = 1.dp,
-                                            color = colors.cardBorder.copy(alpha = 0.75f),
-                                            shape = RoundedCornerShape(15.dp)
-                                        )
-                                        .bouncyCombinedClickable(
-                                            pressedScale = 0.86f,
-                                            onClick = { onSlotLaunch(curToken) },
-                                            onLongClick = { onSlotRemove(index, installed.label) }
-                                        )
-                                ) {
-                                    Image(
-                                        bitmap = bmp,
-                                        contentDescription = installed.label,
-                                        modifier = Modifier
-                                            .size(38.dp)
-                                            .clip(RoundedCornerShape(10.dp))
-                                    )
-                                }
-                            } else if (splitSc != null) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .size(50.dp)
-                                        .clip(RoundedCornerShape(15.dp))
-                                        .bouncyCombinedClickable(
-                                            pressedScale = 0.86f,
-                                            onClick = { onSlotLaunch(curToken) },
-                                            onLongClick = { onSlotRemove(index, splitSc.label.ifBlank { "分屏捷徑" }) }
-                                        )
-                                ) {
-                                    DualSplitShortcutIcon(
-                                        shortcut = splitSc,
-                                        appsByPackage = byPkg,
-                                        sizeDp = 46
-                                    )
-                                }
-                            } else if (builtin != null) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .size(50.dp)
-                                        .clip(RoundedCornerShape(15.dp))
-                                        .background(builtin.tint.copy(alpha = 0.18f))
-                                        .border(
-                                            width = 1.dp,
-                                            color = builtin.tint.copy(alpha = 0.55f),
-                                            shape = RoundedCornerShape(15.dp)
-                                        )
-                                        .bouncyCombinedClickable(
-                                            pressedScale = 0.86f,
-                                            onClick = { onSlotLaunch(curToken) },
-                                            onLongClick = { onSlotRemove(index, builtin.label) }
-                                        )
-                                ) {
-                                    Icon(
-                                        imageVector = builtin.icon,
-                                        contentDescription = builtin.label,
-                                        tint = builtin.tint,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        CustomSixShortcutsSection(
+            slots = slots,
+            installedApps = installedApps,
+            splitShortcuts = splitShortcuts,
+            onSlotEmptyClick = onSlotEmptyClick,
+            onSlotLaunch = onSlotLaunch,
+            onSlotRemove = onSlotRemove,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp)
+        )
     }
 }
 

@@ -3,6 +3,9 @@ package com.dxcar.launcher.media
 import android.content.ComponentName
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaController
@@ -20,10 +23,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 
 data class MediaSessionSummary(
     val packageName: String,
     val appLabel: String,
+    val appIcon: Bitmap?,
     val isPlaying: Boolean
 )
 
@@ -31,8 +36,9 @@ data class ActiveMediaState(
     val hasSession: Boolean = false,
     val packageName: String = "",
     val appName: String = "媒體播放器",
+    val appIcon: Bitmap? = null,
     val title: String = "目前沒有播放中的媒體",
-    val artist: String = "點擊下方圖示開啟 YouTube、Spotify 或音樂 App",
+    val artist: String = "開啟 YouTube、KKBOX、Apple Music、網易雲、Spotify 或 VLC 後自動顯示",
     val album: String = "",
     val albumArt: Bitmap? = null,
     val isPlaying: Boolean = false,
@@ -55,6 +61,7 @@ class MediaControlBridge(private val context: Context) {
     private var selectedController: MediaController? = null
     private var preferredPackage: String? = null
     private var listenerRegistered = false
+    private val appIconCache = ConcurrentHashMap<String, Bitmap>()
 
     private val controllerCallback = object : MediaController.Callback() {
         override fun onPlaybackStateChanged(state: PlaybackState?) = publishSelectedState()
@@ -131,6 +138,7 @@ class MediaControlBridge(private val context: Context) {
             MediaSessionSummary(
                 packageName = c.packageName,
                 appLabel = resolveAppLabel(c.packageName),
+                appIcon = resolveAppIcon(c.packageName),
                 isPlaying = c.playbackState?.state == PlaybackState.STATE_PLAYING
             )
         }.distinctBy { it.packageName }
@@ -144,6 +152,7 @@ class MediaControlBridge(private val context: Context) {
         val pb = controller.playbackState
         val pkg = controller.packageName
         val appLabel = resolveAppLabel(pkg)
+        val appIcon = resolveAppIcon(pkg)
 
         val title = meta?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
             ?: meta?.getString(MediaMetadata.METADATA_KEY_TITLE)
@@ -165,6 +174,7 @@ class MediaControlBridge(private val context: Context) {
             hasSession = true,
             packageName = pkg,
             appName = appLabel,
+            appIcon = appIcon,
             title = title,
             artist = artist,
             album = album,
@@ -228,5 +238,26 @@ class MediaControlBridge(private val context: Context) {
             val appInfo = context.packageManager.getApplicationInfo(pkg, 0)
             context.packageManager.getApplicationLabel(appInfo).toString()
         }.getOrElse { pkg }
+    }
+
+    private fun resolveAppIcon(pkg: String): Bitmap? {
+        appIconCache[pkg]?.let { return it }
+        val bmp = runCatching {
+            val drawable = context.packageManager.getApplicationIcon(pkg)
+            drawableToBitmap(drawable, 96)
+        }.getOrNull()
+        if (bmp != null) appIconCache[pkg] = bmp
+        return bmp
+    }
+
+    private fun drawableToBitmap(drawable: Drawable, sizePx: Int): Bitmap {
+        if (drawable is BitmapDrawable && drawable.bitmap != null) {
+            return Bitmap.createScaledBitmap(drawable.bitmap, sizePx, sizePx, true)
+        }
+        val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        drawable.setBounds(0, 0, canvas.width, canvas.height)
+        drawable.draw(canvas)
+        return bmp
     }
 }

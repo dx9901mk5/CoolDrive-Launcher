@@ -361,6 +361,7 @@ class BluetoothCompanionService : Service() {
                     telecom.acceptRingingCall()
                 }
                 CallActionCommand.DECLINE -> {
+                    @Suppress("DEPRECATION")
                     telecom.endCall()
                 }
             }

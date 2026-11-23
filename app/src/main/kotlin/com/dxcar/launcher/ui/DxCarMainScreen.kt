@@ -61,10 +61,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dxcar.launcher.DxCarApp
 import com.dxcar.launcher.SplitSidePanelActivity
+import com.dxcar.launcher.accessibility.DxCarAccessibilityService
 import com.dxcar.launcher.comms.BluetoothCompanionService
 import com.dxcar.launcher.comms.CallActionCommand
 import com.dxcar.launcher.comms.CarMessageItem
 import com.dxcar.launcher.data.DeviceRole
+import com.dxcar.launcher.data.HomeExperimentMode
 import com.dxcar.launcher.data.HomeMapDisplayMode
 import com.dxcar.launcher.data.MapEngineStyle
 import com.dxcar.launcher.data.SplitScreenShortcut
@@ -74,7 +76,9 @@ import com.dxcar.launcher.gestures.dxCarMultiFingerGestures
 import com.dxcar.launcher.layout.CoolwalkLayoutEngine
 import com.dxcar.launcher.layout.ResolvedDockPlacement
 import com.dxcar.launcher.layout.ScreenMetrics
+import com.dxcar.launcher.map.BuiltInNavState
 import com.dxcar.launcher.map.LiveMapCard
+import com.dxcar.launcher.map.NavSearchResult
 import com.dxcar.launcher.overlay.PersistentDockOverlayService
 import com.dxcar.launcher.system.InstalledAppInfo
 import com.dxcar.launcher.system.PermissionHelper
@@ -117,8 +121,16 @@ fun DxCarRootScreen(
     val popupMessage by app.notificationCenter.popupMessage.collectAsState()
     val messages by app.notificationCenter.messages.collectAsState()
     val activeNav by app.notificationCenter.activeNavigation.collectAsState()
+    val builtInNavState by app.builtInNavEngine.state.collectAsState()
     val bridgeStatus by BluetoothCompanionService.bridgeState.collectAsState()
     val updateState by app.updateManager.state.collectAsState()
+
+    // Feed live GPS coordinates to Plan B OSRM navigation engine
+    LaunchedEffect(location.latitude, location.longitude, config.homeExperimentMode) {
+        if (config.homeExperimentMode == HomeExperimentMode.PLAN_B_BUILTIN_NAV && builtInNavState.isNavigating) {
+            app.builtInNavEngine.onLocationUpdated(location.latitude, location.longitude)
+        }
+    }
 
     var destination by remember { mutableStateOf(LauncherDestination.DASHBOARD_SPLIT) }
     var isMapPrimary by remember { mutableStateOf(true) }
@@ -254,7 +266,7 @@ fun DxCarRootScreen(
         destination = LauncherDestination.FULLSCREEN_YOUTUBE_WEB
     }
 
-    fun launchRealMapsFreeformBox() {
+    fun launchFreeformPrimaryBox(targetPackage: String? = null) {
         val measured = latestMapCardRect
         val bounds = if (measured != null && measured.width() >= 200 && measured.height() >= 180) {
             measured
@@ -271,8 +283,15 @@ fun DxCarRootScreen(
             }
             Rect(leftX, padPx, (leftX + primaryW - padPx * 2).coerceAtLeast(leftX + 200), availH - padPx)
         }
-        app.installedAppsRepository.launchGoogleMapsFreeform(bounds)
-        gestureHudText = "🗺 已以 63% 比例貼合開啟真實 Google 地圖"
+        val pct = (layoutSpec.primaryWeight * 100).toInt()
+        if (targetPackage.isNullOrBlank()) {
+            app.installedAppsRepository.launchGoogleMapsFreeform(bounds)
+            gestureHudText = "🗺 已以 $pct% 比例貼合開啟真實 Google 地圖"
+        } else {
+            app.installedAppsRepository.launchPackageFreeform(targetPackage, bounds)
+            val label = app.installedAppsRepository.findApp(targetPackage)?.label ?: "導航 App"
+            gestureHudText = "🗺 已以 $pct% 比例貼合開啟 $label"
+        }
     }
 
     fun handleCustomShortcutLaunch(token: String) {
@@ -448,7 +467,38 @@ fun DxCarRootScreen(
                         destination = LauncherDestination.SETTINGS
                     },
                     onClockClick = { showQuickControlCenter = !showQuickControlCenter },
-                    onNotificationsClick = { showNotificationCenter = !showNotificationCenter }
+                    onNotificationsClick = { showNotificationCenter = !showNotificationCenter },
+                    onBackClick = {
+                        when {
+                            showQuickControlCenter -> showQuickControlCenter = false
+                            showNotificationCenter -> showNotificationCenter = false
+                            showSplitCreator -> showSplitCreator = false
+                            pickingShortcutSlotIndex != null -> pickingShortcutSlotIndex = null
+                            destination != LauncherDestination.DASHBOARD_SPLIT -> {
+                                destination = if (destination == LauncherDestination.SETTINGS) {
+                                    LauncherDestination.APP_DRAWER
+                                } else {
+                                    LauncherDestination.DASHBOARD_SPLIT
+                                }
+                            }
+                            else -> {
+                                val acc = DxCarAccessibilityService.instance
+                                if (acc != null) {
+                                    acc.goBack()
+                                } else {
+                                    gestureHudText = "請至設定開啟「無障礙服務」以啟用全域返回鍵"
+                                }
+                            }
+                        }
+                    },
+                    onRecentsClick = {
+                        val acc = DxCarAccessibilityService.instance
+                        if (acc != null) {
+                            acc.openRecents()
+                        } else {
+                            gestureHudText = "請至設定開啟「無障礙服務」以進入多工視窗"
+                        }
+                    }
                 )
             }
 
@@ -487,35 +537,64 @@ fun DxCarRootScreen(
                                 rightHandDrive = config.rightHandDrive,
                                 primaryRatio = layoutSpec.primaryWeight,
                                 isMapPrimary = isMapPrimary,
+                                experimentMode = config.homeExperimentMode,
                                 location = location,
                                 activeNav = activeNav,
+                                builtInNavState = builtInNavState,
                                 media = media,
                                 isNight = isNight,
                                 mapEngineStyle = config.mapEngineStyle,
+                                trafficEnabled = config.mapTrafficEnabled,
                                 homeMapDisplayMode = config.homeMapDisplayMode,
+                                planCNavPackage = config.planCNavPackage,
+                                showSixShortcutsInMediaPanel = config.showSixShortcutsInMediaPanel,
                                 homeAddress = config.homeAddress,
                                 workAddress = config.workAddress,
                                 customShortcutSlots = config.customShortcutSlots,
                                 splitShortcuts = config.splitShortcuts,
                                 installedApps = installedApps,
                                 onMapCardBoundsMeasured = { rect -> latestMapCardRect = rect },
-                                onPinRealMapsHere = ::launchRealMapsFreeformBox,
+                                onPinRealMapsHere = { launchFreeformPrimaryBox(null) },
                                 onSwitchToBuiltinMap = {
                                     app.preferences.update { it.copy(homeMapDisplayMode = HomeMapDisplayMode.BUILTIN_LIVE_MAP) }
                                 },
-                                onToggleMapStyle = {
-                                    val next = if (config.mapEngineStyle == MapEngineStyle.GOOGLE_TRAFFIC_TILES) {
-                                        MapEngineStyle.OPENFREEMAP_VECTOR_3D
-                                    } else {
-                                        MapEngineStyle.GOOGLE_TRAFFIC_TILES
-                                    }
-                                    app.preferences.update { it.copy(mapEngineStyle = next) }
-                                    gestureHudText = if (next == MapEngineStyle.OPENFREEMAP_VECTOR_3D) {
-                                        "🗺 切換至 3D 向量地圖"
-                                    } else {
-                                        "🗺 切換至 Google 即時路況圖磚"
-                                    }
+                                onSelectMapStyle = { styleItem ->
+                                    app.preferences.update { it.copy(mapEngineStyle = styleItem) }
+                                    gestureHudText = "🗺 已切換圖層：${styleItem.labelZh}"
                                 },
+                                onToggleTraffic = {
+                                    val nextTraffic = !config.mapTrafficEnabled
+                                    app.preferences.update { it.copy(mapTrafficEnabled = nextTraffic) }
+                                    gestureHudText = if (nextTraffic) "🚦 已開啟 Google 即時路況" else "🗺 已關閉即時路況圖層"
+                                },
+                                onToggleMapStyle = {
+                                    val allStyles = MapEngineStyle.entries
+                                    val nextIdx = (allStyles.indexOf(config.mapEngineStyle) + 1) % allStyles.size
+                                    val next = allStyles[nextIdx]
+                                    app.preferences.update { it.copy(mapEngineStyle = next) }
+                                    gestureHudText = "🗺 切換至 ${next.labelZh}"
+                                },
+                                onSearchBuiltInPlaces = { q ->
+                                    app.builtInNavEngine.searchPlaces(q, location.latitude, location.longitude)
+                                },
+                                onStartBuiltInNav = { place ->
+                                    app.builtInNavEngine.startNavigation(
+                                        startLat = location.latitude,
+                                        startLon = location.longitude,
+                                        destName = place.name,
+                                        destLat = place.latitude,
+                                        destLon = place.longitude
+                                    )
+                                },
+                                onStopBuiltInNav = { app.builtInNavEngine.stopNavigation() },
+                                onSelectPlanCNavPkg = { pkg ->
+                                    app.preferences.update { it.copy(planCNavPackage = pkg) }
+                                    val label = app.installedAppsRepository.findApp(pkg)?.label ?: pkg
+                                    gestureHudText = "🧭 已指定左側導航：$label"
+                                },
+                                onLaunchPlanCFreeform = { pkg -> launchFreeformPrimaryBox(pkg) },
+                                onLaunchPlanCSplit = { pkg -> SplitSidePanelActivity.launchWithRealGoogleMaps(context, pkg) },
+                                onLaunchPlanCFullscreen = { pkg -> launchAppRespectingOptions(pkg) },
                                 onSwapPanes = { isMapPrimary = !isMapPrimary },
                                 onOpenFullscreenMap = { destination = LauncherDestination.FULLSCREEN_MAP },
                                 onLaunchRealGoogleMaps = { query ->
@@ -560,18 +639,37 @@ fun DxCarRootScreen(
                                     activeNav = activeNav,
                                     isNight = isNight,
                                     mapEngineStyle = config.mapEngineStyle,
+                                    trafficEnabled = config.mapTrafficEnabled,
+                                    experimentMode = config.homeExperimentMode,
+                                    builtInNavState = builtInNavState,
                                     isPrimary = true,
                                     isFullscreen = true,
                                     homeAddress = config.homeAddress,
                                     workAddress = config.workAddress,
+                                    onSelectMapStyle = { styleItem ->
+                                        app.preferences.update { it.copy(mapEngineStyle = styleItem) }
+                                    },
+                                    onToggleTraffic = {
+                                        app.preferences.update { it.copy(mapTrafficEnabled = !it.mapTrafficEnabled) }
+                                    },
                                     onToggleStyle = {
-                                        val next = if (config.mapEngineStyle == MapEngineStyle.GOOGLE_TRAFFIC_TILES) {
-                                            MapEngineStyle.OPENFREEMAP_VECTOR_3D
-                                        } else {
-                                            MapEngineStyle.GOOGLE_TRAFFIC_TILES
-                                        }
+                                        val allStyles = MapEngineStyle.entries
+                                        val next = allStyles[(allStyles.indexOf(config.mapEngineStyle) + 1) % allStyles.size]
                                         app.preferences.update { it.copy(mapEngineStyle = next) }
                                     },
+                                    onSearchBuiltInPlaces = { q ->
+                                        app.builtInNavEngine.searchPlaces(q, location.latitude, location.longitude)
+                                    },
+                                    onStartBuiltInNav = { place ->
+                                        app.builtInNavEngine.startNavigation(
+                                            startLat = location.latitude,
+                                            startLon = location.longitude,
+                                            destName = place.name,
+                                            destLat = place.latitude,
+                                            destLon = place.longitude
+                                        )
+                                    },
+                                    onStopBuiltInNav = { app.builtInNavEngine.stopNavigation() },
                                     onSwapRequested = { destination = LauncherDestination.DASHBOARD_SPLIT },
                                     onToggleFullscreen = { destination = LauncherDestination.DASHBOARD_SPLIT },
                                     onLaunchGoogleMapsApp = { q ->
@@ -622,6 +720,7 @@ fun DxCarRootScreen(
                             SettingsScreen(
                                 config = config,
                                 layoutSpec = layoutSpec,
+                                installedApps = installedApps,
                                 homeLaunchers = homeLaunchers,
                                 permissionHealth = permissionHealth,
                                 bridgeStatus = bridgeStatus,
@@ -646,7 +745,7 @@ fun DxCarRootScreen(
                                 onLaunchRealMapsSplitScreen = {
                                     SplitSidePanelActivity.launchWithRealGoogleMaps(context)
                                 },
-                                onLaunchRealMapsFreeform = ::launchRealMapsFreeformBox,
+                                onLaunchRealMapsFreeform = { launchFreeformPrimaryBox(null) },
                                 onOpenSplitShortcutCreator = { showSplitCreator = true },
                                 onResetSettingsToDefaults = {
                                     app.preferences.resetToDefaults()
@@ -902,12 +1001,17 @@ private fun CoolwalkSplitDashboard(
     rightHandDrive: Boolean,
     primaryRatio: Float,
     isMapPrimary: Boolean,
+    experimentMode: HomeExperimentMode,
     location: com.dxcar.launcher.map.VehicleLocationState,
     activeNav: com.dxcar.launcher.comms.ActiveNavBanner?,
+    builtInNavState: BuiltInNavState,
     media: com.dxcar.launcher.media.ActiveMediaState,
     isNight: Boolean,
     mapEngineStyle: MapEngineStyle,
+    trafficEnabled: Boolean,
     homeMapDisplayMode: HomeMapDisplayMode,
+    planCNavPackage: String,
+    showSixShortcutsInMediaPanel: Boolean,
     homeAddress: String,
     workAddress: String,
     customShortcutSlots: List<String>,
@@ -916,7 +1020,16 @@ private fun CoolwalkSplitDashboard(
     onMapCardBoundsMeasured: (Rect) -> Unit,
     onPinRealMapsHere: () -> Unit,
     onSwitchToBuiltinMap: () -> Unit,
+    onSelectMapStyle: (MapEngineStyle) -> Unit,
+    onToggleTraffic: () -> Unit,
     onToggleMapStyle: () -> Unit,
+    onSearchBuiltInPlaces: (String) -> Unit,
+    onStartBuiltInNav: (NavSearchResult) -> Unit,
+    onStopBuiltInNav: () -> Unit,
+    onSelectPlanCNavPkg: (String) -> Unit,
+    onLaunchPlanCFreeform: (String) -> Unit,
+    onLaunchPlanCSplit: (String) -> Unit,
+    onLaunchPlanCFullscreen: (String) -> Unit,
     onSwapPanes: () -> Unit,
     onOpenFullscreenMap: () -> Unit,
     onLaunchRealGoogleMaps: (String?) -> Unit,
@@ -939,7 +1052,8 @@ private fun CoolwalkSplitDashboard(
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "primaryWeight"
     )
-    val secondaryWeight = (1f - primaryWeight).coerceAtLeast(0.26f)
+    val secondaryWeight = (1f - primaryWeight).coerceAtLeast(0.24f)
+    val isPlanC = experimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA
 
     val mapCardComposable: @Composable (Boolean, Modifier) -> Unit = { primary, mod ->
         Box(
@@ -953,85 +1067,108 @@ private fun CoolwalkSplitDashboard(
                     )
                 }
         ) {
-            if (homeMapDisplayMode == HomeMapDisplayMode.REAL_GMAPS_FREEFORM_EMBED) {
-                Surface(
-                    color = colors.cardSurface,
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+            when {
+                isPlanC -> {
+                    PlanCNavAppCard(
+                        selectedNavPackage = planCNavPackage,
+                        installedApps = installedApps,
+                        activeNav = activeNav,
+                        primaryRatio = primaryRatio,
+                        onSelectNavPackage = onSelectPlanCNavPkg,
+                        onLaunchFreeformHere = onLaunchPlanCFreeform,
+                        onLaunchSplitPanel = onLaunchPlanCSplit,
+                        onLaunchFullscreen = onLaunchPlanCFullscreen
+                    )
+                }
+                homeMapDisplayMode == HomeMapDisplayMode.REAL_GMAPS_FREEFORM_EMBED -> {
+                    Surface(
+                        color = colors.cardSurface,
+                        modifier = Modifier.fillMaxSize()
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Map,
-                            contentDescription = null,
-                            tint = colors.accent,
-                            modifier = Modifier.size(54.dp)
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        Text(
-                            text = "真實 Google 地圖本體貼合模式（${(primaryRatio * 100).toInt()}% 比例）",
-                            color = colors.primaryText,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = "點擊下方按鈕即以 Freeform 精準貼合此卡片範圍啟動 Google 地圖本體",
-                            color = colors.secondaryText,
-                            fontSize = 12.sp
-                        )
-                        Spacer(Modifier.height(14.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Button(
-                                onClick = onPinRealMapsHere,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = colors.accent,
-                                    contentColor = colors.onAccent
-                                ),
-                                shape = RoundedCornerShape(16.dp)
-                            ) {
-                                Text("貼合開啟真實 Google 地圖")
-                            }
-                            OutlinedButton(
-                                onClick = onLaunchRealMapsSplit,
-                                shape = RoundedCornerShape(16.dp)
-                            ) {
-                                Text("原生分割模式")
-                            }
-                            OutlinedButton(
-                                onClick = onSwitchToBuiltinMap,
-                                shape = RoundedCornerShape(16.dp)
-                            ) {
-                                Text("切回內建即時地圖")
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Map,
+                                contentDescription = null,
+                                tint = colors.accent,
+                                modifier = Modifier.size(54.dp)
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                text = "真實 Google 地圖本體貼合模式（${(primaryRatio * 100).toInt()}% 比例）",
+                                color = colors.primaryText,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = "點擊下方按鈕即以 Freeform 精準貼合此卡片範圍啟動 Google 地圖本體",
+                                color = colors.secondaryText,
+                                fontSize = 12.sp
+                            )
+                            Spacer(Modifier.height(14.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Button(
+                                    onClick = onPinRealMapsHere,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = colors.accent,
+                                        contentColor = colors.onAccent
+                                    ),
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Text("貼合開啟真實 Google 地圖")
+                                }
+                                OutlinedButton(
+                                    onClick = onLaunchRealMapsSplit,
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Text("原生分割模式")
+                                }
+                                OutlinedButton(
+                                    onClick = onSwitchToBuiltinMap,
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Text("切回內建即時地圖")
+                                }
                             }
                         }
                     }
                 }
-            } else {
-                LiveMapCard(
-                    location = location,
-                    activeNav = activeNav,
-                    isNight = isNight,
-                    mapEngineStyle = mapEngineStyle,
-                    isPrimary = primary,
-                    isFullscreen = false,
-                    homeAddress = homeAddress,
-                    workAddress = workAddress,
-                    onToggleStyle = onToggleMapStyle,
-                    onSwapRequested = onSwapPanes,
-                    onToggleFullscreen = onOpenFullscreenMap,
-                    onLaunchGoogleMapsApp = onLaunchRealGoogleMaps,
-                    onLaunchRealMapsSplit = onLaunchRealMapsSplit
-                )
+                else -> {
+                    LiveMapCard(
+                        location = location,
+                        activeNav = activeNav,
+                        isNight = isNight,
+                        mapEngineStyle = mapEngineStyle,
+                        trafficEnabled = trafficEnabled,
+                        experimentMode = experimentMode,
+                        builtInNavState = builtInNavState,
+                        isPrimary = primary,
+                        isFullscreen = false,
+                        homeAddress = homeAddress,
+                        workAddress = workAddress,
+                        onSelectMapStyle = onSelectMapStyle,
+                        onToggleTraffic = onToggleTraffic,
+                        onToggleStyle = onToggleMapStyle,
+                        onSearchBuiltInPlaces = onSearchBuiltInPlaces,
+                        onStartBuiltInNav = onStartBuiltInNav,
+                        onStopBuiltInNav = onStopBuiltInNav,
+                        onSwapRequested = onSwapPanes,
+                        onToggleFullscreen = onOpenFullscreenMap,
+                        onLaunchGoogleMapsApp = onLaunchRealGoogleMaps,
+                        onLaunchRealMapsSplit = onLaunchRealMapsSplit
+                    )
+                }
             }
         }
     }
 
-    val mediaCardComposable: @Composable (Boolean, Modifier) -> Unit = { primary, mod ->
+    val mediaCardComposable: @Composable (Boolean, Boolean, Modifier) -> Unit = { primary, integrateSix, mod ->
         Box(
             modifier = mod
                 .clip(cardShape)
@@ -1040,13 +1177,22 @@ private fun CoolwalkSplitDashboard(
             MediaControlCard(
                 media = media,
                 isPrimary = primary,
+                pureMusicMode = isPlanC,
+                showSwapButton = !isPlanC,
+                showSixShortcuts = integrateSix && showSixShortcutsInMediaPanel,
+                customShortcutSlots = customShortcutSlots,
+                installedApps = installedApps,
+                splitShortcuts = splitShortcuts,
                 onPlayPause = onMediaPlayPause,
                 onNext = onMediaNext,
                 onPrevious = onMediaPrev,
                 onSelectSession = onSelectMediaSession,
                 onOpenMediaApp = onOpenMediaApp,
                 onOpenYoutubeFullscreen = onOpenYoutubeFullscreen,
-                onSwapRequested = onSwapPanes
+                onSwapRequested = onSwapPanes,
+                onCustomSlotEmptyClick = onCustomSlotEmptyClick,
+                onCustomSlotLaunch = onCustomSlotLaunch,
+                onCustomSlotRemove = onCustomSlotRemove
             )
         }
     }
@@ -1063,21 +1209,23 @@ private fun CoolwalkSplitDashboard(
     }
 
     if (isHorizontalSplit) {
+        val showMapLeft = isMapPrimary || isPlanC
         val primaryPane: @Composable (Modifier) -> Unit = { mod ->
-            if (isMapPrimary) mapCardComposable(true, mod) else mediaCardComposable(true, mod)
+            if (showMapLeft) mapCardComposable(true, mod) else mediaCardComposable(true, false, mod)
         }
         val secondaryColumn: @Composable (Modifier) -> Unit = { mod ->
             Column(
                 modifier = mod,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                if (isMapPrimary) {
-                    mediaCardComposable(false, Modifier.weight(1f).fillMaxWidth())
+                if (showMapLeft) {
+                    // Integrated Media Controller + optional 6 shortcuts as one unified right-side card!
+                    mediaCardComposable(false, supportsThirdSubCard, Modifier.weight(1f).fillMaxWidth())
                 } else {
                     mapCardComposable(false, Modifier.weight(1f).fillMaxWidth())
-                }
-                if (supportsThirdSubCard) {
-                    customSixCard()
+                    if (supportsThirdSubCard && showSixShortcutsInMediaPanel) {
+                        customSixCard()
+                    }
                 }
             }
         }
@@ -1089,31 +1237,27 @@ private fun CoolwalkSplitDashboard(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (rightHandDrive) {
-                // RHD: Secondary + 6-App Bar on Left, Primary (near driver) on Right!
                 secondaryColumn(Modifier.weight(secondaryWeight).fillMaxHeight())
                 primaryPane(Modifier.weight(primaryWeight).fillMaxHeight())
             } else {
-                // LHD (Default): Primary (near driver) on Left, Secondary + 6-App Bar on Right!
                 primaryPane(Modifier.weight(primaryWeight).fillMaxHeight())
                 secondaryColumn(Modifier.weight(secondaryWeight).fillMaxHeight())
             }
         }
     } else {
-        // Portrait / Square vertical split (with 6 Custom App Bar cleanly docked at bottom)
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            if (isMapPrimary) {
+            if (isMapPrimary || isPlanC) {
                 mapCardComposable(true, Modifier.weight(primaryWeight).fillMaxWidth())
-                mediaCardComposable(false, Modifier.weight(secondaryWeight).fillMaxWidth())
+                mediaCardComposable(false, showSixShortcutsInMediaPanel, Modifier.weight(secondaryWeight).fillMaxWidth())
             } else {
-                mediaCardComposable(true, Modifier.weight(primaryWeight).fillMaxWidth())
+                mediaCardComposable(true, showSixShortcutsInMediaPanel, Modifier.weight(primaryWeight).fillMaxWidth())
                 mapCardComposable(false, Modifier.weight(secondaryWeight).fillMaxWidth())
             }
-            customSixCard()
         }
     }
 }

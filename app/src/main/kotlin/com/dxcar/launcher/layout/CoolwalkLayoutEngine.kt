@@ -70,7 +70,7 @@ object CoolwalkLayoutEngine {
         metrics: ScreenMetrics,
         dockMode: DockPositionMode,
         rightHandDrive: Boolean,
-        customPrimaryRatio: Float = 0.63f
+        customPrimaryRatio: Float = 0.70f
     ): CoolwalkLayoutSpec {
         val widthDp = metrics.widthDp
         val heightDp = metrics.heightDp
@@ -120,7 +120,7 @@ object CoolwalkLayoutEngine {
             }
         }
 
-        val clampedPrimary = customPrimaryRatio.coerceIn(0.54f, 0.72f)
+        val clampedPrimary = customPrimaryRatio.coerceIn(0.54f, 0.76f)
         val isHorizontalSplit = metrics.isLandscape && widthDp >= 560f
         val supportsThirdSubCard = isHorizontalSplit
         val dockThickness = when {

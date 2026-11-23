@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dxcar.launcher.accessibility.DxCarAccessibilityService
 import com.dxcar.launcher.comms.CallActionCommand
+import com.dxcar.launcher.data.HomeExperimentMode
 import com.dxcar.launcher.data.ThemeMode
 import com.dxcar.launcher.system.PermissionHelper
 import com.dxcar.launcher.theme.DxCarTheme
@@ -76,6 +77,7 @@ class SplitSidePanelActivity : ComponentActivity() {
         isSplitMode.value = isInMultiWindowMode
 
         val autoSplit = intent.getBooleanExtra(EXTRA_AUTO_LAUNCH_MAPS, true)
+        val navPkg = intent.getStringExtra(EXTRA_NAV_PACKAGE)?.takeIf { it.isNotBlank() }
         val app = application as DxCarApp
 
         setContent {
@@ -87,11 +89,12 @@ class SplitSidePanelActivity : ComponentActivity() {
             val messages by app.notificationCenter.messages.collectAsState()
             val accConnected by DxCarAccessibilityService.isConnected.collectAsState()
             val inSplit by isSplitMode
+            val targetNavPkg = navPkg ?: config.planCNavPackage.ifBlank { "com.google.android.apps.maps" }
 
             var splitTriggered by remember { mutableStateOf(false) }
 
-            // Automatically enter Android Native Split-Screen & open real Google Maps adjacent!
-            LaunchedEffect(autoSplit, accConnected) {
+            // Automatically enter Android Native Split-Screen & open selected Navigation App adjacent!
+            LaunchedEffect(autoSplit, accConnected, targetNavPkg) {
                 if (autoSplit && !splitTriggered && !isInMultiWindowMode) {
                     splitTriggered = true
                     val acc = DxCarAccessibilityService.instance
@@ -99,7 +102,7 @@ class SplitSidePanelActivity : ComponentActivity() {
                         delay(260L)
                         acc.toggleSplitScreen()
                         delay(520L)
-                        app.installedAppsRepository.launchGoogleMapsAdjacent()
+                        app.installedAppsRepository.launchPackageAdjacent(targetNavPkg)
                     }
                 }
             }
@@ -144,7 +147,7 @@ class SplitSidePanelActivity : ComponentActivity() {
                                         if (!isInMultiWindowMode && acc != null) {
                                             acc.toggleSplitScreen()
                                         }
-                                        app.installedAppsRepository.launchGoogleMapsAdjacent()
+                                        app.installedAppsRepository.launchPackageAdjacent(targetNavPkg)
                                     }
                             ) {
                                 Row(
@@ -155,7 +158,7 @@ class SplitSidePanelActivity : ComponentActivity() {
                                     Icon(Icons.Rounded.Map, contentDescription = null, tint = colors.accent, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        text = if (inSplit) "重開 G 地圖" else "啟動分割 G 地圖",
+                                        text = if (inSplit) "重開導航 App" else "啟動分割導航",
                                         color = colors.primaryText,
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
@@ -224,6 +227,8 @@ class SplitSidePanelActivity : ComponentActivity() {
                             MediaControlCard(
                                 media = media,
                                 isPrimary = true,
+                                pureMusicMode = config.homeExperimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA,
+                                showSwapButton = false,
                                 onPlayPause = { app.mediaControlBridge.togglePlayPause() },
                                 onNext = { app.mediaControlBridge.skipNext() },
                                 onPrevious = { app.mediaControlBridge.skipPrevious() },
@@ -237,7 +242,7 @@ class SplitSidePanelActivity : ComponentActivity() {
                                     if (yt != null) app.installedAppsRepository.launchAppFullscreen(yt)
                                 },
                                 onSwapRequested = {
-                                    app.installedAppsRepository.launchGoogleMapsAdjacent()
+                                    app.installedAppsRepository.launchPackageAdjacent(targetNavPkg)
                                 }
                             )
                         }
@@ -342,11 +347,15 @@ class SplitSidePanelActivity : ComponentActivity() {
 
     companion object {
         private const val EXTRA_AUTO_LAUNCH_MAPS = "extra_auto_launch_maps"
+        private const val EXTRA_NAV_PACKAGE = "extra_nav_package"
 
-        fun launchWithRealGoogleMaps(context: Context) {
+        fun launchWithRealGoogleMaps(context: Context, navPackage: String? = null) {
             val intent = Intent(context, SplitSidePanelActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 putExtra(EXTRA_AUTO_LAUNCH_MAPS, true)
+                if (!navPackage.isNullOrBlank()) {
+                    putExtra(EXTRA_NAV_PACKAGE, navPackage)
+                }
             }
             runCatching { context.startActivity(intent) }
         }
