@@ -58,6 +58,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.cooldrive.launcher.data.SplitScreenShortcut
 import com.cooldrive.launcher.system.AppCategory
 import com.cooldrive.launcher.system.InstalledAppInfo
 import com.cooldrive.launcher.theme.LocalCoolDriveColors
@@ -68,6 +69,7 @@ object BuiltInShortcutTokens {
     const val DIALER = "__builtin_dialer__"
     const val DAY_NIGHT = "__builtin_daynight__"
     const val SPLIT_GMAPS = "__builtin_split_gmaps__"
+    const val SPLIT_PREFIX = "__split__"
 }
 
 private data class BuiltInShortcutMeta(
@@ -96,6 +98,7 @@ private fun builtInShortcuts(accent: Color): List<BuiltInShortcutMeta> = listOf(
 fun CustomSixAppBarCard(
     slots: List<String>,
     installedApps: List<InstalledAppInfo>,
+    splitShortcuts: List<SplitScreenShortcut> = emptyList(),
     onSlotEmptyClick: (Int) -> Unit,
     onSlotLaunch: (String) -> Unit,
     onSlotRemove: (Int, String) -> Unit,
@@ -104,6 +107,7 @@ fun CustomSixAppBarCard(
     val colors = LocalCoolDriveColors.current
     val cardShape = RoundedCornerShape(colors.cardCornerDp.dp)
     val byPkg = remember(installedApps) { installedApps.associateBy { it.packageName } }
+    val splitById = remember(splitShortcuts) { splitShortcuts.associateBy { it.id } }
     val builtins = remember(colors.accent) { builtInShortcuts(colors.accent).associateBy { it.token } }
     val normalizedSlots = remember(slots) { List(6) { idx -> slots.getOrElse(idx) { "" } } }
     val allEmpty = remember(normalizedSlots) { normalizedSlots.all { it.isBlank() } }
@@ -139,7 +143,10 @@ fun CustomSixAppBarCard(
                 normalizedSlots.forEachIndexed { index, token ->
                     val installed = byPkg[token]
                     val builtin = builtins[token]
-                    val isAssigned = installed != null || builtin != null
+                    val splitSc = if (token.startsWith(BuiltInShortcutTokens.SPLIT_PREFIX)) {
+                        splitById[token.removePrefix(BuiltInShortcutTokens.SPLIT_PREFIX)]
+                    } else null
+                    val isAssigned = installed != null || builtin != null || splitSc != null
 
                     Box(
                         contentAlignment = Alignment.Center,
@@ -211,6 +218,24 @@ fun CustomSixAppBarCard(
                                             .clip(RoundedCornerShape(10.dp))
                                     )
                                 }
+                            } else if (splitSc != null) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(50.dp)
+                                        .clip(RoundedCornerShape(15.dp))
+                                        .bouncyCombinedClickable(
+                                            pressedScale = 0.86f,
+                                            onClick = { onSlotLaunch(curToken) },
+                                            onLongClick = { onSlotRemove(index, splitSc.label.ifBlank { "分屏捷徑" }) }
+                                        )
+                                ) {
+                                    DualSplitShortcutIcon(
+                                        shortcut = splitSc,
+                                        appsByPackage = byPkg,
+                                        sizeDp = 46
+                                    )
+                                }
                             } else if (builtin != null) {
                                 Box(
                                     contentAlignment = Alignment.Center,
@@ -254,12 +279,14 @@ fun CustomSixAppBarCard(
 fun AppPickerDialog(
     slotIndex: Int,
     apps: List<InstalledAppInfo>,
+    splitShortcuts: List<SplitScreenShortcut> = emptyList(),
     onSelectToken: (String, String) -> Unit,
     onDismiss: () -> Unit
 ) {
     val colors = LocalCoolDriveColors.current
     var selectedCategory by remember { mutableStateOf(AppCategory.ALL) }
     val builtins = remember(colors.accent) { builtInShortcuts(colors.accent) }
+    val appsByPkg = remember(apps) { apps.associateBy { it.packageName } }
 
     val filtered = remember(apps, selectedCategory) {
         if (selectedCategory == AppCategory.ALL) apps
@@ -341,17 +368,54 @@ fun AppPickerDialog(
 
                 Spacer(Modifier.height(12.dp))
 
-                // Grid with REAL App Icons + Rubber-Band Spring Overscroll Bounce
+                // Grid with REAL Spacious App Icons + Rubber-Band Spring Overscroll Bounce
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 104.dp),
-                    contentPadding = PaddingValues(top = 4.dp, bottom = 18.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    columns = GridCells.Adaptive(minSize = 138.dp),
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp),
                     modifier = Modifier
                         .fillMaxSize()
                         .springBounceOverscroll(maxOverscrollPx = 170f)
                 ) {
                     if (selectedCategory == AppCategory.ALL) {
+                        items(splitShortcuts, key = { "pick_split_${it.id}" }) { sc ->
+                            Surface(
+                                color = colors.cardSurfaceElevated,
+                                shape = RoundedCornerShape(18.dp),
+                                modifier = Modifier
+                                    .border(1.dp, Color(0xFF22C55E).copy(alpha = 0.55f), RoundedCornerShape(18.dp))
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .bouncyClickable(pressedScale = 0.89f) {
+                                        onSelectToken(
+                                            "${BuiltInShortcutTokens.SPLIT_PREFIX}${sc.id}",
+                                            sc.label.ifBlank { "分屏捷徑" }
+                                        )
+                                    }
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    DualSplitShortcutIcon(
+                                        shortcut = sc,
+                                        appsByPackage = appsByPkg,
+                                        sizeDp = 62
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        text = sc.label.ifBlank { "分屏捷徑" },
+                                        color = colors.primaryText,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+
                         items(builtins, key = { it.token }) { item ->
                             Surface(
                                 color = colors.cardSurfaceElevated,
@@ -364,28 +428,28 @@ fun AppPickerDialog(
                                     }
                             ) {
                                 Column(
-                                    modifier = Modifier.padding(10.dp),
+                                    modifier = Modifier.padding(14.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Box(
                                         contentAlignment = Alignment.Center,
                                         modifier = Modifier
-                                            .size(48.dp)
-                                            .clip(RoundedCornerShape(14.dp))
+                                            .size(62.dp)
+                                            .clip(RoundedCornerShape(16.dp))
                                             .background(item.tint.copy(alpha = 0.18f))
                                     ) {
                                         Icon(
                                             imageVector = item.icon,
                                             contentDescription = item.label,
                                             tint = item.tint,
-                                            modifier = Modifier.size(26.dp)
+                                            modifier = Modifier.size(32.dp)
                                         )
                                     }
-                                    Spacer(Modifier.height(6.dp))
+                                    Spacer(Modifier.height(8.dp))
                                     Text(
                                         text = item.label,
                                         color = colors.primaryText,
-                                        fontSize = 12.sp,
+                                        fontSize = 13.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -409,21 +473,21 @@ fun AppPickerDialog(
                                 }
                         ) {
                             Column(
-                                modifier = Modifier.padding(10.dp),
+                                modifier = Modifier.padding(14.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Image(
                                     bitmap = bmp,
                                     contentDescription = app.label,
                                     modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(RoundedCornerShape(12.dp))
+                                        .size(62.dp)
+                                        .clip(RoundedCornerShape(16.dp))
                                 )
-                                Spacer(Modifier.height(6.dp))
+                                Spacer(Modifier.height(8.dp))
                                 Text(
                                     text = app.label,
                                     color = colors.primaryText,
-                                    fontSize = 12.sp,
+                                    fontSize = 13.sp,
                                     fontWeight = FontWeight.Medium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,

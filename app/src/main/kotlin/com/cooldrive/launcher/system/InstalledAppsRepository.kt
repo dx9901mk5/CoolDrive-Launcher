@@ -15,9 +15,13 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import androidx.core.content.ContextCompat
+import com.cooldrive.launcher.accessibility.CoolDriveAccessibilityService
+import com.cooldrive.launcher.data.SplitLaunchEngine
+import com.cooldrive.launcher.data.SplitScreenShortcut
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -314,6 +318,81 @@ class InstalledAppsRepository(private val context: Context) {
 
     fun launchDialer(): Boolean {
         val intent = Intent(Intent.ACTION_DIAL).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return runCatching {
+            context.startActivity(intent)
+            true
+        }.getOrDefault(false)
+    }
+
+    /**
+     * Launches a saved Dual-App Split-Screen Shortcut using either Native Split-Screen
+     * (via Accessibility + FLAG_ACTIVITY_LAUNCH_ADJACENT) or Freeform Exact-Ratio bounds (3:7..7:3).
+     */
+    fun launchSplitShortcut(
+        shortcut: SplitScreenShortcut,
+        screenWidthPx: Int,
+        screenHeightPx: Int
+    ) {
+        scope.launch(Dispatchers.Main) {
+            if (shortcut.engine == SplitLaunchEngine.FREEFORM_EXACT_RATIO) {
+                val splitX = (screenWidthPx * shortcut.ratio.leftWeight).toInt().coerceIn(200, (screenWidthPx - 200).coerceAtLeast(200))
+                val leftRect = Rect(0, 0, splitX, screenHeightPx)
+                val rightRect = Rect(splitX, 0, screenWidthPx, screenHeightPx)
+                launchPackageFreeform(shortcut.leftPackage, leftRect)
+                delay(280L)
+                launchPackageFreeform(shortcut.rightPackage, rightRect)
+            } else {
+                launchAppFullscreen(shortcut.leftPackage)
+                delay(380L)
+                val acc = CoolDriveAccessibilityService.instance
+                if (acc != null) {
+                    acc.toggleSplitScreen()
+                    delay(480L)
+                }
+                launchPackageAdjacent(shortcut.rightPackage)
+            }
+            recordRecent(shortcut.leftPackage)
+        }
+    }
+
+    fun launchPackageAdjacent(packageName: String): Boolean {
+        val intent = pm.getLaunchIntentForPackage(packageName)?.apply {
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT or
+                    Intent.FLAG_ACTIVITY_MULTIPLE_TASK
+            )
+        } ?: return false
+        return runCatching {
+            context.startActivity(intent)
+            recordRecent(packageName)
+            true
+        }.getOrDefault(false)
+    }
+
+    fun launchPackageFreeform(packageName: String, bounds: Rect): Boolean {
+        val intent = pm.getLaunchIntentForPackage(packageName)?.apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+        } ?: return false
+        return runCatching {
+            val options = ActivityOptions.makeBasic()
+            options.launchBounds = bounds
+            runCatching {
+                val method = ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
+                method.invoke(options, 5)
+            }
+            context.startActivity(intent, options.toBundle())
+            recordRecent(packageName)
+            true
+        }.getOrElse {
+            launchAppFullscreen(packageName)
+        }
+    }
+
+    fun requestUninstallApp(packageName: String): Boolean {
+        val intent = Intent(Intent.ACTION_DELETE, Uri.parse("package:$packageName")).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         return runCatching {

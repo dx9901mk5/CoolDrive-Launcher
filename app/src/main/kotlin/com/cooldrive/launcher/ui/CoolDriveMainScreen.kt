@@ -25,12 +25,20 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.Map
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,6 +52,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -55,7 +65,9 @@ import com.cooldrive.launcher.comms.BluetoothCompanionService
 import com.cooldrive.launcher.comms.CallActionCommand
 import com.cooldrive.launcher.comms.CarMessageItem
 import com.cooldrive.launcher.data.DeviceRole
+import com.cooldrive.launcher.data.HomeMapDisplayMode
 import com.cooldrive.launcher.data.MapEngineStyle
+import com.cooldrive.launcher.data.SplitScreenShortcut
 import com.cooldrive.launcher.data.ThemeMode
 import com.cooldrive.launcher.gestures.MultiFingerEvent
 import com.cooldrive.launcher.gestures.coolDriveMultiFingerGestures
@@ -113,7 +125,9 @@ fun CoolDriveRootScreen(
     var isDockTemporarilyHidden by remember { mutableStateOf(false) }
     var showQuickControlCenter by remember { mutableStateOf(false) }
     var showNotificationCenter by remember { mutableStateOf(false) }
+    var showSplitCreator by remember { mutableStateOf(false) }
     var pickingShortcutSlotIndex by remember { mutableStateOf<Int?>(null) }
+    var latestMapCardRect by remember { mutableStateOf<Rect?>(null) }
     var gestureHudText by remember { mutableStateOf<String?>(null) }
     var permissionHealth by remember { mutableStateOf(PermissionHelper.check(context)) }
     var pairedBtDevices by remember { mutableStateOf(app.systemStatusMonitor.getPairedBluetoothDevices()) }
@@ -232,37 +246,50 @@ fun CoolDriveRootScreen(
     }
 
     fun launchRealMapsFreeformBox() {
-        val dockPx = (layoutSpec.dockThicknessDp * dm.density).toInt()
-        val padPx = (12 * dm.density).toInt()
-        val availW = (dm.widthPixels - if (layoutSpec.dockPlacement != ResolvedDockPlacement.BOTTOM) dockPx else 0).coerceAtLeast(300)
-        val availH = (dm.heightPixels - if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0).coerceAtLeast(240)
-        val primaryW = (availW * layoutSpec.primaryWeight).toInt()
-        val leftX = when {
-            config.rightHandDrive -> availW - primaryW + padPx
-            layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT -> dockPx + padPx
-            else -> padPx
+        val measured = latestMapCardRect
+        val bounds = if (measured != null && measured.width() >= 200 && measured.height() >= 180) {
+            measured
+        } else {
+            val dockPx = if (config.showHomeDock) (layoutSpec.dockThicknessDp * dm.density).toInt() else 0
+            val padPx = (12 * dm.density).toInt()
+            val availW = (dm.widthPixels - if (layoutSpec.dockPlacement != ResolvedDockPlacement.BOTTOM) dockPx else 0).coerceAtLeast(300)
+            val availH = (dm.heightPixels - if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0).coerceAtLeast(240)
+            val primaryW = (availW * layoutSpec.primaryWeight).toInt()
+            val leftX = when {
+                config.rightHandDrive -> availW - primaryW + padPx
+                layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT -> dockPx + padPx
+                else -> padPx
+            }
+            Rect(leftX, padPx, (leftX + primaryW - padPx * 2).coerceAtLeast(leftX + 200), availH - padPx)
         }
-        val bounds = Rect(leftX, padPx, (leftX + primaryW - padPx * 2).coerceAtLeast(leftX + 200), availH - padPx)
         app.installedAppsRepository.launchGoogleMapsFreeform(bounds)
-        gestureHudText = "🗺 已嘗試以 Freeform 視窗開啟真實 Google 地圖"
+        gestureHudText = "🗺 已以 63% 比例貼合開啟真實 Google 地圖"
     }
 
     fun handleCustomShortcutLaunch(token: String) {
-        when (token) {
-            BuiltInShortcutTokens.SETTINGS -> {
+        when {
+            token == BuiltInShortcutTokens.SETTINGS -> {
                 permissionHealth = PermissionHelper.check(context)
                 app.installedAppsRepository.refreshHomeLaunchers()
                 destination = LauncherDestination.SETTINGS
             }
-            BuiltInShortcutTokens.YOUTUBE -> launchYoutubeBest()
-            BuiltInShortcutTokens.DIALER -> app.installedAppsRepository.launchDialer()
-            BuiltInShortcutTokens.DAY_NIGHT -> {
+            token == BuiltInShortcutTokens.YOUTUBE -> launchYoutubeBest()
+            token == BuiltInShortcutTokens.DIALER -> app.installedAppsRepository.launchDialer()
+            token == BuiltInShortcutTokens.DAY_NIGHT -> {
                 val nextMode = if (isNight) ThemeMode.FORCE_DAY else ThemeMode.FORCE_NIGHT
                 app.preferences.update { it.copy(themeMode = nextMode) }
                 gestureHudText = if (nextMode == ThemeMode.FORCE_NIGHT) "🌙 已切換為夜間模式" else "☀️ 已切換為白天模式"
             }
-            BuiltInShortcutTokens.SPLIT_GMAPS -> {
+            token == BuiltInShortcutTokens.SPLIT_GMAPS -> {
                 SplitSidePanelActivity.launchWithRealGoogleMaps(context)
+            }
+            token.startsWith(BuiltInShortcutTokens.SPLIT_PREFIX) -> {
+                val id = token.removePrefix(BuiltInShortcutTokens.SPLIT_PREFIX)
+                val sc = config.splitShortcuts.firstOrNull { it.id == id }
+                if (sc != null) {
+                    app.installedAppsRepository.launchSplitShortcut(sc, dm.widthPixels, dm.heightPixels)
+                    gestureHudText = "⊞ 正在開啟分屏：${sc.label} (${sc.ratio.label})"
+                }
             }
             else -> {
                 if (!app.installedAppsRepository.launchAppFullscreen(token)) {
@@ -459,10 +486,17 @@ fun CoolDriveRootScreen(
                                 media = media,
                                 isNight = isNight,
                                 mapEngineStyle = config.mapEngineStyle,
+                                homeMapDisplayMode = config.homeMapDisplayMode,
                                 homeAddress = config.homeAddress,
                                 workAddress = config.workAddress,
                                 customShortcutSlots = config.customShortcutSlots,
+                                splitShortcuts = config.splitShortcuts,
                                 installedApps = installedApps,
+                                onMapCardBoundsMeasured = { rect -> latestMapCardRect = rect },
+                                onPinRealMapsHere = ::launchRealMapsFreeformBox,
+                                onSwitchToBuiltinMap = {
+                                    app.preferences.update { it.copy(homeMapDisplayMode = HomeMapDisplayMode.BUILTIN_LIVE_MAP) }
+                                },
                                 onToggleMapStyle = {
                                     val next = if (config.mapEngineStyle == MapEngineStyle.GOOGLE_TRAFFIC_TILES) {
                                         MapEngineStyle.OPENFREEMAP_VECTOR_3D
@@ -553,14 +587,22 @@ fun CoolDriveRootScreen(
                         LauncherDestination.APP_DRAWER -> {
                             AppDrawerScreen(
                                 apps = installedApps,
-                                pinnedPackages = config.pinnedDockPackages,
+                                splitShortcuts = config.splitShortcuts,
                                 hasPendingUpdate = updateState.hasUpdate || updateState.downloadedReady,
                                 onLaunchApp = { pkg -> app.installedAppsRepository.launchAppFullscreen(pkg) },
-                                onLaunchYoutube = ::launchYoutubeBest,
-                                onTogglePin = { pkg ->
-                                    app.preferences.togglePinnedPackage(pkg)
-                                    gestureHudText = "📌 已更新備選 Dock 清單"
+                                onLaunchSplitShortcut = { sc ->
+                                    app.installedAppsRepository.launchSplitShortcut(sc, dm.widthPixels, dm.heightPixels)
+                                    gestureHudText = "⊞ 正在開啟分屏：${sc.label} (${sc.ratio.label})"
                                 },
+                                onRemoveSplitShortcut = { sc ->
+                                    app.preferences.removeSplitShortcut(sc.id)
+                                    gestureHudText = "🗑 已移除分屏捷徑：${sc.label}"
+                                },
+                                onUninstallApp = { targetApp ->
+                                    app.installedAppsRepository.requestUninstallApp(targetApp.packageName)
+                                },
+                                onOpenSplitCreator = { showSplitCreator = true },
+                                onLaunchYoutube = ::launchYoutubeBest,
                                 onOpenSettings = {
                                     permissionHealth = PermissionHelper.check(context)
                                     app.installedAppsRepository.refreshHomeLaunchers()
@@ -599,6 +641,7 @@ fun CoolDriveRootScreen(
                                     SplitSidePanelActivity.launchWithRealGoogleMaps(context)
                                 },
                                 onLaunchRealMapsFreeform = ::launchRealMapsFreeformBox,
+                                onOpenSplitShortcutCreator = { showSplitCreator = true },
                                 onResetSettingsToDefaults = {
                                     app.preferences.resetToDefaults()
                                     gestureHudText = "↺ 已恢復所有啟動器設定為預設值"
@@ -637,24 +680,51 @@ fun CoolDriveRootScreen(
                 }
             }
 
-            // MAIN DOCK + STAGE LAYOUT (Auto Left / Right / Bottom per Google Coolwalk DPI!)
+            val showHomeDockNow = config.showHomeDock && !isDockTemporarilyHidden
+            // MAIN DOCK + STAGE LAYOUT (Auto Left / Right / Bottom per Google Coolwalk DPI & User Toggle!)
             when (layoutSpec.dockPlacement) {
                 ResolvedDockPlacement.LEFT -> {
                     Row(modifier = Modifier.fillMaxSize()) {
-                        if (!isDockTemporarilyHidden) dockComposable()
+                        if (showHomeDockNow) dockComposable()
                         stageContent(Modifier.weight(1f).fillMaxHeight())
                     }
                 }
                 ResolvedDockPlacement.RIGHT -> {
                     Row(modifier = Modifier.fillMaxSize()) {
                         stageContent(Modifier.weight(1f).fillMaxHeight())
-                        if (!isDockTemporarilyHidden) dockComposable()
+                        if (showHomeDockNow) dockComposable()
                     }
                 }
                 ResolvedDockPlacement.BOTTOM -> {
                     Column(modifier = Modifier.fillMaxSize()) {
                         stageContent(Modifier.weight(1f).fillMaxWidth())
-                        if (!isDockTemporarilyHidden) dockComposable()
+                        if (showHomeDockNow) dockComposable()
+                    }
+                }
+            }
+
+            // When Home Dock is hidden by user (e.g. using stock AI Box left dock), keep a sleek corner 9-dot menu button
+            if (!showHomeDockNow && destination == LauncherDestination.DASHBOARD_SPLIT) {
+                Surface(
+                    color = colors.glassOverlay,
+                    shape = CircleShape,
+                    shadowElevation = 8.dp,
+                    modifier = Modifier
+                        .align(if (config.rightHandDrive) Alignment.BottomEnd else Alignment.BottomStart)
+                        .padding(18.dp)
+                        .size(50.dp)
+                        .border(1.2.dp, colors.accent.copy(alpha = 0.7f), CircleShape)
+                        .bouncyClickable(pressedScale = 0.88f) {
+                            destination = LauncherDestination.APP_DRAWER
+                        }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Rounded.Apps,
+                            contentDescription = "展開 App 選單",
+                            tint = colors.primaryText,
+                            modifier = Modifier.size(26.dp)
+                        )
                     }
                 }
             }
@@ -772,7 +842,7 @@ fun CoolDriveRootScreen(
                 )
             }
 
-            // APP PICKER DIALOG FOR THE 6 CUSTOM SHORTCUT SLOTS (Shows Real App Icons!)
+            // APP PICKER DIALOG FOR THE 6 CUSTOM SHORTCUT SLOTS (Shows Real App Icons + Split Shortcuts!)
             AnimatedVisibility(
                 visible = pickingShortcutSlotIndex != null,
                 enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.90f, animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMedium)),
@@ -782,12 +852,30 @@ fun CoolDriveRootScreen(
                 AppPickerDialog(
                     slotIndex = slotIdx,
                     apps = installedApps,
+                    splitShortcuts = config.splitShortcuts,
                     onSelectToken = { token, label ->
                         app.preferences.setCustomShortcutSlot(slotIdx, token)
                         pickingShortcutSlotIndex = null
                         gestureHudText = "✓ 已加入「$label」至第 ${slotIdx + 1} 格"
                     },
                     onDismiss = { pickingShortcutSlotIndex = null }
+                )
+            }
+
+            // SPLIT-SCREEN SHORTCUT CREATOR ("分屏設定" -> 3:7..7:3 -> Save as Dual-Icon Shortcut!)
+            AnimatedVisibility(
+                visible = showSplitCreator,
+                enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.92f, animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMedium)),
+                exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.94f, animationSpec = tween(140))
+            ) {
+                SplitShortcutCreatorDialog(
+                    apps = installedApps,
+                    onSaveShortcut = { shortcut ->
+                        app.preferences.addSplitShortcut(shortcut)
+                        showSplitCreator = false
+                        gestureHudText = "✓ 創建分屏捷徑成功：${shortcut.label} (${shortcut.ratio.label})"
+                    },
+                    onDismiss = { showSplitCreator = false }
                 )
             }
         }
@@ -813,10 +901,15 @@ private fun CoolwalkSplitDashboard(
     media: com.cooldrive.launcher.media.ActiveMediaState,
     isNight: Boolean,
     mapEngineStyle: MapEngineStyle,
+    homeMapDisplayMode: HomeMapDisplayMode,
     homeAddress: String,
     workAddress: String,
     customShortcutSlots: List<String>,
+    splitShortcuts: List<SplitScreenShortcut>,
     installedApps: List<InstalledAppInfo>,
+    onMapCardBoundsMeasured: (Rect) -> Unit,
+    onPinRealMapsHere: () -> Unit,
+    onSwitchToBuiltinMap: () -> Unit,
     onToggleMapStyle: () -> Unit,
     onSwapPanes: () -> Unit,
     onOpenFullscreenMap: () -> Unit,
@@ -847,22 +940,88 @@ private fun CoolwalkSplitDashboard(
             modifier = mod
                 .clip(cardShape)
                 .border(colors.cardBorderWidthDp.dp, colors.cardBorder, cardShape)
+                .onGloballyPositioned { coords ->
+                    val b = coords.boundsInWindow()
+                    onMapCardBoundsMeasured(
+                        Rect(b.left.toInt(), b.top.toInt(), b.right.toInt(), b.bottom.toInt())
+                    )
+                }
         ) {
-            LiveMapCard(
-                location = location,
-                activeNav = activeNav,
-                isNight = isNight,
-                mapEngineStyle = mapEngineStyle,
-                isPrimary = primary,
-                isFullscreen = false,
-                homeAddress = homeAddress,
-                workAddress = workAddress,
-                onToggleStyle = onToggleMapStyle,
-                onSwapRequested = onSwapPanes,
-                onToggleFullscreen = onOpenFullscreenMap,
-                onLaunchGoogleMapsApp = onLaunchRealGoogleMaps,
-                onLaunchRealMapsSplit = onLaunchRealMapsSplit
-            )
+            if (homeMapDisplayMode == HomeMapDisplayMode.REAL_GMAPS_FREEFORM_EMBED) {
+                Surface(
+                    color = colors.cardSurface,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Map,
+                            contentDescription = null,
+                            tint = colors.accent,
+                            modifier = Modifier.size(54.dp)
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            text = "真實 Google 地圖本體貼合模式（${(primaryRatio * 100).toInt()}% 比例）",
+                            color = colors.primaryText,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = "點擊下方按鈕即以 Freeform 精準貼合此卡片範圍啟動 Google 地圖本體",
+                            color = colors.secondaryText,
+                            fontSize = 12.sp
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(
+                                onClick = onPinRealMapsHere,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = colors.accent,
+                                    contentColor = colors.onAccent
+                                ),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Text("貼合開啟真實 Google 地圖")
+                            }
+                            OutlinedButton(
+                                onClick = onLaunchRealMapsSplit,
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Text("原生分割模式")
+                            }
+                            OutlinedButton(
+                                onClick = onSwitchToBuiltinMap,
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Text("切回內建即時地圖")
+                            }
+                        }
+                    }
+                }
+            } else {
+                LiveMapCard(
+                    location = location,
+                    activeNav = activeNav,
+                    isNight = isNight,
+                    mapEngineStyle = mapEngineStyle,
+                    isPrimary = primary,
+                    isFullscreen = false,
+                    homeAddress = homeAddress,
+                    workAddress = workAddress,
+                    onToggleStyle = onToggleMapStyle,
+                    onSwapRequested = onSwapPanes,
+                    onToggleFullscreen = onOpenFullscreenMap,
+                    onLaunchGoogleMapsApp = onLaunchRealGoogleMaps,
+                    onLaunchRealMapsSplit = onLaunchRealMapsSplit
+                )
+            }
         }
     }
 
@@ -890,6 +1049,7 @@ private fun CoolwalkSplitDashboard(
         CustomSixAppBarCard(
             slots = customShortcutSlots,
             installedApps = installedApps,
+            splitShortcuts = splitShortcuts,
             onSlotEmptyClick = onCustomSlotEmptyClick,
             onSlotLaunch = onCustomSlotLaunch,
             onSlotRemove = onCustomSlotRemove

@@ -14,3 +14,6 @@ app/signing/*.p12
 app/signing/*.jks
 app/signing/*.keystore
 dist/*.apk
+臨時影片/
+*.mp4
+*.mov

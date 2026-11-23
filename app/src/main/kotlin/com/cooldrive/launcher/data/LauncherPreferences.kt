@@ -39,6 +39,37 @@ enum class MapEngineStyle {
 }
 
 @Serializable
+enum class HomeMapDisplayMode(val labelZh: String, val descZh: String) {
+    BUILTIN_LIVE_MAP("內建免 Key 即時地圖（穩固）", "於 63% 主畫面渲染即時路況／3D 向量地圖，點 G地圖 展開原版"),
+    REAL_GMAPS_FREEFORM_EMBED("真實 Google 地圖本體貼合（63%）", "以 Freeform 視窗將真實 Google 地圖 App 貼合至首頁 63% 比例位置")
+}
+
+@Serializable
+enum class SplitRatioPreset(val label: String, val leftWeight: Float) {
+    R_3_7("3:7", 0.30f),
+    R_4_6("4:6", 0.40f),
+    R_5_5("5:5", 0.50f),
+    R_6_4("6:4", 0.60f),
+    R_7_3("7:3", 0.70f)
+}
+
+@Serializable
+enum class SplitLaunchEngine(val labelZh: String) {
+    NATIVE_SPLIT_SCREEN("系統原生分割螢幕"),
+    FREEFORM_EXACT_RATIO("Freeform 精準比例雙視窗")
+}
+
+@Serializable
+data class SplitScreenShortcut(
+    val id: String,
+    val leftPackage: String,
+    val rightPackage: String,
+    val ratio: SplitRatioPreset = SplitRatioPreset.R_7_3,
+    val engine: SplitLaunchEngine = SplitLaunchEngine.NATIVE_SPLIT_SCREEN,
+    val label: String = ""
+)
+
+@Serializable
 enum class LauncherStylePreset(val labelZh: String, val descZh: String) {
     COOLWALK_CLASSIC("AA Coolwalk 經典", "原生圓角分割卡片與溫潤層次"),
     OLED_STEALTH("極致純黑 OLED", "深夜低眩光純黑底與細緻邊框"),
@@ -72,9 +103,11 @@ data class LauncherConfig(
     val stylePreset: LauncherStylePreset = LauncherStylePreset.COOLWALK_CLASSIC,
     val accentColorIndex: Int = 0,
     val mapEngineStyle: MapEngineStyle = MapEngineStyle.GOOGLE_TRAFFIC_TILES,
+    val homeMapDisplayMode: HomeMapDisplayMode = HomeMapDisplayMode.BUILTIN_LIVE_MAP,
     val primarySplitRatio: Float = 0.63f,
     val is24HourClock: Boolean = true,
     val autoCheckAndDownloadUpdate: Boolean = true,
+    val showHomeDock: Boolean = true,
     val persistentOverlayDockEnabled: Boolean = true,
     val globalCallMessageBannerEnabled: Boolean = true,
     val autoReadMessagesTts: Boolean = false,
@@ -88,6 +121,7 @@ data class LauncherConfig(
     val pinnedDockPackages: List<String> = DEFAULT_PINNED_PACKAGES,
     val recentDockPackages: List<String> = DEFAULT_PINNED_PACKAGES,
     val customShortcutSlots: List<String> = List(6) { "" },
+    val splitShortcuts: List<SplitScreenShortcut> = emptyList(),
     val homeAddress: String = "",
     val workAddress: String = "",
     val companionTargetDeviceAddress: String = "",
@@ -193,6 +227,24 @@ class LauncherPreferences(context: Context) {
 
     fun clearCustomShortcutSlot(slotIndex: Int) {
         setCustomShortcutSlot(slotIndex, "")
+    }
+
+    fun addSplitShortcut(shortcut: SplitScreenShortcut) {
+        update { current ->
+            val next = current.splitShortcuts.filterNot { it.id == shortcut.id } + shortcut
+            current.copy(splitShortcuts = next)
+        }
+    }
+
+    fun removeSplitShortcut(shortcutId: String) {
+        update { current ->
+            val token = "__split__$shortcutId"
+            val cleanedSlots = current.customShortcutSlots.map { if (it == token) "" else it }
+            current.copy(
+                splitShortcuts = current.splitShortcuts.filterNot { it.id == shortcutId },
+                customShortcutSlots = cleanedSlots
+            )
+        }
     }
 
     companion object {

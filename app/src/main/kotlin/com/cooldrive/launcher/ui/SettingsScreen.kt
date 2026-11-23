@@ -75,6 +75,7 @@ import androidx.compose.ui.unit.sp
 import com.cooldrive.launcher.BuildConfig
 import com.cooldrive.launcher.comms.BridgeStatusState
 import com.cooldrive.launcher.data.DockPositionMode
+import com.cooldrive.launcher.data.HomeMapDisplayMode
 import com.cooldrive.launcher.data.LauncherConfig
 import com.cooldrive.launcher.data.LauncherStylePreset
 import com.cooldrive.launcher.data.MapEngineStyle
@@ -118,6 +119,7 @@ fun SettingsScreen(
     onRefreshHomeLaunchers: () -> Unit,
     onLaunchRealMapsSplitScreen: () -> Unit,
     onLaunchRealMapsFreeform: () -> Unit,
+    onOpenSplitShortcutCreator: () -> Unit,
     onResetSettingsToDefaults: () -> Unit,
     onRefreshPermissions: () -> Unit,
     onRequestRuntimePermissions: () -> Unit,
@@ -537,7 +539,26 @@ fun SettingsScreen(
                 }
 
                 Spacer(Modifier.height(6.dp))
-                Text("首頁即時地圖引擎（免 API Key）與真實 Google 地圖分割", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text("首頁地圖模式（保留原 63% / 37% 分頁比例）", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    HomeMapDisplayMode.entries.forEach { mode ->
+                        SelectablePill(
+                            text = mode.labelZh,
+                            selected = config.homeMapDisplayMode == mode,
+                            onClick = { onUpdateConfig { it.copy(homeMapDisplayMode = mode) } }
+                        )
+                    }
+                }
+                Text(
+                    text = config.homeMapDisplayMode.descZh,
+                    color = colors.secondaryText,
+                    fontSize = 11.sp
+                )
+
+                Text("內建免 Key 地圖引擎風格", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -564,13 +585,13 @@ fun SettingsScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = "想直接把 AI Box 原本的「真實 Google 地圖 App」放在分割畫面？",
+                            text = "真實 Google 地圖本體分割與多比例分屏捷徑",
                             color = colors.primaryText,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "因 Android 沙盒不允許一般啟動器把第三方 App 直接畫在方框內，可點下方按鈕以系統原生分割螢幕或 Freeform 視窗將真實 Google 地圖與 CoolDrive 媒體控制並排顯示！",
+                            text = "原廠 AI Box 系統內建啟動器因具系統簽章可直接呼叫私有 ActivityView；一般安裝版啟動器可透過下方「真實 G 地圖貼合（63%）」或「原生分割／分屏設定」直接使用真正的 Google 地圖本體！",
                             color = colors.secondaryText,
                             fontSize = 11.sp
                         )
@@ -594,7 +615,13 @@ fun SettingsScreen(
                                 onClick = onLaunchRealMapsFreeform,
                                 shape = RoundedCornerShape(14.dp)
                             ) {
-                                Text("Freeform 視窗嵌入左側 63%")
+                                Text("立即以 Freeform 貼合 63%")
+                            }
+                            OutlinedButton(
+                                onClick = onOpenSplitShortcutCreator,
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Text("開啟分屏設定 (3:7~7:3)")
                             }
                         }
                     }
@@ -686,10 +713,17 @@ fun SettingsScreen(
                 }
 
                 SettingsToggleRow(
-                    title = "全螢幕 App（含 YouTube）常駐懸浮 Dock",
-                    subtitle = "點開 YouTube 或 Google 地圖全螢幕時，自動保持 AA Dock 常駐於側邊／底部",
+                    title = "常駐懸浮 Dock（在其他全螢幕 App 上方常駐）",
+                    subtitle = "開啟後在 YouTube／Google 地圖全螢幕時保留常駐列；若車機盒本身已有左側常駐列，可關閉避免重疊兩條",
                     checked = config.persistentOverlayDockEnabled,
                     onCheckedChange = { checked -> onUpdateConfig { it.copy(persistentOverlayDockEnabled = checked) } }
+                )
+
+                SettingsToggleRow(
+                    title = "首頁顯示 CoolDrive 側邊／底部 Dock",
+                    subtitle = "關閉後首頁將隱藏本啟動器 Dock（僅留左下角九宮格按鈕），適合已使用車機原廠左側列時搭配",
+                    checked = config.showHomeDock,
+                    onCheckedChange = { checked -> onUpdateConfig { it.copy(showHomeDock = checked) } }
                 )
 
                 SettingsToggleRow(
