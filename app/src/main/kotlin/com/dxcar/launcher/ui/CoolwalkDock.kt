@@ -41,6 +41,7 @@ import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PushPin
+import androidx.compose.material.icons.rounded.ViewInAr
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.Icon
@@ -121,6 +122,8 @@ fun CoolwalkDock(
     onNotificationsClick: () -> Unit,
     onBackClick: () -> Unit = {},
     onRecentsClick: () -> Unit = {},
+    onTwoFingerTilt3D: (() -> Unit)? = null,
+    onTwoFingerTilt2D: (() -> Unit)? = null,
     onCollapseOverlay: (() -> Unit)? = null,
     onTogglePinOverlay: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -145,6 +148,15 @@ fun CoolwalkDock(
                     onBackClick = onBackClick,
                     onRecentsClick = onRecentsClick
                 )
+                if (isOverlayMode && onTwoFingerTilt3D != null) {
+                    SmallDockUtilityIcon(
+                        icon = Icons.Rounded.ViewInAr,
+                        contentDescription = "模擬雙指上滑切 3D 建築（長按回 2D）",
+                        tint = colors.accent,
+                        onClick = onTwoFingerTilt3D,
+                        onLongClick = onTwoFingerTilt2D
+                    )
+                }
                 if (isOverlayMode && onTogglePinOverlay != null) {
                     SmallDockUtilityIcon(
                         icon = Icons.Rounded.PushPin,
@@ -313,8 +325,17 @@ fun CoolwalkDock(
                             onLongClick = onBluetoothLongClick
                         )
                     }
-                    if (isOverlayMode && (onCollapseOverlay != null || onTogglePinOverlay != null)) {
+                    if (isOverlayMode && (onCollapseOverlay != null || onTogglePinOverlay != null || onTwoFingerTilt3D != null)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            if (onTwoFingerTilt3D != null) {
+                                SmallDockUtilityIcon(
+                                    icon = Icons.Rounded.ViewInAr,
+                                    contentDescription = "模擬雙指上滑切 3D 建築（長按回 2D）",
+                                    tint = colors.accent,
+                                    onClick = onTwoFingerTilt3D,
+                                    onLongClick = onTwoFingerTilt2D
+                                )
+                            }
                             if (onTogglePinOverlay != null) {
                                 SmallDockUtilityIcon(
                                     icon = Icons.Rounded.PushPin,
@@ -766,14 +787,25 @@ private fun SmallDockUtilityIcon(
     icon: ImageVector,
     contentDescription: String,
     tint: Color,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null
 ) {
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .size(28.dp)
             .clip(CircleShape)
-            .bouncyClickable(pressedScale = 0.86f, onClick = onClick)
+            .then(
+                if (onLongClick != null) {
+                    Modifier.bouncyCombinedClickable(
+                        pressedScale = 0.86f,
+                        onClick = onClick,
+                        onLongClick = onLongClick
+                    )
+                } else {
+                    Modifier.bouncyClickable(pressedScale = 0.86f, onClick = onClick)
+                }
+            )
     ) {
         Icon(
             imageVector = icon,

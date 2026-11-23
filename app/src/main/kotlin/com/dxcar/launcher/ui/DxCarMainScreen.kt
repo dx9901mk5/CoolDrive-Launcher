@@ -406,6 +406,17 @@ fun DxCarRootScreen(
                 pairedDevices = pairedBtDevices,
                 bridgeStatus = bridgeStatus,
                 permissionHealth = permissionHealth,
+                updateState = updateState,
+                onCheckUpdate = {
+                    scope.launch { app.updateManager.checkForUpdate(autoDownload = false) }
+                },
+                onDownloadOrInstallUpdate = {
+                    if (updateState.downloadedReady) {
+                        app.updateManager.installDownloadedApk()
+                    } else {
+                        scope.launch { app.updateManager.downloadAndInstall(autoLaunchInstaller = true) }
+                    }
+                },
                 onRefreshPairedDevices = {
                     pairedBtDevices = app.systemStatusMonitor.getPairedBluetoothDevices()
                     permissionHealth = PermissionHelper.check(context)
@@ -885,9 +896,9 @@ fun DxCarRootScreen(
                 }
             }
 
-            // TOP-CENTER AUTO-UPDATE READY BANNER (when new release was auto-downloaded!)
+            // AUTO-UPDATE DOWNLOADING / READY BANNER (Bottom Center)
             AnimatedVisibility(
-                visible = updateState.downloadedReady && destination == LauncherDestination.DASHBOARD_SPLIT,
+                visible = (updateState.downloading || updateState.downloadedReady) && destination == LauncherDestination.DASHBOARD_SPLIT,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier
@@ -899,21 +910,51 @@ fun DxCarRootScreen(
                     shape = RoundedCornerShape(22.dp),
                     shadowElevation = 10.dp,
                     modifier = Modifier.bouncyClickable(pressedScale = 0.93f) {
-                        app.updateManager.installDownloadedApk()
+                        if (updateState.downloadedReady) {
+                            app.updateManager.installDownloadedApk()
+                        }
                     }
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(Icons.Rounded.CloudDownload, contentDescription = null, tint = colors.onAccent)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = "新版本 v${updateState.latestVersion} 已自動下載完成 · 點擊立即安裝",
-                            color = colors.onAccent,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.CloudDownload, contentDescription = null, tint = colors.onAccent)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = if (updateState.downloadedReady) {
+                                    "新版本 v${updateState.latestVersion} 已自動下載完成 · 點擊立即安裝"
+                                } else {
+                                    updateState.statusMessage.ifBlank { "正在下載更新…" }
+                                },
+                                color = colors.onAccent,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        if (updateState.downloading) {
+                            if (updateState.totalBytes > 0L) {
+                                androidx.compose.material3.LinearProgressIndicator(
+                                    progress = { updateState.progress },
+                                    color = colors.onAccent,
+                                    trackColor = colors.onAccent.copy(alpha = 0.28f),
+                                    modifier = Modifier
+                                        .width(240.dp)
+                                        .height(5.dp)
+                                        .clip(RoundedCornerShape(3.dp))
+                                )
+                            } else {
+                                androidx.compose.material3.LinearProgressIndicator(
+                                    color = colors.onAccent,
+                                    trackColor = colors.onAccent.copy(alpha = 0.28f),
+                                    modifier = Modifier
+                                        .width(240.dp)
+                                        .height(5.dp)
+                                        .clip(RoundedCornerShape(3.dp))
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1274,54 +1315,95 @@ private fun CoolwalkSplitDashboard(
     }
 
     if (isHorizontalSplit) {
-        val showMapLeft = isMapPrimary || isPlanC
-        val primaryPane: @Composable (Modifier) -> Unit = { mod ->
-            if (showMapLeft) mapCardComposable(true, mod) else mediaCardComposable(true, false, mod)
-        }
-        val secondaryColumn: @Composable (Modifier) -> Unit = { mod ->
-            Column(
-                modifier = mod,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                if (showMapLeft) {
-                    // Integrated Media Controller + optional 6 shortcuts as one unified right-side card!
-                    mediaCardComposable(false, supportsThirdSubCard, Modifier.weight(1f).fillMaxWidth())
-                } else {
-                    mapCardComposable(false, Modifier.weight(1f).fillMaxWidth())
-                    if (supportsThirdSubCard && showSixShortcutsInMediaPanel) {
-                        customSixCard()
+        val showMapPrimary = isMapPrimary || isPlanC
+        AnimatedContent(
+            targetState = showMapPrimary,
+            transitionSpec = {
+                val dir = if (targetState) 1 else -1
+                val enter = androidx.compose.animation.slideInHorizontally(
+                    animationSpec = spring(dampingRatio = 0.84f, stiffness = Spring.StiffnessMediumLow),
+                    initialOffsetX = { fullWidth -> dir * (fullWidth / 5) }
+                ) + fadeIn(animationSpec = androidx.compose.animation.core.tween(240)) +
+                    androidx.compose.animation.scaleIn(
+                        initialScale = 0.96f,
+                        animationSpec = androidx.compose.animation.core.tween(240)
+                    )
+                val exit = androidx.compose.animation.slideOutHorizontally(
+                    animationSpec = androidx.compose.animation.core.tween(200),
+                    targetOffsetX = { fullWidth -> -dir * (fullWidth / 6) }
+                ) + fadeOut(animationSpec = androidx.compose.animation.core.tween(180)) +
+                    androidx.compose.animation.scaleOut(
+                        targetScale = 0.96f,
+                        animationSpec = androidx.compose.animation.core.tween(180)
+                    )
+                enter togetherWith exit
+            },
+            label = "coolwalkHorizontalSwap"
+        ) { mapOnPrimary ->
+            val primaryPane: @Composable (Modifier) -> Unit = { mod ->
+                if (mapOnPrimary) mapCardComposable(true, mod) else mediaCardComposable(true, false, mod)
+            }
+            val secondaryColumn: @Composable (Modifier) -> Unit = { mod ->
+                Column(
+                    modifier = mod,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (mapOnPrimary) {
+                        mediaCardComposable(false, supportsThirdSubCard, Modifier.weight(1f).fillMaxWidth())
+                    } else {
+                        mapCardComposable(false, Modifier.weight(1f).fillMaxWidth())
+                        if (supportsThirdSubCard && showSixShortcutsInMediaPanel) {
+                            customSixCard()
+                        }
                     }
                 }
             }
-        }
 
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            if (rightHandDrive) {
-                secondaryColumn(Modifier.weight(secondaryWeight).fillMaxHeight())
-                primaryPane(Modifier.weight(primaryWeight).fillMaxHeight())
-            } else {
-                primaryPane(Modifier.weight(primaryWeight).fillMaxHeight())
-                secondaryColumn(Modifier.weight(secondaryWeight).fillMaxHeight())
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (rightHandDrive) {
+                    secondaryColumn(Modifier.weight(secondaryWeight).fillMaxHeight())
+                    primaryPane(Modifier.weight(primaryWeight).fillMaxHeight())
+                } else {
+                    primaryPane(Modifier.weight(primaryWeight).fillMaxHeight())
+                    secondaryColumn(Modifier.weight(secondaryWeight).fillMaxHeight())
+                }
             }
         }
     } else {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            if (isMapPrimary || isPlanC) {
-                mapCardComposable(true, Modifier.weight(primaryWeight).fillMaxWidth())
-                mediaCardComposable(false, showSixShortcutsInMediaPanel, Modifier.weight(secondaryWeight).fillMaxWidth())
-            } else {
-                mediaCardComposable(true, showSixShortcutsInMediaPanel, Modifier.weight(primaryWeight).fillMaxWidth())
-                mapCardComposable(false, Modifier.weight(secondaryWeight).fillMaxWidth())
+        AnimatedContent(
+            targetState = isMapPrimary || isPlanC,
+            transitionSpec = {
+                val dir = if (targetState) 1 else -1
+                val enter = androidx.compose.animation.slideInVertically(
+                    animationSpec = spring(dampingRatio = 0.84f, stiffness = Spring.StiffnessMediumLow),
+                    initialOffsetY = { fullHeight -> dir * (fullHeight / 5) }
+                ) + fadeIn(animationSpec = androidx.compose.animation.core.tween(240))
+                val exit = androidx.compose.animation.slideOutVertically(
+                    animationSpec = androidx.compose.animation.core.tween(200),
+                    targetOffsetY = { fullHeight -> -dir * (fullHeight / 6) }
+                ) + fadeOut(animationSpec = androidx.compose.animation.core.tween(180))
+                enter togetherWith exit
+            },
+            label = "coolwalkVerticalSwap"
+        ) { mapOnTop ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (mapOnTop) {
+                    mapCardComposable(true, Modifier.weight(primaryWeight).fillMaxWidth())
+                    mediaCardComposable(false, showSixShortcutsInMediaPanel, Modifier.weight(secondaryWeight).fillMaxWidth())
+                } else {
+                    mediaCardComposable(true, showSixShortcutsInMediaPanel, Modifier.weight(primaryWeight).fillMaxWidth())
+                    mapCardComposable(false, Modifier.weight(secondaryWeight).fillMaxWidth())
+                }
             }
         }
     }

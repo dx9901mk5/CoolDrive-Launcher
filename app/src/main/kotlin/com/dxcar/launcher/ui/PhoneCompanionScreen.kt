@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -57,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.dxcar.launcher.BuildConfig
 import com.dxcar.launcher.comms.BluetoothCompanionService
 import com.dxcar.launcher.comms.BoxNotificationListenerService
 import com.dxcar.launcher.comms.BridgeConnectionStatus
@@ -69,6 +71,7 @@ import com.dxcar.launcher.system.PairedBtDevice
 import com.dxcar.launcher.system.PermissionHealth
 import com.dxcar.launcher.system.PermissionHelper
 import com.dxcar.launcher.theme.LocalDxCarColors
+import com.dxcar.launcher.update.UpdateUiState
 import java.util.UUID
 
 /**
@@ -84,6 +87,9 @@ fun PhoneCompanionScreen(
     pairedDevices: List<PairedBtDevice>,
     bridgeStatus: BridgeStatusState,
     permissionHealth: PermissionHealth,
+    updateState: UpdateUiState,
+    onCheckUpdate: () -> Unit,
+    onDownloadOrInstallUpdate: () -> Unit,
     onRefreshPairedDevices: () -> Unit,
     onSelectTargetDevice: (PairedBtDevice) -> Unit,
     onToggleAllowedPackage: (String) -> Unit,
@@ -556,6 +562,96 @@ fun PhoneCompanionScreen(
                     Text("即時同步與診斷紀錄", color = colors.primaryText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     bridgeStatus.recentLogs.take(10).forEach { line ->
                         Text(line, color = colors.secondaryText, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        // APP UPDATE & GITHUB VERSION CHECK CARD
+        Surface(
+            color = colors.cardSurface,
+            shape = RoundedCornerShape(22.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, colors.cardBorder, RoundedCornerShape(22.dp))
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                            text = "App 版本與 GitHub 更新（目前 v${BuildConfig.VERSION_NAME}）",
+                            color = colors.primaryText,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = updateState.statusMessage.ifBlank { "點擊檢查 GitHub Releases 最新版本" },
+                            color = if (updateState.hasUpdate || updateState.downloadedReady) colors.accent else colors.secondaryText,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = onCheckUpdate,
+                        enabled = !updateState.checking && !updateState.downloading,
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text(if (updateState.checking) "檢查中…" else "檢查更新")
+                    }
+
+                    if (updateState.hasUpdate || updateState.downloadedReady || updateState.downloading) {
+                        Button(
+                            onClick = onDownloadOrInstallUpdate,
+                            enabled = !updateState.downloading,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = colors.accent,
+                                contentColor = colors.onAccent
+                            ),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Text(
+                                when {
+                                    updateState.downloadedReady -> "立即安裝 v${updateState.latestVersion}"
+                                    updateState.downloading -> {
+                                        if (updateState.totalBytes > 0L) "下載中 ${(updateState.progress * 100).toInt()}%"
+                                        else "下載中…"
+                                    }
+                                    else -> "下載更新 v${updateState.latestVersion}"
+                                }
+                            )
+                        }
+                    }
+                }
+
+                if (updateState.downloading) {
+                    if (updateState.totalBytes > 0L) {
+                        LinearProgressIndicator(
+                            progress = { updateState.progress },
+                            color = colors.accent,
+                            trackColor = colors.cardBorder,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                        )
+                    } else {
+                        LinearProgressIndicator(
+                            color = colors.accent,
+                            trackColor = colors.cardBorder,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                        )
                     }
                 }
             }

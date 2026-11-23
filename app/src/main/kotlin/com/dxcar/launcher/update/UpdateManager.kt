@@ -35,6 +35,8 @@ data class UpdateUiState(
     val checking: Boolean = false,
     val downloading: Boolean = false,
     val progress: Float = 0f,
+    val downloadedBytes: Long = 0L,
+    val totalBytes: Long = -1L,
     val hasUpdate: Boolean = false,
     val downloadedReady: Boolean = false,
     val downloadedFilePath: String = "",
@@ -109,7 +111,9 @@ class UpdateManager(private val context: Context) {
             downloading = true,
             downloadedReady = false,
             progress = 0f,
-            statusMessage = "正在自動下載 v${_state.value.latestVersion} 更新檔…"
+            downloadedBytes = 0L,
+            totalBytes = -1L,
+            statusMessage = "正在連線下載 v${_state.value.latestVersion} 更新檔…"
         )
         runCatching {
             val dir = File(context.cacheDir, "updates").apply { mkdirs() }
@@ -118,7 +122,8 @@ class UpdateManager(private val context: Context) {
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) error("HTTP ${resp.code}")
                 val body = resp.body ?: error("Empty APK body")
-                val total = body.contentLength().coerceAtLeast(1L)
+                val total = body.contentLength()
+                var lastUiPush = 0L
                 body.byteStream().use { input ->
                     outFile.outputStream().use { output ->
                         val buf = ByteArray(16 * 1024)
@@ -128,9 +133,24 @@ class UpdateManager(private val context: Context) {
                             if (read <= 0) break
                             output.write(buf, 0, read)
                             copied += read
-                            _state.value = _state.value.copy(
-                                progress = (copied.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-                            )
+                            val now = System.currentTimeMillis()
+                            if (now - lastUiPush >= 120L || (total > 0 && copied >= total)) {
+                                lastUiPush = now
+                                val pct = if (total > 0) (copied.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0f
+                                val mbDone = String.format("%.1f", copied / (1024f * 1024f))
+                                val msg = if (total > 0) {
+                                    val mbTotal = String.format("%.1f", total / (1024f * 1024f))
+                                    "下載中 ${(pct * 100).toInt()}%（$mbDone / $mbTotal MB）"
+                                } else {
+                                    "下載中 $mbDone MB…"
+                                }
+                                _state.value = _state.value.copy(
+                                    progress = pct,
+                                    downloadedBytes = copied,
+                                    totalBytes = total,
+                                    statusMessage = msg
+                                )
+                            }
                         }
                     }
                 }

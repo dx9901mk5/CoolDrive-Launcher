@@ -448,6 +448,12 @@ class PersistentDockOverlayService :
                                     interactionTick.value++
                                     DxCarAccessibilityService.instance?.openRecents()
                                 },
+                                onTwoFingerTilt3D = {
+                                    triggerTwoFingerTiltGesture(tiltUpTo3D = true)
+                                },
+                                onTwoFingerTilt2D = {
+                                    triggerTwoFingerTiltGesture(tiltUpTo3D = false)
+                                },
                                 onCollapseOverlay = {
                                     isPinnedOpen.value = false
                                     isCollapsed.value = true
@@ -867,6 +873,31 @@ class PersistentDockOverlayService :
                 }
             }
         }
+    }
+
+    private fun triggerTwoFingerTiltGesture(tiltUpTo3D: Boolean) {
+        val acc = DxCarAccessibilityService.instance
+        if (acc == null) {
+            android.widget.Toast.makeText(
+                this,
+                "請先至設定 → 權限健檢開啟「DX-Car Launcher 無障礙服務」，即可模擬雙指 3D 視角",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+        isPinnedOpen.value = false
+        isCollapsed.value = true
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            acc.dispatchTwoFingerTilt(tiltUpTo3D) { ok ->
+                if (!ok) {
+                    android.widget.Toast.makeText(
+                        this,
+                        "系統未允許無障礙觸控注入，請確認車機無障礙設定",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }, 180L)
     }
 
     private fun bringDxCarToFront(extraAction: String?) {

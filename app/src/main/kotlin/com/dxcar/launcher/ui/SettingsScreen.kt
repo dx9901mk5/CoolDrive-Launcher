@@ -988,6 +988,42 @@ fun SettingsScreen(
                     checked = config.is24HourClock,
                     onCheckedChange = { checked -> onUpdateConfig { it.copy(is24HourClock = checked) } }
                 )
+
+                // 單指車機模擬雙指 3D 俯仰手勢使用教學
+                Surface(
+                    color = colors.accent.copy(alpha = 0.09f),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, colors.accent.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Text(
+                            text = "🧊 單指車機如何切換 Google 地圖 3D 建築（模擬雙指俯仰教學）",
+                            color = colors.primaryText,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "1. 先至下方「AI Box 權限健檢」開啟【DX-Car Launcher 無障礙服務】，並確認上方「常駐懸浮 Dock」已開啟。",
+                            color = colors.secondaryText,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = "2. 開啟原版 Google 地圖後，從螢幕邊緣滑出（或輕點）常駐懸浮 Dock，找到立體方塊【3D 視角】小圖示。",
+                            color = colors.secondaryText,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = "3. 點一下【3D 視角】即自動收起 Dock 並對地圖中央注入「雙指同時往上滑」，立即傾斜顯示 Google 地圖 3D 建築；長按【3D 視角】則注入「雙指同時往下滑」切回 2D 平面。",
+                            color = colors.secondaryText,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
             }
 
             // SECTION 3: 多指操作手勢
@@ -1240,15 +1276,27 @@ fun SettingsScreen(
                         }
 
                         if (updateState.downloading) {
-                            LinearProgressIndicator(
-                                progress = { updateState.progress },
-                                color = colors.accent,
-                                trackColor = colors.cardBorder,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(6.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                            )
+                            Spacer(Modifier.height(4.dp))
+                            if (updateState.totalBytes > 0L) {
+                                LinearProgressIndicator(
+                                    progress = { updateState.progress },
+                                    color = colors.accent,
+                                    trackColor = colors.cardBorder,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(8.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                )
+                            } else {
+                                LinearProgressIndicator(
+                                    color = colors.accent,
+                                    trackColor = colors.cardBorder,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(8.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                )
+                            }
                         }
                     }
                 }
