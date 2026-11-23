@@ -1,15 +1,22 @@
 package com.cooldrive.launcher.ui
 
 import android.content.res.Configuration
+import android.graphics.Rect
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,19 +25,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.BluetoothConnected
 import androidx.compose.material.icons.rounded.CloudDownload
-import androidx.compose.material.icons.rounded.DarkMode
-import androidx.compose.material.icons.rounded.LightMode
-import androidx.compose.material.icons.rounded.Notifications
-import androidx.compose.material.icons.rounded.Phone
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -48,10 +47,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cooldrive.launcher.CoolDriveApp
+import com.cooldrive.launcher.SplitSidePanelActivity
 import com.cooldrive.launcher.comms.BluetoothCompanionService
 import com.cooldrive.launcher.comms.CallActionCommand
 import com.cooldrive.launcher.comms.CarMessageItem
@@ -65,6 +64,7 @@ import com.cooldrive.launcher.layout.ResolvedDockPlacement
 import com.cooldrive.launcher.layout.ScreenMetrics
 import com.cooldrive.launcher.map.LiveMapCard
 import com.cooldrive.launcher.overlay.PersistentDockOverlayService
+import com.cooldrive.launcher.system.InstalledAppInfo
 import com.cooldrive.launcher.system.PermissionHelper
 import com.cooldrive.launcher.system.SystemStatusMonitor
 import com.cooldrive.launcher.theme.CoolDriveTheme
@@ -99,6 +99,7 @@ fun CoolDriveRootScreen(
     val location by app.locationTracker.location.collectAsState()
     val media by app.mediaControlBridge.mediaState.collectAsState()
     val installedApps by app.installedAppsRepository.apps.collectAsState()
+    val liveRecentPackages by app.installedAppsRepository.recentPackages.collectAsState()
     val homeLaunchers by app.installedAppsRepository.homeLaunchers.collectAsState()
     val activeCall by app.notificationCenter.activeCall.collectAsState()
     val popupMessage by app.notificationCenter.popupMessage.collectAsState()
@@ -112,6 +113,7 @@ fun CoolDriveRootScreen(
     var isDockTemporarilyHidden by remember { mutableStateOf(false) }
     var showQuickControlCenter by remember { mutableStateOf(false) }
     var showNotificationCenter by remember { mutableStateOf(false) }
+    var pickingShortcutSlotIndex by remember { mutableStateOf<Int?>(null) }
     var gestureHudText by remember { mutableStateOf<String?>(null) }
     var permissionHealth by remember { mutableStateOf(PermissionHelper.check(context)) }
     var pairedBtDevices by remember { mutableStateOf(app.systemStatusMonitor.getPairedBluetoothDevices()) }
@@ -207,13 +209,18 @@ fun CoolDriveRootScreen(
     )
 
     val unreadCount = remember(messages) { messages.count { !it.isRead } }
-    val dockSlots = remember(config.pinnedDockPackages, installedApps, destination) {
+    val dockSlots = remember(liveRecentPackages, config.recentDockPackages, config.pinnedDockPackages, installedApps, destination) {
         val activePkg = when (destination) {
             LauncherDestination.FULLSCREEN_MAP -> "com.google.android.apps.maps"
             LauncherDestination.FULLSCREEN_YOUTUBE_WEB -> "com.google.android.youtube"
             else -> ""
         }
-        buildDefaultDockSlots(config.pinnedDockPackages, installedApps, activePkg)
+        buildRecentDockSlots(
+            recentPackages = (liveRecentPackages + config.recentDockPackages).distinct(),
+            fallbackPackages = config.pinnedDockPackages,
+            installedApps = installedApps,
+            activePackage = activePkg
+        )
     }
 
     fun launchYoutubeBest() {
@@ -222,6 +229,47 @@ fun CoolDriveRootScreen(
             return
         }
         destination = LauncherDestination.FULLSCREEN_YOUTUBE_WEB
+    }
+
+    fun launchRealMapsFreeformBox() {
+        val dockPx = (layoutSpec.dockThicknessDp * dm.density).toInt()
+        val padPx = (12 * dm.density).toInt()
+        val availW = (dm.widthPixels - if (layoutSpec.dockPlacement != ResolvedDockPlacement.BOTTOM) dockPx else 0).coerceAtLeast(300)
+        val availH = (dm.heightPixels - if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0).coerceAtLeast(240)
+        val primaryW = (availW * layoutSpec.primaryWeight).toInt()
+        val leftX = when {
+            config.rightHandDrive -> availW - primaryW + padPx
+            layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT -> dockPx + padPx
+            else -> padPx
+        }
+        val bounds = Rect(leftX, padPx, (leftX + primaryW - padPx * 2).coerceAtLeast(leftX + 200), availH - padPx)
+        app.installedAppsRepository.launchGoogleMapsFreeform(bounds)
+        gestureHudText = "🗺 已嘗試以 Freeform 視窗開啟真實 Google 地圖"
+    }
+
+    fun handleCustomShortcutLaunch(token: String) {
+        when (token) {
+            BuiltInShortcutTokens.SETTINGS -> {
+                permissionHealth = PermissionHelper.check(context)
+                app.installedAppsRepository.refreshHomeLaunchers()
+                destination = LauncherDestination.SETTINGS
+            }
+            BuiltInShortcutTokens.YOUTUBE -> launchYoutubeBest()
+            BuiltInShortcutTokens.DIALER -> app.installedAppsRepository.launchDialer()
+            BuiltInShortcutTokens.DAY_NIGHT -> {
+                val nextMode = if (isNight) ThemeMode.FORCE_DAY else ThemeMode.FORCE_NIGHT
+                app.preferences.update { it.copy(themeMode = nextMode) }
+                gestureHudText = if (nextMode == ThemeMode.FORCE_NIGHT) "🌙 已切換為夜間模式" else "☀️ 已切換為白天模式"
+            }
+            BuiltInShortcutTokens.SPLIT_GMAPS -> {
+                SplitSidePanelActivity.launchWithRealGoogleMaps(context)
+            }
+            else -> {
+                if (!app.installedAppsRepository.launchAppFullscreen(token)) {
+                    gestureHudText = "無法啟動該應用程式"
+                }
+            }
+        }
     }
 
     fun handleToggleDayNight() {
@@ -337,6 +385,7 @@ fun CoolDriveRootScreen(
                     isDashboardActive = destination == LauncherDestination.DASHBOARD_SPLIT,
                     unreadCount = unreadCount,
                     pinnedSlots = dockSlots,
+                    rightHandDrive = config.rightHandDrive,
                     onToggleAppDrawer = {
                         destination = if (destination == LauncherDestination.APP_DRAWER) {
                             LauncherDestination.DASHBOARD_SPLIT
@@ -347,12 +396,8 @@ fun CoolDriveRootScreen(
                     onGoDashboard = { destination = LauncherDestination.DASHBOARD_SPLIT },
                     onSlotClick = { slot ->
                         when {
-                            slot.id == "maps" -> {
-                                if (destination == LauncherDestination.FULLSCREEN_MAP) {
-                                    app.installedAppsRepository.launchGoogleMapsNavigation(null)
-                                } else {
-                                    destination = LauncherDestination.FULLSCREEN_MAP
-                                }
+                            slot.packageName == "com.google.android.apps.maps" && destination != LauncherDestination.FULLSCREEN_MAP -> {
+                                destination = LauncherDestination.FULLSCREEN_MAP
                             }
                             slot.id == "youtube" -> launchYoutubeBest()
                             slot.packageName == "ACTION_DIAL" -> app.installedAppsRepository.launchDialer()
@@ -366,6 +411,7 @@ fun CoolDriveRootScreen(
                     onBluetoothClick = { SystemStatusMonitor.openBluetoothSettings(context) },
                     onBluetoothLongClick = {
                         permissionHealth = PermissionHelper.check(context)
+                        app.installedAppsRepository.refreshHomeLaunchers()
                         destination = LauncherDestination.SETTINGS
                     },
                     onClockClick = { showQuickControlCenter = !showQuickControlCenter },
@@ -374,12 +420,38 @@ fun CoolDriveRootScreen(
             }
 
             val stageContent: @Composable (Modifier) -> Unit = { stageMod ->
-                Box(modifier = stageMod) {
-                    when (destination) {
+                AnimatedContent(
+                    targetState = destination,
+                    transitionSpec = {
+                        when (targetState) {
+                            LauncherDestination.APP_DRAWER ->
+                                (slideInVertically(
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioLowBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    ),
+                                    initialOffsetY = { it / 6 }
+                                ) + scaleIn(initialScale = 0.95f, animationSpec = tween(220)) + fadeIn(tween(200))) togetherWith
+                                    (scaleOut(targetScale = 0.96f, animationSpec = tween(160)) + fadeOut(tween(150)))
+
+                            LauncherDestination.SETTINGS ->
+                                (scaleIn(initialScale = 0.94f, animationSpec = tween(240)) + fadeIn(tween(200))) togetherWith
+                                    (scaleOut(targetScale = 0.96f, animationSpec = tween(160)) + fadeOut(tween(150)))
+
+                            else ->
+                                (scaleIn(initialScale = 0.97f, animationSpec = tween(220)) + fadeIn(tween(200))) togetherWith
+                                    (scaleOut(targetScale = 0.97f, animationSpec = tween(160)) + fadeOut(tween(150)))
+                        }
+                    },
+                    label = "stageTransition",
+                    modifier = stageMod
+                ) { targetDest ->
+                    when (targetDest) {
                         LauncherDestination.DASHBOARD_SPLIT -> {
                             CoolwalkSplitDashboard(
                                 isHorizontalSplit = layoutSpec.isHorizontalSplit,
                                 supportsThirdSubCard = layoutSpec.supportsThirdSubCard,
+                                rightHandDrive = config.rightHandDrive,
                                 primaryRatio = layoutSpec.primaryWeight,
                                 isMapPrimary = isMapPrimary,
                                 location = location,
@@ -389,8 +461,8 @@ fun CoolDriveRootScreen(
                                 mapEngineStyle = config.mapEngineStyle,
                                 homeAddress = config.homeAddress,
                                 workAddress = config.workAddress,
-                                btConnectedName = sysStatus.connectedBtName,
-                                unreadCount = unreadCount,
+                                customShortcutSlots = config.customShortcutSlots,
+                                installedApps = installedApps,
                                 onToggleMapStyle = {
                                     val next = if (config.mapEngineStyle == MapEngineStyle.GOOGLE_TRAFFIC_TILES) {
                                         MapEngineStyle.OPENFREEMAP_VECTOR_3D
@@ -409,6 +481,9 @@ fun CoolDriveRootScreen(
                                 onLaunchRealGoogleMaps = { query ->
                                     app.installedAppsRepository.launchGoogleMapsNavigation(query)
                                 },
+                                onLaunchRealMapsSplit = {
+                                    SplitSidePanelActivity.launchWithRealGoogleMaps(context)
+                                },
                                 onMediaPlayPause = { app.mediaControlBridge.togglePlayPause() },
                                 onMediaNext = { app.mediaControlBridge.skipNext() },
                                 onMediaPrev = { app.mediaControlBridge.skipPrevious() },
@@ -419,12 +494,11 @@ fun CoolDriveRootScreen(
                                     else launchYoutubeBest()
                                 },
                                 onOpenYoutubeFullscreen = ::launchYoutubeBest,
-                                onToggleDayNight = ::handleToggleDayNight,
-                                onOpenDialer = { app.installedAppsRepository.launchDialer() },
-                                onOpenNotifications = { showNotificationCenter = true },
-                                onOpenSettings = {
-                                    permissionHealth = PermissionHelper.check(context)
-                                    destination = LauncherDestination.SETTINGS
+                                onCustomSlotEmptyClick = { slotIdx -> pickingShortcutSlotIndex = slotIdx },
+                                onCustomSlotLaunch = ::handleCustomShortcutLaunch,
+                                onCustomSlotRemove = { slotIdx, label ->
+                                    app.preferences.clearCustomShortcutSlot(slotIdx)
+                                    gestureHudText = "🗑 已移除 $label（點擊 ＋ 可重新加入）"
                                 }
                             )
                         }
@@ -462,6 +536,9 @@ fun CoolDriveRootScreen(
                                     onToggleFullscreen = { destination = LauncherDestination.DASHBOARD_SPLIT },
                                     onLaunchGoogleMapsApp = { q ->
                                         app.installedAppsRepository.launchGoogleMapsNavigation(q)
+                                    },
+                                    onLaunchRealMapsSplit = {
+                                        SplitSidePanelActivity.launchWithRealGoogleMaps(context)
                                     }
                                 )
                             }
@@ -482,10 +559,11 @@ fun CoolDriveRootScreen(
                                 onLaunchYoutube = ::launchYoutubeBest,
                                 onTogglePin = { pkg ->
                                     app.preferences.togglePinnedPackage(pkg)
-                                    gestureHudText = "📌 已更新常駐 Dock 釘選項目"
+                                    gestureHudText = "📌 已更新備選 Dock 清單"
                                 },
                                 onOpenSettings = {
                                     permissionHealth = PermissionHelper.check(context)
+                                    app.installedAppsRepository.refreshHomeLaunchers()
                                     destination = LauncherDestination.SETTINGS
                                 },
                                 onCloseDrawer = { destination = LauncherDestination.DASHBOARD_SPLIT }
@@ -517,6 +595,10 @@ fun CoolDriveRootScreen(
                                     app.installedAppsRepository.refreshHomeLaunchers()
                                     permissionHealth = PermissionHelper.check(context)
                                 },
+                                onLaunchRealMapsSplitScreen = {
+                                    SplitSidePanelActivity.launchWithRealGoogleMaps(context)
+                                },
+                                onLaunchRealMapsFreeform = ::launchRealMapsFreeformBox,
                                 onResetSettingsToDefaults = {
                                     app.preferences.resetToDefaults()
                                     gestureHudText = "↺ 已恢復所有啟動器設定為預設值"
@@ -590,7 +672,9 @@ fun CoolDriveRootScreen(
                     color = colors.accent,
                     shape = RoundedCornerShape(22.dp),
                     shadowElevation = 10.dp,
-                    modifier = Modifier.clickable { app.updateManager.installDownloadedApk() }
+                    modifier = Modifier.bouncyClickable(pressedScale = 0.93f) {
+                        app.updateManager.installDownloadedApk()
+                    }
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
@@ -645,7 +729,11 @@ fun CoolDriveRootScreen(
             )
 
             // QUICK CONTROL CENTER OVERLAY (Clock tap)
-            if (showQuickControlCenter) {
+            AnimatedVisibility(
+                visible = showQuickControlCenter,
+                enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.92f, animationSpec = spring(stiffness = Spring.StiffnessMedium)),
+                exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.94f, animationSpec = tween(140))
+            ) {
                 QuickControlCenterOverlay(
                     systemStatus = sysStatus,
                     isNight = isNight,
@@ -657,6 +745,7 @@ fun CoolDriveRootScreen(
                     onOpenBluetoothSettings = { SystemStatusMonitor.openBluetoothSettings(context) },
                     onOpenSettings = {
                         permissionHealth = PermissionHelper.check(context)
+                        app.installedAppsRepository.refreshHomeLaunchers()
                         destination = LauncherDestination.SETTINGS
                     },
                     onDismiss = { showQuickControlCenter = false }
@@ -664,7 +753,11 @@ fun CoolDriveRootScreen(
             }
 
             // NOTIFICATION CENTER OVERLAY (Bell tap)
-            if (showNotificationCenter) {
+            AnimatedVisibility(
+                visible = showNotificationCenter,
+                enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.92f, animationSpec = spring(stiffness = Spring.StiffnessMedium)),
+                exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.94f, animationSpec = tween(140))
+            ) {
                 NotificationCenterSheet(
                     messages = messages,
                     quickReplies = config.quickReplies,
@@ -678,6 +771,25 @@ fun CoolDriveRootScreen(
                     onClose = { showNotificationCenter = false }
                 )
             }
+
+            // APP PICKER DIALOG FOR THE 6 CUSTOM SHORTCUT SLOTS (Shows Real App Icons!)
+            AnimatedVisibility(
+                visible = pickingShortcutSlotIndex != null,
+                enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.90f, animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMedium)),
+                exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.92f, animationSpec = tween(140))
+            ) {
+                val slotIdx = pickingShortcutSlotIndex ?: return@AnimatedVisibility
+                AppPickerDialog(
+                    slotIndex = slotIdx,
+                    apps = installedApps,
+                    onSelectToken = { token, label ->
+                        app.preferences.setCustomShortcutSlot(slotIdx, token)
+                        pickingShortcutSlotIndex = null
+                        gestureHudText = "✓ 已加入「$label」至第 ${slotIdx + 1} 格"
+                    },
+                    onDismiss = { pickingShortcutSlotIndex = null }
+                )
+            }
         }
     }
 }
@@ -685,13 +797,15 @@ fun CoolDriveRootScreen(
 /**
  * Android Auto Coolwalk Split Dashboard:
  * - Animated Primary (default 63%) vs Secondary (default 37%) proportion!
- * - Clicking the secondary card smoothly SWAPS left & right sides (just like AA Coolwalk!).
- * - When tall & wide enough, shows a 3rd compact quick-status card under the secondary card.
+ * - Supports Left-Hand Drive (default: Primary on Left, Secondary + 6 Custom Slots on Right)
+ *   AND Right-Hand Drive (mirrors cleanly: Primary on Right near driver, Secondary + 6 Custom Slots on Left)!
+ * - Clicking the secondary card smoothly SWAPS sides (just like AA Coolwalk!).
  */
 @Composable
 private fun CoolwalkSplitDashboard(
     isHorizontalSplit: Boolean,
     supportsThirdSubCard: Boolean,
+    rightHandDrive: Boolean,
     primaryRatio: Float,
     isMapPrimary: Boolean,
     location: com.cooldrive.launcher.map.VehicleLocationState,
@@ -701,22 +815,22 @@ private fun CoolwalkSplitDashboard(
     mapEngineStyle: MapEngineStyle,
     homeAddress: String,
     workAddress: String,
-    btConnectedName: String,
-    unreadCount: Int,
+    customShortcutSlots: List<String>,
+    installedApps: List<InstalledAppInfo>,
     onToggleMapStyle: () -> Unit,
     onSwapPanes: () -> Unit,
     onOpenFullscreenMap: () -> Unit,
     onLaunchRealGoogleMaps: (String?) -> Unit,
+    onLaunchRealMapsSplit: () -> Unit,
     onMediaPlayPause: () -> Unit,
     onMediaNext: () -> Unit,
     onMediaPrev: () -> Unit,
     onSelectMediaSession: (String) -> Unit,
     onOpenMediaApp: () -> Unit,
     onOpenYoutubeFullscreen: () -> Unit,
-    onToggleDayNight: () -> Unit,
-    onOpenDialer: () -> Unit,
-    onOpenNotifications: () -> Unit,
-    onOpenSettings: () -> Unit
+    onCustomSlotEmptyClick: (Int) -> Unit,
+    onCustomSlotLaunch: (String) -> Unit,
+    onCustomSlotRemove: (Int, String) -> Unit
 ) {
     val colors = LocalCoolDriveColors.current
     val cardShape = RoundedCornerShape(colors.cardCornerDp.dp)
@@ -746,7 +860,8 @@ private fun CoolwalkSplitDashboard(
                 onToggleStyle = onToggleMapStyle,
                 onSwapRequested = onSwapPanes,
                 onToggleFullscreen = onOpenFullscreenMap,
-                onLaunchGoogleMapsApp = onLaunchRealGoogleMaps
+                onLaunchGoogleMapsApp = onLaunchRealGoogleMaps,
+                onLaunchRealMapsSplit = onLaunchRealMapsSplit
             )
         }
     }
@@ -771,107 +886,54 @@ private fun CoolwalkSplitDashboard(
         }
     }
 
-    val quickStatusCard: @Composable () -> Unit = {
-        Surface(
-            color = colors.cardSurface,
-            shape = cardShape,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(82.dp)
-                .border(colors.cardBorderWidthDp.dp, colors.cardBorder, cardShape)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { onOpenDialer() }
-                ) {
-                    Icon(
-                        imageVector = if (btConnectedName.isNotBlank()) Icons.Rounded.BluetoothConnected else Icons.Rounded.Phone,
-                        contentDescription = null,
-                        tint = if (btConnectedName.isNotBlank()) colors.accent else colors.secondaryText,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            text = btConnectedName.ifBlank { "藍牙電話" },
-                            color = colors.primaryText,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = if (unreadCount > 0) "$unreadCount 則未讀訊息" else "配對同步就緒",
-                            color = colors.secondaryText,
-                            fontSize = 11.sp,
-                            maxLines = 1
-                        )
-                    }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    CompactQuickIcon(
-                        icon = if (isNight) Icons.Rounded.DarkMode else Icons.Rounded.LightMode,
-                        contentDescription = "切換日夜",
-                        onClick = onToggleDayNight
-                    )
-                    CompactQuickIcon(
-                        icon = Icons.Rounded.Notifications,
-                        contentDescription = "訊息通知",
-                        onClick = onOpenNotifications
-                    )
-                    CompactQuickIcon(
-                        icon = Icons.Rounded.Settings,
-                        contentDescription = "設定",
-                        onClick = onOpenSettings
-                    )
-                }
-            }
-        }
+    val customSixCard: @Composable () -> Unit = {
+        CustomSixAppBarCard(
+            slots = customShortcutSlots,
+            installedApps = installedApps,
+            onSlotEmptyClick = onCustomSlotEmptyClick,
+            onSlotLaunch = onCustomSlotLaunch,
+            onSlotRemove = onCustomSlotRemove
+        )
     }
 
     if (isHorizontalSplit) {
+        val primaryPane: @Composable (Modifier) -> Unit = { mod ->
+            if (isMapPrimary) mapCardComposable(true, mod) else mediaCardComposable(true, mod)
+        }
+        val secondaryColumn: @Composable (Modifier) -> Unit = { mod ->
+            Column(
+                modifier = mod,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (isMapPrimary) {
+                    mediaCardComposable(false, Modifier.weight(1f).fillMaxWidth())
+                } else {
+                    mapCardComposable(false, Modifier.weight(1f).fillMaxWidth())
+                }
+                if (supportsThirdSubCard) {
+                    customSixCard()
+                }
+            }
+        }
+
         Row(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            if (isMapPrimary) {
-                mapCardComposable(true, Modifier.weight(primaryWeight).fillMaxHeight())
-                Column(
-                    modifier = Modifier.weight(secondaryWeight).fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    mediaCardComposable(false, Modifier.weight(1f).fillMaxWidth())
-                    if (supportsThirdSubCard) {
-                        quickStatusCard()
-                    }
-                }
+            if (rightHandDrive) {
+                // RHD: Secondary + 6-App Bar on Left, Primary (near driver) on Right!
+                secondaryColumn(Modifier.weight(secondaryWeight).fillMaxHeight())
+                primaryPane(Modifier.weight(primaryWeight).fillMaxHeight())
             } else {
-                mediaCardComposable(true, Modifier.weight(primaryWeight).fillMaxHeight())
-                Column(
-                    modifier = Modifier.weight(secondaryWeight).fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    mapCardComposable(false, Modifier.weight(1f).fillMaxWidth())
-                    if (supportsThirdSubCard) {
-                        quickStatusCard()
-                    }
-                }
+                // LHD (Default): Primary (near driver) on Left, Secondary + 6-App Bar on Right!
+                primaryPane(Modifier.weight(primaryWeight).fillMaxHeight())
+                secondaryColumn(Modifier.weight(secondaryWeight).fillMaxHeight())
             }
         }
     } else {
-        // Portrait / Square vertical split
+        // Portrait / Square vertical split (with 6 Custom App Bar cleanly docked at bottom)
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -885,31 +947,7 @@ private fun CoolwalkSplitDashboard(
                 mediaCardComposable(true, Modifier.weight(primaryWeight).fillMaxWidth())
                 mapCardComposable(false, Modifier.weight(secondaryWeight).fillMaxWidth())
             }
-        }
-    }
-}
-
-@Composable
-private fun CompactQuickIcon(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit
-) {
-    val colors = LocalCoolDriveColors.current
-    Surface(
-        color = colors.cardSurfaceElevated,
-        shape = RoundedCornerShape(14.dp),
-        modifier = Modifier
-            .size(40.dp)
-            .clickable { onClick() }
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = icon,
-                contentDescription = contentDescription,
-                tint = colors.primaryText,
-                modifier = Modifier.size(20.dp)
-            )
+            customSixCard()
         }
     }
 }

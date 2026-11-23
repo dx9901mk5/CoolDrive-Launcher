@@ -29,13 +29,14 @@ import androidx.compose.material.icons.rounded.Navigation
 import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Splitscreen
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.TurnRight
 import androidx.compose.material.icons.rounded.Work
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import com.cooldrive.launcher.ui.bouncyClickable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -84,6 +85,7 @@ fun LiveMapCard(
     onSwapRequested: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onLaunchGoogleMapsApp: (String?) -> Unit,
+    onLaunchRealMapsSplit: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = LocalCoolDriveColors.current
@@ -265,7 +267,7 @@ fun LiveMapCard(
                         modifier = Modifier
                             .weight(1f, fill = false)
                             .border(1.dp, colors.cardBorder, RoundedCornerShape(24.dp))
-                            .clickable { onLaunchGoogleMapsApp(null) }
+                            .bouncyClickable { onLaunchGoogleMapsApp(null) }
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -291,7 +293,7 @@ fun LiveMapCard(
 
                     Spacer(Modifier.width(8.dp))
 
-                    // Home / Work / Real Maps App buttons
+                    // Home / Split Real Google Maps / Launch Real Google Maps buttons
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         MapChipButton(
                             icon = Icons.Rounded.Home,
@@ -307,6 +309,11 @@ fun LiveMapCard(
                                 onClick = { onLaunchGoogleMapsApp(workAddress) }
                             )
                         }
+                        MapChipButton(
+                            icon = Icons.Rounded.Splitscreen,
+                            label = "分割G地圖",
+                            onClick = onLaunchRealMapsSplit
+                        )
                         MapChipButton(
                             icon = Icons.Rounded.Navigation,
                             label = "G地圖",
@@ -419,12 +426,14 @@ fun LiveMapCard(
                     modifier = Modifier.border(1.dp, colors.cardBorder, RoundedCornerShape(16.dp))
                 ) {
                     Column {
-                        IconButton(
-                            onClick = {
-                                currentZoom = (currentZoom + 1.0).coerceAtMost(19.5)
-                                mapLibreMap?.animateCamera(CameraUpdateFactory.zoomTo(currentZoom), 300)
-                            },
-                            modifier = Modifier.size(40.dp)
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .bouncyClickable(pressedScale = 0.85f) {
+                                    currentZoom = (currentZoom + 1.0).coerceAtMost(19.5)
+                                    mapLibreMap?.animateCamera(CameraUpdateFactory.zoomTo(currentZoom), 300)
+                                }
                         ) {
                             Icon(Icons.Rounded.Add, contentDescription = "放大", tint = colors.primaryText)
                         }
@@ -435,12 +444,14 @@ fun LiveMapCard(
                                 .align(Alignment.CenterHorizontally)
                                 .background(colors.cardBorder)
                         )
-                        IconButton(
-                            onClick = {
-                                currentZoom = (currentZoom - 1.0).coerceAtLeast(5.0)
-                                mapLibreMap?.animateCamera(CameraUpdateFactory.zoomTo(currentZoom), 300)
-                            },
-                            modifier = Modifier.size(40.dp)
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .bouncyClickable(pressedScale = 0.85f) {
+                                    currentZoom = (currentZoom - 1.0).coerceAtLeast(5.0)
+                                    mapLibreMap?.animateCamera(CameraUpdateFactory.zoomTo(currentZoom), 300)
+                                }
                         ) {
                             Icon(Icons.Rounded.Remove, contentDescription = "縮小", tint = colors.primaryText)
                         }
@@ -489,7 +500,7 @@ private fun MapChipButton(
                 color = if (highlight) colors.accent else colors.cardBorder,
                 shape = RoundedCornerShape(20.dp)
             )
-            .clickable { onClick() }
+            .bouncyClickable(pressedScale = 0.90f, onClick = onClick)
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
@@ -526,7 +537,7 @@ private fun SmallGlassCircleButton(
         modifier = Modifier
             .size(42.dp)
             .border(1.dp, if (active) colors.accent else colors.cardBorder, CircleShape)
-            .clickable { onClick() }
+            .bouncyClickable(pressedScale = 0.86f, onClick = onClick)
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
@@ -544,31 +555,32 @@ private fun VehiclePuckOverlay(
     accentColor: Color,
     bearingDeg: Float
 ) {
-    Canvas(modifier = Modifier.size(42.dp)) {
+    Canvas(modifier = Modifier.size(44.dp)) {
         val cx = size.width / 2f
         val cy = size.height / 2f
-        // Halo ring
+        val navBlue = Color(0xFF1A73E8)
+        // Outer translucent blue halo ring
         drawCircle(
-            color = accentColor.copy(alpha = 0.24f),
+            color = navBlue.copy(alpha = 0.28f),
             radius = size.minDimension * 0.48f,
             center = Offset(cx, cy)
         )
         // Crisp white base circle
         drawCircle(
             color = Color.White,
-            radius = size.minDimension * 0.30f,
+            radius = size.minDimension * 0.31f,
             center = Offset(cx, cy)
         )
-        // Directional chevron
+        // Bold directional Google Blue chevron
         rotate(degrees = bearingDeg, pivot = Offset(cx, cy)) {
             val path = Path().apply {
                 moveTo(cx, cy - size.minDimension * 0.22f)
-                lineTo(cx + size.minDimension * 0.16f, cy + size.minDimension * 0.14f)
-                lineTo(cx, cy + size.minDimension * 0.05f)
-                lineTo(cx - size.minDimension * 0.16f, cy + size.minDimension * 0.14f)
+                lineTo(cx + size.minDimension * 0.16f, cy + size.minDimension * 0.15f)
+                lineTo(cx, cy + size.minDimension * 0.06f)
+                lineTo(cx - size.minDimension * 0.16f, cy + size.minDimension * 0.15f)
                 close()
             }
-            drawPath(path, color = accentColor)
+            drawPath(path, color = navBlue)
         }
     }
 }

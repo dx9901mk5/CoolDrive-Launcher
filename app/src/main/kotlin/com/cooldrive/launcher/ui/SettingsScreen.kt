@@ -41,6 +41,7 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.Splitscreen
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.Button
@@ -115,6 +116,8 @@ fun SettingsScreen(
     onRequestSetDefaultHome: () -> Unit,
     onSwitchToLauncher: (HomeLauncherInfo) -> Unit,
     onRefreshHomeLaunchers: () -> Unit,
+    onLaunchRealMapsSplitScreen: () -> Unit,
+    onLaunchRealMapsFreeform: () -> Unit,
     onResetSettingsToDefaults: () -> Unit,
     onRefreshPermissions: () -> Unit,
     onRequestRuntimePermissions: () -> Unit,
@@ -192,6 +195,7 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .springBounceOverscroll(maxOverscrollPx = 150f)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -533,8 +537,11 @@ fun SettingsScreen(
                 }
 
                 Spacer(Modifier.height(6.dp))
-                Text("首頁即時地圖引擎（免 API Key）", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("首頁即時地圖引擎（免 API Key）與真實 Google 地圖分割", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     SelectablePill(
                         text = "Google 即時路況圖磚（繁中）",
                         selected = config.mapEngineStyle == MapEngineStyle.GOOGLE_TRAFFIC_TILES,
@@ -545,6 +552,52 @@ fun SettingsScreen(
                         selected = config.mapEngineStyle == MapEngineStyle.OPENFREEMAP_VECTOR_3D,
                         onClick = { onUpdateConfig { it.copy(mapEngineStyle = MapEngineStyle.OPENFREEMAP_VECTOR_3D) } }
                     )
+                }
+
+                Surface(
+                    color = colors.cardSurfaceElevated,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "想直接把 AI Box 原本的「真實 Google 地圖 App」放在分割畫面？",
+                            color = colors.primaryText,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "因 Android 沙盒不允許一般啟動器把第三方 App 直接畫在方框內，可點下方按鈕以系統原生分割螢幕或 Freeform 視窗將真實 Google 地圖與 CoolDrive 媒體控制並排顯示！",
+                            color = colors.secondaryText,
+                            fontSize = 11.sp
+                        )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = onLaunchRealMapsSplitScreen,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = colors.accent,
+                                    contentColor = colors.onAccent
+                                ),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Icon(Icons.Rounded.Splitscreen, contentDescription = null, modifier = Modifier.size(17.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("原生分割：真實 G 地圖 ＋ 媒體")
+                            }
+                            OutlinedButton(
+                                onClick = onLaunchRealMapsFreeform,
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Text("Freeform 視窗嵌入左側 63%")
+                            }
+                        }
+                    }
                 }
 
                 // Split Proportion Slider
@@ -568,11 +621,25 @@ fun SettingsScreen(
                 }
             }
 
-            // SECTION 2: 車機 DPI 與常駐 Dock（Google 模式）
+            // SECTION 2: 駕駛座左右駕、車機 DPI 與常駐 Dock（Google 模式）
             SettingsSectionCard(
                 icon = Icons.Rounded.DisplaySettings,
-                title = "車機 DPI 偵測與常駐 Dock（參照 Google AA 模式）"
+                title = "左右駕模式、車機 DPI 偵測與常駐 Dock"
             ) {
+                Text("駕駛座位置（自動鏡像 Dock 靠駕駛側與首頁分割方向）", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SelectablePill(
+                        text = "左駕模式（預設 · 台灣／歐美）",
+                        selected = !config.rightHandDrive,
+                        onClick = { onUpdateConfig { it.copy(rightHandDrive = false) } }
+                    )
+                    SelectablePill(
+                        text = "右駕模式（日本／香港／英國）",
+                        selected = config.rightHandDrive,
+                        onClick = { onUpdateConfig { it.copy(rightHandDrive = true) } }
+                    )
+                }
+
                 Surface(
                     color = colors.cardSurfaceElevated,
                     shape = RoundedCornerShape(14.dp),
@@ -986,7 +1053,7 @@ private fun SelectablePill(
                 if (selected) colors.accent else colors.cardBorder,
                 RoundedCornerShape(16.dp)
             )
-            .clickable { onClick() }
+            .bouncyClickable(pressedScale = 0.91f, onClick = onClick)
     ) {
         Text(
             text = text,

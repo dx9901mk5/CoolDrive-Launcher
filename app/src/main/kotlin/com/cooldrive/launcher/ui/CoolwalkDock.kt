@@ -1,10 +1,13 @@
 package com.cooldrive.launcher.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,12 +40,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -82,6 +87,7 @@ fun CoolwalkDock(
     isDashboardActive: Boolean,
     unreadCount: Int,
     pinnedSlots: List<DockAppSlot>,
+    rightHandDrive: Boolean = false,
     isOverlayMode: Boolean = false,
     onToggleAppDrawer: () -> Unit,
     onGoDashboard: () -> Unit,
@@ -98,7 +104,70 @@ fun CoolwalkDock(
     val timeText = if (is24HourClock) systemStatus.time24h else systemStatus.time12h
 
     if (placement == ResolvedDockPlacement.BOTTOM) {
-        // Horizontal Bottom Bar (Bottom-Left = 9-dot App Launcher, Center = Apps, Right = Status + Time)
+        val launcherCluster: @Composable () -> Unit = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                DockLauncherButton(
+                    isAppDrawerOpen = isAppDrawerOpen,
+                    isDashboardActive = isDashboardActive,
+                    onClick = if (isAppDrawerOpen) onGoDashboard else onToggleAppDrawer,
+                    onLongClick = onGoDashboard
+                )
+                if (isOverlayMode && onCollapseOverlay != null) {
+                    SmallDockUtilityIcon(
+                        icon = Icons.Rounded.ChevronLeft,
+                        contentDescription = "收合常駐列",
+                        tint = colors.secondaryText,
+                        onClick = onCollapseOverlay
+                    )
+                }
+            }
+        }
+        val appsCluster: @Composable () -> Unit = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                pinnedSlots.take(5).forEach { slot ->
+                    DockAppIconTile(
+                        slot = slot,
+                        sizeDp = (thicknessDp - 20).coerceIn(44, 54),
+                        onClick = { onSlotClick(slot) }
+                    )
+                }
+            }
+        }
+        val statusCluster: @Composable () -> Unit = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                NotificationBellButton(
+                    unreadCount = unreadCount,
+                    onClick = onNotificationsClick
+                )
+                WifiStatusChip(
+                    connected = systemStatus.wifiConnected,
+                    enabled = systemStatus.wifiEnabled,
+                    onClick = onWifiClick
+                )
+                BluetoothStatusChip(
+                    connected = systemStatus.bluetoothConnected,
+                    enabled = systemStatus.bluetoothEnabled,
+                    onClick = onBluetoothClick,
+                    onLongClick = onBluetoothLongClick
+                )
+                ClockChip(
+                    timeText = timeText,
+                    compact = false,
+                    onClick = onClockClick
+                )
+            }
+        }
+
+        // Horizontal Bottom Bar (mirrors seamlessly for LHD vs RHD!)
         Surface(
             color = colors.dockBackground,
             tonalElevation = 4.dp,
@@ -117,66 +186,14 @@ fun CoolwalkDock(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // BOTTOM-LEFT: AA 9-Dot App Menu Launcher / Dashboard Toggle
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    DockLauncherButton(
-                        isAppDrawerOpen = isAppDrawerOpen,
-                        isDashboardActive = isDashboardActive,
-                        onClick = if (isAppDrawerOpen) onGoDashboard else onToggleAppDrawer,
-                        onLongClick = onGoDashboard
-                    )
-                    if (isOverlayMode && onCollapseOverlay != null) {
-                        SmallDockUtilityIcon(
-                            icon = Icons.Rounded.ChevronLeft,
-                            contentDescription = "收合常駐列",
-                            tint = colors.secondaryText,
-                            onClick = onCollapseOverlay
-                        )
-                    }
-                }
-
-                // CENTER: Pinned / Recent Apps (Maps, YouTube, Media, Phone)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    pinnedSlots.take(5).forEach { slot ->
-                        DockAppIconTile(
-                            slot = slot,
-                            sizeDp = (thicknessDp - 20).coerceIn(44, 54),
-                            onClick = { onSlotClick(slot) }
-                        )
-                    }
-                }
-
-                // BOTTOM-RIGHT (Exact AA Bottom-Bar Status Cluster): Notification + Wi-Fi + BT + Time
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    NotificationBellButton(
-                        unreadCount = unreadCount,
-                        onClick = onNotificationsClick
-                    )
-                    WifiStatusChip(
-                        connected = systemStatus.wifiConnected,
-                        enabled = systemStatus.wifiEnabled,
-                        onClick = onWifiClick
-                    )
-                    BluetoothStatusChip(
-                        connected = systemStatus.bluetoothConnected,
-                        enabled = systemStatus.bluetoothEnabled,
-                        onClick = onBluetoothClick,
-                        onLongClick = onBluetoothLongClick
-                    )
-                    ClockChip(
-                        timeText = timeText,
-                        compact = false,
-                        onClick = onClockClick
-                    )
+                if (rightHandDrive) {
+                    statusCluster()
+                    appsCluster()
+                    launcherCluster()
+                } else {
+                    launcherCluster()
+                    appsCluster()
+                    statusCluster()
                 }
             }
         }
@@ -283,6 +300,14 @@ private fun DockLauncherButton(
 ) {
     val colors = LocalCoolDriveColors.current
     val highlighted = isAppDrawerOpen
+    val iconRotation by animateFloatAsState(
+        targetValue = if (highlighted) 90f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "launcherRotation"
+    )
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -294,7 +319,8 @@ private fun DockLauncherButton(
                 color = if (highlighted) colors.accent else colors.cardBorder,
                 shape = CircleShape
             )
-            .combinedClickable(
+            .bouncyCombinedClickable(
+                pressedScale = 0.88f,
                 onClick = onClick,
                 onLongClick = onLongClick
             )
@@ -307,7 +333,9 @@ private fun DockLauncherButton(
             },
             contentDescription = if (isAppDrawerOpen) "回到分割首頁" else "展開 App 選單",
             tint = if (highlighted) colors.onAccent else colors.primaryText,
-            modifier = Modifier.size(26.dp)
+            modifier = Modifier
+                .size(26.dp)
+                .graphicsLayer { rotationZ = iconRotation }
         )
     }
 }
@@ -337,7 +365,7 @@ private fun DockAppIconTile(
                 color = if (slot.isActive) colors.accent else colors.cardBorder.copy(alpha = 0.5f),
                 shape = RoundedCornerShape(16.dp)
             )
-            .clickable { onClick() }
+            .bouncyClickable(pressedScale = 0.88f, onClick = onClick)
     ) {
         if (bitmapImage != null) {
             Image(
@@ -366,24 +394,28 @@ private fun WifiStatusChip(
     onClick: () -> Unit
 ) {
     val colors = LocalCoolDriveColors.current
-    val tint = when {
-        connected -> colors.statusConnected
-        enabled -> colors.secondaryText
-        else -> colors.statusDisconnected
-    }
+    val tint by animateColorAsState(
+        targetValue = when {
+            connected -> colors.statusConnected
+            enabled -> colors.secondaryText
+            else -> colors.statusDisconnected
+        },
+        animationSpec = tween(300),
+        label = "wifiTint"
+    )
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
-            .size(if (compact) 30.dp else 36.dp)
+            .size(if (compact) 29.dp else 36.dp)
             .clip(CircleShape)
             .background(colors.dockIconContainer.copy(alpha = 0.85f))
-            .clickable { onClick() }
+            .bouncyClickable(pressedScale = 0.86f, onClick = onClick)
     ) {
         Icon(
             imageVector = if (connected) Icons.Rounded.Wifi else Icons.Rounded.WifiOff,
             contentDescription = "Wi-Fi 設定",
             tint = tint,
-            modifier = Modifier.size(if (compact) 17.dp else 20.dp)
+            modifier = Modifier.size(if (compact) 16.dp else 20.dp)
         )
     }
 }
@@ -398,11 +430,26 @@ private fun BluetoothStatusChip(
     onLongClick: () -> Unit
 ) {
     val colors = LocalCoolDriveColors.current
-    val tint = when {
-        connected -> colors.accent
-        enabled -> colors.primaryText
-        else -> colors.statusDisconnected
-    }
+    // Explicit unmistakable Bluetooth Blue when paired phone is connected!
+    val btBlue = if (colors.isNight) Color(0xFF3B82F6) else Color(0xFF1D4ED8)
+    val tint by animateColorAsState(
+        targetValue = when {
+            connected -> btBlue
+            enabled -> colors.primaryText
+            else -> colors.statusDisconnected
+        },
+        animationSpec = tween(300),
+        label = "btTint"
+    )
+    val bgColor by animateColorAsState(
+        targetValue = if (connected) {
+            Color(0xFF2563EB).copy(alpha = if (colors.isNight) 0.24f else 0.16f)
+        } else {
+            colors.dockIconContainer.copy(alpha = 0.85f)
+        },
+        animationSpec = tween(300),
+        label = "btBg"
+    )
     val icon = when {
         connected -> Icons.Rounded.BluetoothConnected
         enabled -> Icons.Rounded.Bluetooth
@@ -411,17 +458,22 @@ private fun BluetoothStatusChip(
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
-            .size(if (compact) 30.dp else 36.dp)
+            .size(if (compact) 29.dp else 36.dp)
             .clip(CircleShape)
-            .background(colors.dockIconContainer.copy(alpha = 0.85f))
-            .combinedClickable(
+            .background(bgColor)
+            .then(
+                if (connected) Modifier.border(1.2.dp, btBlue.copy(alpha = 0.75f), CircleShape)
+                else Modifier
+            )
+            .bouncyCombinedClickable(
+                pressedScale = 0.86f,
                 onClick = onClick,
                 onLongClick = onLongClick
             )
     ) {
         Icon(
             imageVector = icon,
-            contentDescription = "藍牙設定",
+            contentDescription = if (connected) "藍牙已連線手機（點擊進入設定）" else "藍牙設定",
             tint = tint,
             modifier = Modifier.size(if (compact) 17.dp else 20.dp)
         )
@@ -439,13 +491,13 @@ private fun ClockChip(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
-            .clickable { onClick() }
-            .padding(horizontal = if (compact) 4.dp else 8.dp, vertical = 4.dp)
+            .bouncyClickable(pressedScale = 0.90f, onClick = onClick)
+            .padding(horizontal = if (compact) 2.dp else 8.dp, vertical = 4.dp)
     ) {
         Text(
             text = timeText,
             color = colors.primaryText,
-            fontSize = if (compact) 17.sp else 18.sp,
+            fontSize = if (compact) 16.sp else 18.sp,
             fontWeight = FontWeight.Bold
         )
     }
@@ -463,7 +515,7 @@ private fun NotificationBellButton(
             .size(38.dp)
             .clip(CircleShape)
             .background(colors.dockIconContainer)
-            .clickable { onClick() }
+            .bouncyClickable(pressedScale = 0.88f, onClick = onClick)
     ) {
         Icon(
             imageVector = Icons.Rounded.Notifications,
@@ -503,7 +555,7 @@ private fun SmallDockUtilityIcon(
         modifier = Modifier
             .size(28.dp)
             .clip(CircleShape)
-            .clickable { onClick() }
+            .bouncyClickable(pressedScale = 0.86f, onClick = onClick)
     ) {
         Icon(
             imageVector = icon,
@@ -514,83 +566,86 @@ private fun SmallDockUtilityIcon(
     }
 }
 
-fun buildDefaultDockSlots(
-    pinnedPackages: List<String>,
+fun buildRecentDockSlots(
+    recentPackages: List<String>,
+    fallbackPackages: List<String>,
     installedApps: List<InstalledAppInfo>,
     activePackage: String
 ): List<DockAppSlot> {
     val byPkg = installedApps.associateBy { it.packageName }
+    val orderedCandidates = (recentPackages + fallbackPackages).distinct()
     val slots = mutableListOf<DockAppSlot>()
 
-    // 1. Always guarantee Maps + YouTube are accessible in the Dock
-    val mapsPkg = pinnedPackages.firstOrNull { it.contains("maps") || it.contains("waze") }
-        ?: "com.google.android.apps.maps"
-    slots += DockAppSlot(
-        id = "maps",
-        label = "Google 地圖",
-        packageName = mapsPkg,
-        fallbackIcon = Icons.Rounded.Map,
-        fallbackTint = Color(0xFF34A853),
-        installedApp = byPkg[mapsPkg],
-        isActive = activePackage == mapsPkg
-    )
-
-    val ytPkg = pinnedPackages.firstOrNull { it.contains("youtube") && !it.contains("music") }
-        ?: "com.google.android.youtube"
-    slots += DockAppSlot(
-        id = "youtube",
-        label = "YouTube",
-        packageName = ytPkg,
-        fallbackIcon = Icons.Rounded.PlayArrow,
-        fallbackTint = Color(0xFFFF0000),
-        installedApp = byPkg[ytPkg],
-        isActive = activePackage == ytPkg
-    )
-
-    // 2. Remaining pinned apps from user preferences
-    val used = slots.mapNotNull { it.packageName }.toMutableSet()
-    for (pkg in pinnedPackages) {
+    for (pkg in orderedCandidates) {
         if (slots.size >= 5) break
-        if (pkg in used) continue
         val app = byPkg[pkg]
         if (app != null) {
-            used += pkg
             slots += DockAppSlot(
                 id = pkg,
                 label = app.label,
                 packageName = pkg,
-                fallbackIcon = Icons.Rounded.MusicNote,
-                fallbackTint = Color(0xFF60A5FA),
+                fallbackIcon = iconForPackage(pkg),
+                fallbackTint = tintForPackage(pkg),
                 installedApp = app,
                 isActive = activePackage == pkg
             )
         }
     }
 
-    // 3. Fill with Music & Phone fallback shortcuts if fewer than 4 slots
-    if (slots.size < 4) {
+    // Fallback slots if device has very few installed apps (e.g., emulator)
+    if (slots.isEmpty()) {
         slots += DockAppSlot(
-            id = "music_fallback",
-            label = "音樂媒體",
-            packageName = byPkg["com.spotify.music"]?.packageName
-                ?: byPkg["com.google.android.apps.youtube.music"]?.packageName,
-            fallbackIcon = Icons.Rounded.MusicNote,
-            fallbackTint = Color(0xFF22C55E),
-            installedApp = byPkg["com.spotify.music"] ?: byPkg["com.google.android.apps.youtube.music"],
-            isActive = false
+            id = "maps",
+            label = "Google 地圖",
+            packageName = "com.google.android.apps.maps",
+            fallbackIcon = Icons.Rounded.Map,
+            fallbackTint = Color(0xFF34A853),
+            installedApp = byPkg["com.google.android.apps.maps"],
+            isActive = activePackage == "com.google.android.apps.maps"
         )
-    }
-    if (slots.size < 4) {
         slots += DockAppSlot(
-            id = "phone_fallback",
-            label = "藍牙電話",
-            packageName = "ACTION_DIAL",
-            fallbackIcon = Icons.Rounded.Phone,
-            fallbackTint = Color(0xFF38BDF8),
-            installedApp = null,
-            isActive = false
+            id = "youtube",
+            label = "YouTube",
+            packageName = "com.google.android.youtube",
+            fallbackIcon = Icons.Rounded.PlayArrow,
+            fallbackTint = Color(0xFFFF0000),
+            installedApp = byPkg["com.google.android.youtube"],
+            isActive = activePackage == "com.google.android.youtube"
         )
     }
 
+    // Fill up to 4 slots with installed apps if still short
+    if (slots.size < 4) {
+        val used = slots.mapNotNull { it.packageName }.toSet()
+        for (app in installedApps) {
+            if (slots.size >= 4) break
+            if (app.packageName in used) continue
+            slots += DockAppSlot(
+                id = app.packageName,
+                label = app.label,
+                packageName = app.packageName,
+                fallbackIcon = iconForPackage(app.packageName),
+                fallbackTint = tintForPackage(app.packageName),
+                installedApp = app,
+                isActive = activePackage == app.packageName
+            )
+        }
+    }
+
     return slots
+}
+
+private fun iconForPackage(pkg: String): ImageVector = when {
+    pkg.contains("maps") || pkg.contains("waze") || pkg.contains("navi") -> Icons.Rounded.Map
+    pkg.contains("youtube") && !pkg.contains("music") -> Icons.Rounded.PlayArrow
+    pkg.contains("dialer") || pkg.contains("phone") -> Icons.Rounded.Phone
+    else -> Icons.Rounded.MusicNote
+}
+
+private fun tintForPackage(pkg: String): Color = when {
+    pkg.contains("maps") -> Color(0xFF34A853)
+    pkg.contains("youtube") -> Color(0xFFFF0000)
+    pkg.contains("spotify") -> Color(0xFF22C55E)
+    pkg.contains("dialer") || pkg.contains("phone") -> Color(0xFF38BDF8)
+    else -> Color(0xFF60A5FA)
 }

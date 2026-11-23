@@ -103,6 +103,16 @@
             </intent-filter>
         </activity>
 
+        <!-- Dedicated Resizable Activity for True Native Split-Screen alongside Real Google Maps -->
+        <activity
+            android:name=".SplitSidePanelActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:taskAffinity="com.cooldrive.launcher.splitpanel"
+            android:theme="@style/Theme.CoolDrive" />
+
         <!-- Notification Listener: Media Sessions, Google Maps Turn-by-Turn, Local Box & Phone Companion Messages -->
         <service
             android:name=".comms.BoxNotificationListenerService"

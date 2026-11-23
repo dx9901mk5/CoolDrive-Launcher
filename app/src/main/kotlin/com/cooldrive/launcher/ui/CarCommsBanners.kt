@@ -27,14 +27,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Chat
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.CallEnd
-import androidx.compose.material.icons.rounded.Chat
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
@@ -156,7 +156,7 @@ fun IncomingCallBanner(
                             shape = CircleShape,
                             modifier = Modifier
                                 .size(50.dp)
-                                .clickable { onAnswer() }
+                                .bouncyClickable(pressedScale = 0.86f, onClick = onAnswer)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
@@ -174,7 +174,7 @@ fun IncomingCallBanner(
                         shape = CircleShape,
                         modifier = Modifier
                             .size(50.dp)
-                            .clickable { onDecline() }
+                            .bouncyClickable(pressedScale = 0.86f, onClick = onDecline)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
@@ -246,7 +246,7 @@ fun IncomingMessageBanner(
                             .background(appTint.copy(alpha = 0.2f))
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.Chat,
+                            imageVector = Icons.AutoMirrored.Rounded.Chat,
                             contentDescription = null,
                             tint = appTint,
                             modifier = Modifier.size(22.dp)
@@ -289,7 +289,7 @@ fun IncomingMessageBanner(
 
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         IconButton(onClick = { onReadAloud(item) }) {
-                            Icon(Icons.Rounded.VolumeUp, contentDescription = "語音朗讀", tint = colors.accent)
+                            Icon(Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = "語音朗讀", tint = colors.accent)
                         }
                         if (onVoiceReply != null && item.canReply) {
                             IconButton(onClick = { onVoiceReply(item) }) {
@@ -319,7 +319,7 @@ fun IncomingMessageBanner(
                                 shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier
                                     .border(1.dp, colors.cardBorder, RoundedCornerShape(16.dp))
-                                    .clickable { onQuickReply(item, reply) }
+                                    .bouncyClickable(pressedScale = 0.90f) { onQuickReply(item, reply) }
                             ) {
                                 Text(
                                     text = "回覆：$reply",
@@ -449,7 +449,7 @@ fun NotificationCenterSheet(
                                             )
                                         }
                                         IconButton(onClick = { onReadAloud(msg) }) {
-                                            Icon(Icons.Rounded.VolumeUp, contentDescription = "朗讀", tint = colors.accent)
+                                            Icon(Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = "朗讀", tint = colors.accent)
                                         }
                                         IconButton(onClick = { onMarkRead(msg) }) {
                                             Icon(Icons.Rounded.Done, contentDescription = "已讀", tint = colors.statusConnected)

@@ -86,6 +86,8 @@ data class LauncherConfig(
     val threeFingerTapAction: GestureAction = GestureAction.TOGGLE_DAY_NIGHT,
     val fourFingerPinchAction: GestureAction = GestureAction.TOGGLE_DOCK_VISIBILITY,
     val pinnedDockPackages: List<String> = DEFAULT_PINNED_PACKAGES,
+    val recentDockPackages: List<String> = DEFAULT_PINNED_PACKAGES,
+    val customShortcutSlots: List<String> = List(6) { "" },
     val homeAddress: String = "",
     val workAddress: String = "",
     val companionTargetDeviceAddress: String = "",
@@ -169,6 +171,28 @@ class LauncherPreferences(context: Context) {
             }
             current.copy(pinnedDockPackages = list)
         }
+    }
+
+    fun recordRecentDockPackage(packageName: String) {
+        if (packageName.isBlank()) return
+        update { current ->
+            val next = (listOf(packageName) + current.recentDockPackages.filterNot { it == packageName })
+                .take(8)
+            current.copy(recentDockPackages = next)
+        }
+    }
+
+    fun setCustomShortcutSlot(slotIndex: Int, packageName: String) {
+        if (slotIndex !in 0..5) return
+        update { current ->
+            val slots = MutableList(6) { idx -> current.customShortcutSlots.getOrElse(idx) { "" } }
+            slots[slotIndex] = packageName
+            current.copy(customShortcutSlots = slots)
+        }
+    }
+
+    fun clearCustomShortcutSlot(slotIndex: Int) {
+        setCustomShortcutSlot(slotIndex, "")
     }
 
     companion object {

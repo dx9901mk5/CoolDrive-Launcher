@@ -1,9 +1,15 @@
 package com.cooldrive.launcher.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,9 +24,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.MusicNote
-import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
@@ -79,7 +85,7 @@ fun MediaControlCard(
         modifier = modifier
             .fillMaxSize()
             .background(colors.cardSurface)
-            .clickable(enabled = !isPrimary) { onSwapRequested() }
+            .bouncyClickable(enabled = !isPrimary, pressedScale = 0.97f, onClick = onSwapRequested)
     ) {
         // Subtle Ambient Album Art Backdrop Wash (Coolwalk Media Card signature!)
         if (artBitmap != null) {
@@ -133,7 +139,7 @@ fun MediaControlCard(
                 Surface(
                     color = colors.cardSurfaceElevated.copy(alpha = 0.9f),
                     shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.clickable { onOpenMediaApp() }
+                    modifier = Modifier.bouncyClickable(pressedScale = 0.92f, onClick = onOpenMediaApp)
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -163,7 +169,7 @@ fun MediaControlCard(
                         shape = CircleShape,
                         modifier = Modifier
                             .size(34.dp)
-                            .clickable { onSwapRequested() }
+                            .bouncyClickable(pressedScale = 0.85f, onClick = onSwapRequested)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
@@ -180,13 +186,13 @@ fun MediaControlCard(
                         shape = CircleShape,
                         modifier = Modifier
                             .size(34.dp)
-                            .clickable {
+                            .bouncyClickable(pressedScale = 0.85f) {
                                 if (media.hasSession) onOpenMediaApp() else onOpenYoutubeFullscreen()
                             }
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                imageVector = Icons.Rounded.OpenInNew,
+                                imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
                                 contentDescription = "全螢幕展開媒體",
                                 tint = colors.primaryText,
                                 modifier = Modifier.size(17.dp)
@@ -327,7 +333,7 @@ fun MediaControlCard(
                             Surface(
                                 color = if (selected) colors.accent else colors.cardSurfaceElevated,
                                 shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.clickable { onSelectSession(sess.packageName) }
+                                modifier = Modifier.bouncyClickable(pressedScale = 0.90f) { onSelectSession(sess.packageName) }
                             ) {
                                 Text(
                                     text = sess.appLabel,
@@ -347,7 +353,7 @@ fun MediaControlCard(
                         modifier = Modifier
                             .fillMaxWidth()
                             .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.45f), RoundedCornerShape(14.dp))
-                            .clickable { onOpenYoutubeFullscreen() }
+                            .bouncyClickable(pressedScale = 0.94f, onClick = onOpenYoutubeFullscreen)
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -389,15 +395,24 @@ private fun TransportButton(
         shadowElevation = if (large) 4.dp else 0.dp,
         modifier = Modifier
             .size(if (large) 62.dp else 48.dp)
-            .clickable { onClick() }
+            .bouncyClickable(pressedScale = 0.84f, onClick = onClick)
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = icon,
-                contentDescription = contentDescription,
-                tint = if (large) colors.onAccent else colors.primaryText,
-                modifier = Modifier.size(if (large) 34.dp else 26.dp)
-            )
+            AnimatedContent(
+                targetState = icon,
+                transitionSpec = {
+                    (scaleIn(tween(180)) + fadeIn(tween(150))) togetherWith
+                        (scaleOut(tween(140)) + fadeOut(tween(120)))
+                },
+                label = "transportIconMorph"
+            ) { targetIcon ->
+                Icon(
+                    imageVector = targetIcon,
+                    contentDescription = contentDescription,
+                    tint = if (large) colors.onAccent else colors.primaryText,
+                    modifier = Modifier.size(if (large) 34.dp else 26.dp)
+                )
+            }
         }
     }
 }

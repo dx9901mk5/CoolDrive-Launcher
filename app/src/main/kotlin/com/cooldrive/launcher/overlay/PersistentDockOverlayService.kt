@@ -67,7 +67,7 @@ import com.cooldrive.launcher.theme.LocalCoolDriveColors
 import com.cooldrive.launcher.ui.CoolwalkDock
 import com.cooldrive.launcher.ui.IncomingCallBanner
 import com.cooldrive.launcher.ui.IncomingMessageBanner
-import com.cooldrive.launcher.ui.buildDefaultDockSlots
+import com.cooldrive.launcher.ui.buildRecentDockSlots
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -162,6 +162,7 @@ class PersistentDockOverlayService :
                 val config by app.preferences.config.collectAsState()
                 val sysStatus by app.systemStatusMonitor.status.collectAsState()
                 val apps by app.installedAppsRepository.apps.collectAsState()
+                val liveRecent by app.installedAppsRepository.recentPackages.collectAsState()
                 val activePkg by CoolDriveAccessibilityService.foregroundPackage.collectAsState()
                 val messages by app.notificationCenter.messages.collectAsState()
                 val collapsed by isCollapsed.collectAsState()
@@ -178,8 +179,13 @@ class PersistentDockOverlayService :
                     rightHandDrive = config.rightHandDrive,
                     customPrimaryRatio = config.primarySplitRatio
                 )
-                val slots = remember(config.pinnedDockPackages, apps, activePkg) {
-                    buildDefaultDockSlots(config.pinnedDockPackages, apps, activePkg)
+                val slots = remember(liveRecent, config.recentDockPackages, config.pinnedDockPackages, apps, activePkg) {
+                    buildRecentDockSlots(
+                        recentPackages = (liveRecent + config.recentDockPackages).distinct(),
+                        fallbackPackages = config.pinnedDockPackages,
+                        installedApps = apps,
+                        activePackage = activePkg
+                    )
                 }
                 val unreadCount = remember(messages) { messages.count { !it.isRead } }
 
@@ -221,6 +227,7 @@ class PersistentDockOverlayService :
                             isDashboardActive = false,
                             unreadCount = unreadCount,
                             pinnedSlots = slots,
+                            rightHandDrive = config.rightHandDrive,
                             isOverlayMode = true,
                             onToggleAppDrawer = { bringCoolDriveToFront(MainActivity.EXTRA_OPEN_DRAWER) },
                             onGoDashboard = { bringCoolDriveToFront(null) },

@@ -11,7 +11,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +29,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.Brightness6
 import androidx.compose.material.icons.rounded.Close
@@ -39,7 +39,6 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SwapHoriz
-import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -129,7 +128,7 @@ fun AppDrawerScreen(
                                 if (selected) colors.accent else colors.cardBorder,
                                 RoundedCornerShape(18.dp)
                             )
-                            .clickable { selectedCategory = cat }
+                            .bouncyClickable(pressedScale = 0.90f) { selectedCategory = cat }
                     ) {
                         Text(
                             text = cat.labelZh,
@@ -152,7 +151,7 @@ fun AppDrawerScreen(
                     shape = RoundedCornerShape(20.dp),
                     modifier = Modifier
                         .border(1.2.dp, colors.accent.copy(alpha = 0.7f), RoundedCornerShape(20.dp))
-                        .clickable { onOpenSettings() }
+                        .bouncyClickable(pressedScale = 0.91f, onClick = onOpenSettings)
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
@@ -199,13 +198,15 @@ fun AppDrawerScreen(
         )
         Spacer(Modifier.height(12.dp))
 
-        // APP GRID (Always starts with CoolDrive Settings tile & YouTube Fullscreen shortcut!)
+        // APP GRID with real spring rubber-band overscroll bounce at top & bottom!
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 112.dp),
-            contentPadding = PaddingValues(bottom = 16.dp),
+            contentPadding = PaddingValues(top = 4.dp, bottom = 22.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .springBounceOverscroll(maxOverscrollPx = 190f)
         ) {
             // Built-in Launcher Settings Tile (Style, GitHub, Auto-Update)
             item(key = "__cooldrive_settings__") {
@@ -245,7 +246,8 @@ fun AppDrawerScreen(
                             shape = RoundedCornerShape(20.dp)
                         )
                         .clip(RoundedCornerShape(20.dp))
-                        .combinedClickable(
+                        .bouncyCombinedClickable(
+                            pressedScale = 0.90f,
                             onClick = { onLaunchApp(app.packageName) },
                             onLongClick = { onTogglePin(app.packageName) }
                         )
@@ -306,7 +308,7 @@ private fun BuiltInDrawerTile(
         modifier = Modifier
             .border(1.2.dp, tint.copy(alpha = 0.55f), RoundedCornerShape(20.dp))
             .clip(RoundedCornerShape(20.dp))
-            .clickable { onClick() }
+            .bouncyClickable(pressedScale = 0.90f, onClick = onClick)
     ) {
         Box(modifier = Modifier.padding(12.dp)) {
             if (badgeAlert) {
@@ -475,7 +477,7 @@ fun QuickControlCenterOverlay(
 
                 // Media Volume Slider
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.VolumeUp, contentDescription = null, tint = colors.accent)
+                    Icon(Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = null, tint = colors.accent)
                     Spacer(Modifier.width(12.dp))
                     Text("音量", color = colors.primaryText, fontSize = 14.sp, modifier = Modifier.width(42.dp))
                     Slider(
@@ -505,7 +507,7 @@ private fun QuickTile(
         shape = RoundedCornerShape(18.dp),
         modifier = modifier
             .height(74.dp)
-            .clickable { onClick() }
+            .bouncyClickable(pressedScale = 0.91f, onClick = onClick)
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -573,7 +575,7 @@ fun BuiltInYoutubeFullscreenScreen(
                 .align(Alignment.TopEnd)
                 .padding(14.dp)
                 .border(1.dp, colors.cardBorder, RoundedCornerShape(20.dp))
-                .clickable { onClose() }
+                .bouncyClickable(pressedScale = 0.90f, onClick = onClose)
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),

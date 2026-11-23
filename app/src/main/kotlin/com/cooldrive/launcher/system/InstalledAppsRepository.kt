@@ -201,10 +201,11 @@ class InstalledAppsRepository(private val context: Context) {
     }
 
     fun recordRecent(packageName: String) {
-        if (packageName == context.packageName) return
+        if (packageName.isBlank() || packageName == context.packageName) return
         val next = (_recentPackages.value - packageName).toMutableList()
         next.add(0, packageName)
         _recentPackages.value = next.take(8)
+        com.cooldrive.launcher.CoolDriveApp.instance?.preferences?.recordRecentDockPackage(packageName)
     }
 
     /**
@@ -265,6 +266,50 @@ class InstalledAppsRepository(private val context: Context) {
         }.getOrDefault(false)
 
         return if (ok) true else launchAppFullscreen("com.google.android.apps.maps")
+    }
+
+    /**
+     * Launches real Google Maps into the adjacent native Android Split-Screen pane.
+     */
+    fun launchGoogleMapsAdjacent(): Boolean {
+        val pkg = findBestGoogleMapsPackage() ?: "com.google.android.apps.maps"
+        val intent = pm.getLaunchIntentForPackage(pkg)?.apply {
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT or
+                    Intent.FLAG_ACTIVITY_MULTIPLE_TASK
+            )
+        } ?: return false
+        return runCatching {
+            context.startActivity(intent)
+            recordRecent(pkg)
+            true
+        }.getOrDefault(false)
+    }
+
+    /**
+     * Attempts to launch real Google Maps in a Freeform window pinned directly inside
+     * the exact pixel bounds of the left Map card (works on Freeform-enabled AI Box ROMs).
+     */
+    fun launchGoogleMapsFreeform(bounds: Rect): Boolean {
+        val pkg = findBestGoogleMapsPackage() ?: "com.google.android.apps.maps"
+        val intent = pm.getLaunchIntentForPackage(pkg)?.apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+        } ?: return false
+        return runCatching {
+            val options = ActivityOptions.makeBasic()
+            options.launchBounds = bounds
+            // Try hidden WindowConfiguration.WINDOWING_MODE_FREEFORM (5) supported on many AI Boxes
+            runCatching {
+                val method = ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
+                method.invoke(options, 5)
+            }
+            context.startActivity(intent, options.toBundle())
+            recordRecent(pkg)
+            true
+        }.getOrElse {
+            launchAppFullscreen(pkg)
+        }
     }
 
     fun launchDialer(): Boolean {

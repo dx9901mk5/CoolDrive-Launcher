@@ -11,6 +11,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.Network
@@ -20,6 +21,8 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.ContextCompat
+import com.cooldrive.launcher.comms.BluetoothCompanionService
+import com.cooldrive.launcher.comms.BridgeConnectionStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -75,6 +78,7 @@ class SystemStatusMonitor(private val context: Context) {
     private val dateFmt = DateTimeFormatter.ofPattern("M月d日 E", Locale.TRADITIONAL_CHINESE)
 
     private var started = false
+    private val activeAclDevices = LinkedHashMap<String, String>()
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) = refreshNetworkState()
@@ -84,6 +88,7 @@ class SystemStatusMonitor(private val context: Context) {
     }
 
     private val systemReceiver = object : BroadcastReceiver() {
+        @SuppressLint("MissingPermission")
         override fun onReceive(ctx: Context?, intent: Intent?) {
             when (intent?.action) {
                 Intent.ACTION_TIME_TICK,
@@ -92,10 +97,27 @@ class SystemStatusMonitor(private val context: Context) {
                 WifiManager.WIFI_STATE_CHANGED_ACTION,
                 WifiManager.RSSI_CHANGED_ACTION,
                 WifiManager.NETWORK_STATE_CHANGED_ACTION -> refreshNetworkState()
+                BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                    @Suppress("DEPRECATION")
+                    val dev = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                    if (dev != null) {
+                        val name = runCatching { dev.name }.getOrNull().orEmpty().ifBlank { dev.address }
+                        activeAclDevices[dev.address] = name
+                    }
+                    refreshBluetoothState()
+                }
+                BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                    @Suppress("DEPRECATION")
+                    val dev = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                    if (dev != null) {
+                        activeAclDevices.remove(dev.address)
+                    }
+                    refreshBluetoothState()
+                }
                 BluetoothAdapter.ACTION_STATE_CHANGED,
                 BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED,
-                BluetoothDevice.ACTION_ACL_CONNECTED,
-                BluetoothDevice.ACTION_ACL_DISCONNECTED -> refreshBluetoothState()
+                "android.bluetooth.headsetclient.profile.action.CONNECTION_STATE_CHANGED",
+                "android.bluetooth.a2dp-sink.profile.action.CONNECTION_STATE_CHANGED" -> refreshBluetoothState()
             }
         }
     }
@@ -121,6 +143,8 @@ class SystemStatusMonitor(private val context: Context) {
             addAction(BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED)
             addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
             addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            addAction("android.bluetooth.headsetclient.profile.action.CONNECTION_STATE_CHANGED")
+            addAction("android.bluetooth.a2dp-sink.profile.action.CONNECTION_STATE_CHANGED")
         }
         ContextCompat.registerReceiver(
             context,
@@ -133,6 +157,7 @@ class SystemStatusMonitor(private val context: Context) {
         scope.launch {
             while (isActive) {
                 refreshClock()
+                refreshBluetoothState()
                 refreshAudioAndBrightness()
                 delay(5_000L)
             }
@@ -226,14 +251,51 @@ class SystemStatusMonitor(private val context: Context) {
             return
         }
 
-        var connected = false
-        var connectedName = ""
+        var connected = activeAclDevices.isNotEmpty()
+        var connectedName = activeAclDevices.values.lastOrNull().orEmpty()
+
+        // Check Companion SPP bridge directly
+        val bridge = BluetoothCompanionService.bridgeState.value
+        if (bridge.status == BridgeConnectionStatus.CONNECTED) {
+            connected = true
+            if (connectedName.isBlank()) connectedName = bridge.peerName
+        }
+
+        // Check Android AudioManager active Bluetooth audio endpoints (works on almost all AI Boxes!)
         runCatching {
+            val audioDevices = audioManager.getDevices(AudioManager.GET_DEVICES_ALL)
+            val btAudio = audioDevices.firstOrNull { dev ->
+                dev.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                    dev.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                        (dev.type == AudioDeviceInfo.TYPE_BLE_HEADSET || dev.type == AudioDeviceInfo.TYPE_BLE_SPEAKER))
+            }
+            if (btAudio != null) {
+                connected = true
+                if (connectedName.isBlank()) {
+                    connectedName = btAudio.productName?.toString().orEmpty()
+                }
+            }
+        }
+
+        runCatching {
+            // Adapter-level global connection state (covers HFP Client / A2DP Sink / PBAP / MAP on AI Box)
+            val globalState = runCatching {
+                adapter.javaClass.getMethod("getConnectionState").invoke(adapter) as? Int
+            }.getOrDefault(BluetoothAdapter.STATE_DISCONNECTED)
+            if (globalState == BluetoothAdapter.STATE_CONNECTED) {
+                connected = true
+            }
+
             val profiles = listOf(
                 BluetoothProfile.HEADSET,
                 BluetoothProfile.A2DP,
-                16, // BluetoothProfile.HEADSET_CLIENT (HFP Client on AI Box / Automotive)
-                11  // BluetoothProfile.A2DP_SINK (on AI Box / Automotive)
+                5,  // PAN
+                11, // A2DP_SINK (AI Box / Automotive)
+                12, // AVRCP_CONTROLLER (AI Box / Automotive)
+                16, // HEADSET_CLIENT / HFP Client (AI Box / Automotive)
+                17, // PBAP_CLIENT
+                18  // MAP_CLIENT
             )
             for (profile in profiles) {
                 val state = runCatching { adapter.getProfileConnectionState(profile) }
@@ -243,6 +305,19 @@ class SystemStatusMonitor(private val context: Context) {
                     break
                 }
             }
+
+            // GATT connected devices (for BLE dual-mode phones paired to AI Box)
+            runCatching {
+                val gattDevs = bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT).orEmpty() +
+                    bluetoothManager?.getConnectedDevices(BluetoothProfile.GATT_SERVER).orEmpty()
+                if (gattDevs.isNotEmpty()) {
+                    connected = true
+                    if (connectedName.isBlank()) {
+                        connectedName = gattDevs.first().name ?: gattDevs.first().address
+                    }
+                }
+            }
+
             val bonded = adapter.bondedDevices.orEmpty()
             for (dev in bonded) {
                 val isDevConnected = isDeviceConnectedReflect(dev)

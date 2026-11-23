@@ -122,7 +122,7 @@ object CoolwalkLayoutEngine {
 
         val clampedPrimary = customPrimaryRatio.coerceIn(0.54f, 0.72f)
         val isHorizontalSplit = metrics.isLandscape && widthDp >= 560f
-        val supportsThirdSubCard = isHorizontalSplit && heightDp >= 430f && widthDp >= 780f
+        val supportsThirdSubCard = isHorizontalSplit
         val dockThickness = when {
             placement == ResolvedDockPlacement.BOTTOM && heightDp < 420f -> 64
             placement == ResolvedDockPlacement.BOTTOM -> 72
