@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.Icon
@@ -89,6 +90,7 @@ fun CoolwalkDock(
     pinnedSlots: List<DockAppSlot>,
     rightHandDrive: Boolean = false,
     isOverlayMode: Boolean = false,
+    isOverlayPinnedOpen: Boolean = false,
     onToggleAppDrawer: () -> Unit,
     onGoDashboard: () -> Unit,
     onSlotClick: (DockAppSlot) -> Unit,
@@ -98,6 +100,7 @@ fun CoolwalkDock(
     onClockClick: () -> Unit,
     onNotificationsClick: () -> Unit,
     onCollapseOverlay: (() -> Unit)? = null,
+    onTogglePinOverlay: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalCoolDriveColors.current
@@ -115,6 +118,14 @@ fun CoolwalkDock(
                     onClick = if (isAppDrawerOpen) onGoDashboard else onToggleAppDrawer,
                     onLongClick = onGoDashboard
                 )
+                if (isOverlayMode && onTogglePinOverlay != null) {
+                    SmallDockUtilityIcon(
+                        icon = Icons.Rounded.PushPin,
+                        contentDescription = if (isOverlayPinnedOpen) "取消釘選常駐" else "暫時釘選展開",
+                        tint = if (isOverlayPinnedOpen) colors.accent else colors.secondaryText,
+                        onClick = onTogglePinOverlay
+                    )
+                }
                 if (isOverlayMode && onCollapseOverlay != null) {
                     SmallDockUtilityIcon(
                         icon = Icons.Rounded.ChevronLeft,
@@ -245,13 +256,25 @@ fun CoolwalkDock(
                             onLongClick = onBluetoothLongClick
                         )
                     }
-                    if (isOverlayMode && onCollapseOverlay != null) {
-                        SmallDockUtilityIcon(
-                            icon = Icons.Rounded.ChevronLeft,
-                            contentDescription = "收合常駐列",
-                            tint = colors.secondaryText,
-                            onClick = onCollapseOverlay
-                        )
+                    if (isOverlayMode && (onCollapseOverlay != null || onTogglePinOverlay != null)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            if (onTogglePinOverlay != null) {
+                                SmallDockUtilityIcon(
+                                    icon = Icons.Rounded.PushPin,
+                                    contentDescription = if (isOverlayPinnedOpen) "取消釘選常駐" else "暫時釘選展開",
+                                    tint = if (isOverlayPinnedOpen) colors.accent else colors.secondaryText,
+                                    onClick = onTogglePinOverlay
+                                )
+                            }
+                            if (onCollapseOverlay != null) {
+                                SmallDockUtilityIcon(
+                                    icon = Icons.Rounded.ChevronLeft,
+                                    contentDescription = "收合常駐列",
+                                    tint = colors.secondaryText,
+                                    onClick = onCollapseOverlay
+                                )
+                            }
+                        }
                     }
                 }
 

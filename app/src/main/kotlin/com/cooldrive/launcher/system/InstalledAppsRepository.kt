@@ -19,6 +19,9 @@ import androidx.core.content.ContextCompat
 import com.cooldrive.launcher.accessibility.CoolDriveAccessibilityService
 import com.cooldrive.launcher.data.SplitLaunchEngine
 import com.cooldrive.launcher.data.SplitScreenShortcut
+import com.cooldrive.launcher.layout.CoolwalkLayoutSpec
+import com.cooldrive.launcher.layout.ResolvedDockPlacement
+import com.cooldrive.launcher.layout.ScreenMetrics
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -272,6 +275,33 @@ class InstalledAppsRepository(private val context: Context) {
             return launchGoogleMapsNavigation(null)
         }
         return ok
+    }
+
+    /**
+     * Option 2 (Optional Freeform Avoid-Dock Launch) vs Standard Fullscreen Launch:
+     * When [avoidDockFreeform] is enabled, computes the exact screen bounds avoiding the Dock
+     * area and launches the target app into those Freeform bounds.
+     */
+    fun launchAppSmart(
+        packageName: String,
+        avoidDockFreeform: Boolean,
+        metrics: ScreenMetrics,
+        spec: CoolwalkLayoutSpec
+    ): Boolean {
+        if (!avoidDockFreeform) {
+            return launchAppFullscreen(packageName)
+        }
+        val bounds = computeAvoidDockBounds(metrics, spec)
+        return launchPackageFreeform(packageName, bounds)
+    }
+
+    fun computeAvoidDockBounds(metrics: ScreenMetrics, spec: CoolwalkLayoutSpec): Rect {
+        val dockPx = (spec.dockThicknessDp * metrics.density).toInt().coerceAtLeast(0)
+        return when (spec.dockPlacement) {
+            ResolvedDockPlacement.LEFT -> Rect(dockPx, 0, metrics.widthPx, metrics.heightPx)
+            ResolvedDockPlacement.RIGHT -> Rect(0, 0, (metrics.widthPx - dockPx).coerceAtLeast(240), metrics.heightPx)
+            ResolvedDockPlacement.BOTTOM -> Rect(0, 0, metrics.widthPx, (metrics.heightPx - dockPx).coerceAtLeast(240))
+        }
     }
 
     /**

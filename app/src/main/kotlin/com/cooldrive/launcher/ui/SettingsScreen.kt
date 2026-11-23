@@ -714,9 +714,41 @@ fun SettingsScreen(
 
                 SettingsToggleRow(
                     title = "常駐懸浮 Dock（在其他全螢幕 App 上方常駐）",
-                    subtitle = "開啟後在 YouTube／Google 地圖全螢幕時保留常駐列；若車機盒本身已有左側常駐列，可關閉避免重疊兩條",
+                    subtitle = "開啟後在 YouTube／Google 地圖／導航王全螢幕時保留常駐列；若車機盒本身已有原廠左側列可關閉",
                     checked = config.persistentOverlayDockEnabled,
                     onCheckedChange = { checked -> onUpdateConfig { it.copy(persistentOverlayDockEnabled = checked) } }
+                )
+
+                if (config.persistentOverlayDockEnabled) {
+                    SettingsToggleRow(
+                        title = "全螢幕 App 自動收合為極細邊緣拉條（推薦）",
+                        subtitle = "進入 Google 地圖、YouTube 或導航王時自動縮成 15dp 微透明邊條完全不擋畫面，從邊緣一滑或輕點即展開",
+                        checked = config.overlayAutoCollapseEnabled,
+                        onCheckedChange = { checked -> onUpdateConfig { it.copy(overlayAutoCollapseEnabled = checked) } }
+                    )
+
+                    if (config.overlayAutoCollapseEnabled) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("展開後自動收回：", color = colors.secondaryText, fontSize = 12.sp)
+                            listOf(3 to "3 秒", 4 to "4 秒", 7 to "7 秒", 0 to "手動收回").forEach { (sec, label) ->
+                                SelectablePill(
+                                    text = label,
+                                    selected = config.overlayAutoRetractSeconds == sec,
+                                    onClick = { onUpdateConfig { it.copy(overlayAutoRetractSeconds = sec) } }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                SettingsToggleRow(
+                    title = "實驗性選配：啟動 App 時以 Freeform 避讓 Dock 區域",
+                    subtitle = "嘗試讓開啟的 App 自動往右（或上方）避開 Dock 寬度；註：部分車機可能出現視窗標題列，或 YT／導航王全螢幕時會跳回滿版",
+                    checked = config.launchAppsAvoidDockFreeform,
+                    onCheckedChange = { checked -> onUpdateConfig { it.copy(launchAppsAvoidDockFreeform = checked) } }
                 )
 
                 SettingsToggleRow(

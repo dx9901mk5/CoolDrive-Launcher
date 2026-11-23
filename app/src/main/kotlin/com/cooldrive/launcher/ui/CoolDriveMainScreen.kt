@@ -237,9 +237,18 @@ fun CoolDriveRootScreen(
         )
     }
 
+    fun launchAppRespectingOptions(packageName: String): Boolean {
+        return app.installedAppsRepository.launchAppSmart(
+            packageName = packageName,
+            avoidDockFreeform = config.launchAppsAvoidDockFreeform,
+            metrics = screenMetrics,
+            spec = layoutSpec
+        )
+    }
+
     fun launchYoutubeBest() {
         val ytPkg = app.installedAppsRepository.findBestYoutubePackage()
-        if (ytPkg != null && app.installedAppsRepository.launchAppFullscreen(ytPkg)) {
+        if (ytPkg != null && launchAppRespectingOptions(ytPkg)) {
             return
         }
         destination = LauncherDestination.FULLSCREEN_YOUTUBE_WEB
@@ -292,7 +301,7 @@ fun CoolDriveRootScreen(
                 }
             }
             else -> {
-                if (!app.installedAppsRepository.launchAppFullscreen(token)) {
+                if (!launchAppRespectingOptions(token)) {
                     gestureHudText = "無法啟動該應用程式"
                 }
             }
@@ -426,7 +435,7 @@ fun CoolDriveRootScreen(
                             slot.id == "youtube" -> launchYoutubeBest()
                             slot.packageName == "ACTION_DIAL" -> app.installedAppsRepository.launchDialer()
                             !slot.packageName.isNullOrBlank() -> {
-                                app.installedAppsRepository.launchAppFullscreen(slot.packageName)
+                                launchAppRespectingOptions(slot.packageName)
                             }
                             else -> destination = LauncherDestination.APP_DRAWER
                         }
@@ -586,7 +595,7 @@ fun CoolDriveRootScreen(
                                 apps = installedApps,
                                 splitShortcuts = config.splitShortcuts,
                                 hasPendingUpdate = updateState.hasUpdate || updateState.downloadedReady,
-                                onLaunchApp = { pkg -> app.installedAppsRepository.launchAppFullscreen(pkg) },
+                                onLaunchApp = { pkg -> launchAppRespectingOptions(pkg) },
                                 onLaunchSplitShortcut = { sc ->
                                     app.installedAppsRepository.launchSplitShortcut(sc, dm.widthPixels, dm.heightPixels)
                                     gestureHudText = "⊞ 正在開啟分屏：${sc.label} (${sc.ratio.label})"

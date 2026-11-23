@@ -5,9 +5,11 @@ import com.cooldrive.launcher.data.MapEngineStyle
 /**
  * Zero-API-Key map styles for MapLibre OpenGL:
  * 1. GOOGLE_TRAFFIC_TILES:
- *    - Day: Google Maps Standard + Real-Time Traffic layer (Traditional Chinese zh-TW)
- *    - Night: Low-glare Dark Matter vector/raster navigation dark style (prevents night glare)
- *      with live Google Traffic overlay on top!
+ *    - Uses 100% authentic Google Maps HD (scale=2) Standard + Real-Time Traffic tiles (zh-TW)
+ *      with real Taiwan POIs, stores, stations, and live traffic!
+ *    - In Night Mode, MapLibrePane applies a GPU Hue-Preserving Night ColorMatrix on TextureView
+ *      so white roads/land become deep Google Maps Night Navy while parks stay green, water stays
+ *      blue, traffic stays red/yellow/green, and all real Google Maps Chinese POIs remain crystal clear!
  * 2. OPENFREEMAP_VECTOR_3D:
  *    - Day: OpenFreeMap Liberty 3D Vector (3D buildings, crisp scaling at any car DPI)
  *    - Night: OpenFreeMap Dark Vector
@@ -30,86 +32,34 @@ object MapStyleFactory {
                 )
             }
             MapEngineStyle.GOOGLE_TRAFFIC_TILES -> {
-                if (isNight) {
-                    ResolvedMapStyle.StyleJson(NIGHT_DARK_TRAFFIC_JSON)
-                } else {
-                    ResolvedMapStyle.StyleJson(DAY_GOOGLE_TRAFFIC_JSON)
-                }
+                ResolvedMapStyle.StyleJson(GOOGLE_HD_TRAFFIC_JSON)
             }
         }
     }
 
-    private val DAY_GOOGLE_TRAFFIC_JSON = """
+    private val GOOGLE_HD_TRAFFIC_JSON = """
         {
           "version": 8,
-          "name": "CoolDrive Google Day Traffic",
+          "name": "CoolDrive Authentic Google Traffic HD",
           "sources": {
-            "gmaps-day": {
+            "gmaps-hd": {
               "type": "raster",
               "tiles": [
-                "https://mt0.google.com/vt/lyrs=m,traffic&hl=zh-TW&gl=TW&x={x}&y={y}&z={z}",
-                "https://mt1.google.com/vt/lyrs=m,traffic&hl=zh-TW&gl=TW&x={x}&y={y}&z={z}",
-                "https://mt2.google.com/vt/lyrs=m,traffic&hl=zh-TW&gl=TW&x={x}&y={y}&z={z}",
-                "https://mt3.google.com/vt/lyrs=m,traffic&hl=zh-TW&gl=TW&x={x}&y={y}&z={z}"
+                "https://mt0.google.com/vt/lyrs=m,traffic&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
+                "https://mt1.google.com/vt/lyrs=m,traffic&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
+                "https://mt2.google.com/vt/lyrs=m,traffic&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
+                "https://mt3.google.com/vt/lyrs=m,traffic&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}"
               ],
               "tileSize": 256
             }
           },
           "layers": [
             {
-              "id": "gmaps-day-layer",
+              "id": "gmaps-hd-layer",
               "type": "raster",
-              "source": "gmaps-day",
+              "source": "gmaps-hd",
               "minzoom": 0,
               "maxzoom": 20
-            }
-          ]
-        }
-    """.trimIndent()
-
-    // Anti-glare automotive dark base + translucent Google real-time traffic road layer
-    private val NIGHT_DARK_TRAFFIC_JSON = """
-        {
-          "version": 8,
-          "name": "CoolDrive Night Navigation",
-          "sources": {
-            "dark-base": {
-              "type": "raster",
-              "tiles": [
-                "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-                "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-                "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png"
-              ],
-              "tileSize": 256
-            },
-            "gmaps-night-tint": {
-              "type": "raster",
-              "tiles": [
-                "https://mt0.google.com/vt/lyrs=m,traffic&hl=zh-TW&gl=TW&x={x}&y={y}&z={z}",
-                "https://mt1.google.com/vt/lyrs=m,traffic&hl=zh-TW&gl=TW&x={x}&y={y}&z={z}"
-              ],
-              "tileSize": 256
-            }
-          },
-          "layers": [
-            {
-              "id": "dark-base-layer",
-              "type": "raster",
-              "source": "dark-base",
-              "paint": {
-                "raster-brightness-max": 0.92,
-                "raster-contrast": 0.12
-              }
-            },
-            {
-              "id": "gmaps-night-overlay",
-              "type": "raster",
-              "source": "gmaps-night-tint",
-              "paint": {
-                "raster-opacity": 0.28,
-                "raster-brightness-max": 0.65,
-                "raster-saturation": -0.15
-              }
             }
           ]
         }

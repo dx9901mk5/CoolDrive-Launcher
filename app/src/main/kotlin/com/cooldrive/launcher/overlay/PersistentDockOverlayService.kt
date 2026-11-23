@@ -17,25 +17,24 @@ import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.KeyboardArrowUp
-import androidx.compose.material3.Icon
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
@@ -68,6 +67,7 @@ import com.cooldrive.launcher.ui.CoolwalkDock
 import com.cooldrive.launcher.ui.IncomingCallBanner
 import com.cooldrive.launcher.ui.IncomingMessageBanner
 import com.cooldrive.launcher.ui.buildRecentDockSlots
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -95,8 +95,11 @@ class PersistentDockOverlayService :
     private var dockParams: WindowManager.LayoutParams? = null
     private var bannerParams: WindowManager.LayoutParams? = null
 
-    private val isCollapsed = MutableStateFlow(false)
+    private val isCollapsed = MutableStateFlow(true)
+    private val isPinnedOpen = MutableStateFlow(false)
+    private val interactionTick = MutableStateFlow(0L)
     private val metricsFlow = MutableStateFlow(ScreenMetrics(1280, 720, 240))
+    private var lastHomeForeground = true
 
     override fun onCreate() {
         super.onCreate()
@@ -166,7 +169,21 @@ class PersistentDockOverlayService :
                 val activePkg by CoolDriveAccessibilityService.foregroundPackage.collectAsState()
                 val messages by app.notificationCenter.messages.collectAsState()
                 val collapsed by isCollapsed.collectAsState()
+                val pinnedOpen by isPinnedOpen.collectAsState()
+                val tick by interactionTick.collectAsState()
                 val metrics by metricsFlow.collectAsState()
+
+                // Auto-retract back to slim edge handle after idle seconds (when auto-collapse is ON & not pinned)
+                LaunchedEffect(collapsed, pinnedOpen, tick, config.overlayAutoCollapseEnabled, config.overlayAutoRetractSeconds) {
+                    if (!collapsed &&
+                        config.overlayAutoCollapseEnabled &&
+                        !pinnedOpen &&
+                        config.overlayAutoRetractSeconds > 0
+                    ) {
+                        delay(config.overlayAutoRetractSeconds * 1_000L)
+                        isCollapsed.value = true
+                    }
+                }
 
                 val isNight = DayNightEngine.isNightNow(
                     config = config,
@@ -196,64 +213,138 @@ class PersistentDockOverlayService :
                 ) {
                     val palette = LocalCoolDriveColors.current
                     if (collapsed) {
+                        // Ultra-slim translucent edge handle (14dp) — ZERO blocking of Google Maps / YT / NaviKing!
+                        val handleShape = when (spec.dockPlacement) {
+                            ResolvedDockPlacement.LEFT -> RoundedCornerShape(topEnd = 12.dp, bottomEnd = 12.dp)
+                            ResolvedDockPlacement.RIGHT -> RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp)
+                            ResolvedDockPlacement.BOTTOM -> RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
+                        }
                         val isBottom = spec.dockPlacement == ResolvedDockPlacement.BOTTOM
+                        val swipeModifier = if (isBottom) {
+                            Modifier.pointerInput(spec.dockPlacement) {
+                                detectVerticalDragGestures { _, dragAmount ->
+                                    if (dragAmount < -14f) {
+                                        isCollapsed.value = false
+                                        interactionTick.value++
+                                    }
+                                }
+                            }
+                        } else {
+                            Modifier.pointerInput(spec.dockPlacement) {
+                                detectHorizontalDragGestures { _, dragAmount ->
+                                    val inward = if (spec.dockPlacement == ResolvedDockPlacement.LEFT) dragAmount > 14f else dragAmount < -14f
+                                    if (inward) {
+                                        isCollapsed.value = false
+                                        interactionTick.value++
+                                    }
+                                }
+                            }
+                        }
+
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
-                                .padding(4.dp)
                                 .then(
-                                    if (isBottom) Modifier.width(68.dp).height(24.dp)
-                                    else Modifier.width(24.dp).height(76.dp)
+                                    if (isBottom) Modifier.width(108.dp).height(15.dp)
+                                    else Modifier.width(15.dp).height(108.dp)
                                 )
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(palette.glassOverlay)
-                                .border(1.dp, palette.accent.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
-                                .clickable { isCollapsed.value = false }
+                                .clip(handleShape)
+                                .background(palette.glassOverlay.copy(alpha = 0.72f))
+                                .border(1.dp, palette.accent.copy(alpha = 0.55f), handleShape)
+                                .then(swipeModifier)
+                                .clickable {
+                                    isCollapsed.value = false
+                                    interactionTick.value++
+                                }
                         ) {
-                            Icon(
-                                imageVector = if (isBottom) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.ChevronRight,
-                                contentDescription = "展開常駐 Dock",
-                                tint = palette.accent,
-                                modifier = Modifier.size(18.dp)
+                            Box(
+                                modifier = Modifier
+                                    .then(
+                                        if (isBottom) Modifier.width(44.dp).height(4.dp)
+                                        else Modifier.width(4.dp).height(44.dp)
+                                    )
+                                    .clip(CircleShape)
+                                    .background(palette.accent.copy(alpha = 0.9f))
                             )
                         }
                     } else {
-                        CoolwalkDock(
-                            placement = spec.dockPlacement,
-                            thicknessDp = spec.dockThicknessDp,
-                            systemStatus = sysStatus,
-                            is24HourClock = config.is24HourClock,
-                            isAppDrawerOpen = false,
-                            isDashboardActive = false,
-                            unreadCount = unreadCount,
-                            pinnedSlots = slots,
-                            rightHandDrive = config.rightHandDrive,
-                            isOverlayMode = true,
-                            onToggleAppDrawer = { bringCoolDriveToFront(MainActivity.EXTRA_OPEN_DRAWER) },
-                            onGoDashboard = { bringCoolDriveToFront(null) },
-                            onSlotClick = { slot ->
-                                when {
-                                    slot.packageName == "ACTION_DIAL" -> app.installedAppsRepository.launchDialer()
-                                    !slot.packageName.isNullOrBlank() -> {
-                                        val ok = app.installedAppsRepository.launchAppFullscreen(slot.packageName)
-                                        if (!ok && slot.id == "youtube") {
-                                            bringCoolDriveToFront(MainActivity.EXTRA_OPEN_YOUTUBE)
-                                        }
+                        Box(
+                            modifier = Modifier.pointerInput(Unit) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        awaitPointerEvent(PointerEventPass.Initial)
+                                        interactionTick.value++
                                     }
-                                    slot.id == "youtube" -> {
-                                        val yt = app.installedAppsRepository.findBestYoutubePackage()
-                                        if (yt != null) app.installedAppsRepository.launchAppFullscreen(yt)
-                                        else bringCoolDriveToFront(MainActivity.EXTRA_OPEN_YOUTUBE)
-                                    }
-                                    else -> bringCoolDriveToFront(MainActivity.EXTRA_OPEN_DRAWER)
                                 }
-                            },
-                            onWifiClick = { SystemStatusMonitor.openWifiSettings(this@PersistentDockOverlayService) },
-                            onBluetoothClick = { SystemStatusMonitor.openBluetoothSettings(this@PersistentDockOverlayService) },
-                            onClockClick = { bringCoolDriveToFront(MainActivity.EXTRA_OPEN_QUICK_PANEL) },
-                            onNotificationsClick = { bringCoolDriveToFront(MainActivity.EXTRA_OPEN_NOTIFICATIONS) },
-                            onCollapseOverlay = { isCollapsed.value = true }
-                        )
+                            }
+                        ) {
+                            CoolwalkDock(
+                                placement = spec.dockPlacement,
+                                thicknessDp = spec.dockThicknessDp,
+                                systemStatus = sysStatus,
+                                is24HourClock = config.is24HourClock,
+                                isAppDrawerOpen = false,
+                                isDashboardActive = false,
+                                unreadCount = unreadCount,
+                                pinnedSlots = slots,
+                                rightHandDrive = config.rightHandDrive,
+                                isOverlayMode = true,
+                                isOverlayPinnedOpen = pinnedOpen,
+                                onToggleAppDrawer = { bringCoolDriveToFront(MainActivity.EXTRA_OPEN_DRAWER) },
+                                onGoDashboard = { bringCoolDriveToFront(null) },
+                                onSlotClick = { slot ->
+                                    when {
+                                        slot.packageName == "ACTION_DIAL" -> app.installedAppsRepository.launchDialer()
+                                        !slot.packageName.isNullOrBlank() -> {
+                                            val ok = app.installedAppsRepository.launchAppSmart(
+                                                packageName = slot.packageName,
+                                                avoidDockFreeform = config.launchAppsAvoidDockFreeform,
+                                                metrics = metrics,
+                                                spec = spec
+                                            )
+                                            if (!ok && slot.id == "youtube") {
+                                                bringCoolDriveToFront(MainActivity.EXTRA_OPEN_YOUTUBE)
+                                            }
+                                        }
+                                        slot.id == "youtube" -> {
+                                            val yt = app.installedAppsRepository.findBestYoutubePackage()
+                                            if (yt != null) {
+                                                app.installedAppsRepository.launchAppSmart(
+                                                    packageName = yt,
+                                                    avoidDockFreeform = config.launchAppsAvoidDockFreeform,
+                                                    metrics = metrics,
+                                                    spec = spec
+                                                )
+                                            } else {
+                                                bringCoolDriveToFront(MainActivity.EXTRA_OPEN_YOUTUBE)
+                                            }
+                                        }
+                                        else -> bringCoolDriveToFront(MainActivity.EXTRA_OPEN_DRAWER)
+                                    }
+                                    if (config.overlayAutoCollapseEnabled && !pinnedOpen) {
+                                        isCollapsed.value = true
+                                    }
+                                },
+                                onWifiClick = {
+                                    SystemStatusMonitor.openWifiSettings(this@PersistentDockOverlayService)
+                                    if (config.overlayAutoCollapseEnabled && !pinnedOpen) isCollapsed.value = true
+                                },
+                                onBluetoothClick = {
+                                    SystemStatusMonitor.openBluetoothSettings(this@PersistentDockOverlayService)
+                                    if (config.overlayAutoCollapseEnabled && !pinnedOpen) isCollapsed.value = true
+                                },
+                                onClockClick = { bringCoolDriveToFront(MainActivity.EXTRA_OPEN_QUICK_PANEL) },
+                                onNotificationsClick = { bringCoolDriveToFront(MainActivity.EXTRA_OPEN_NOTIFICATIONS) },
+                                onCollapseOverlay = {
+                                    isPinnedOpen.value = false
+                                    isCollapsed.value = true
+                                },
+                                onTogglePinOverlay = {
+                                    isPinnedOpen.value = !isPinnedOpen.value
+                                    interactionTick.value++
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -333,6 +424,17 @@ class PersistentDockOverlayService :
             ) { config, isHomeFg, collapsed, metrics ->
                 QuadState(config, isHomeFg, collapsed, metrics)
             }.collect { (config, isHomeFg, collapsed, metrics) ->
+                // Whenever transitioning from Home -> Third-party Fullscreen App:
+                // auto-collapse to slim edge handle if Option 1 is enabled (and not pinned open)
+                if (lastHomeForeground && !isHomeFg) {
+                    if (config.overlayAutoCollapseEnabled && !isPinnedOpen.value) {
+                        isCollapsed.value = true
+                    } else if (!config.overlayAutoCollapseEnabled) {
+                        isCollapsed.value = false
+                    }
+                }
+                lastHomeForeground = isHomeFg
+
                 val showDock = config.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
                     config.persistentOverlayDockEnabled &&
                     !isHomeFg

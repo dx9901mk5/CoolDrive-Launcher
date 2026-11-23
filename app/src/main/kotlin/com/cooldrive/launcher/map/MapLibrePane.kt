@@ -1,5 +1,9 @@
 package com.cooldrive.launcher.map
 
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
+import android.view.View
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -68,6 +72,7 @@ import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapLibreMapOptions
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 
@@ -96,9 +101,36 @@ fun LiveMapCard(
     var followVehicle by remember { mutableStateOf(true) }
     var currentZoom by remember { mutableDoubleStateOf(15.6) }
 
+    // GPU Hue-Preserving Night Mode Paint for authentic Google Maps HD tiles
+    val googleNightPaint = remember {
+        Paint().apply {
+            colorFilter = ColorMatrixColorFilter(
+                ColorMatrix(
+                    floatArrayOf(
+                        0.4822f, -1.2012f, -0.1210f, 0f, 236.2f,
+                        -0.3664f, -0.3698f, -0.1238f, 0f, 248.3f,
+                        -0.3919f, -1.3156f, 0.7875f, 0f, 276.6f,
+                        0f, 0f, 0f, 1f, 0f
+                    )
+                )
+            )
+        }
+    }
+
+    // Use TextureView mode so hardware ColorMatrixColorFilter applies cleanly at 60fps
     val mapView = remember {
-        MapView(context).apply {
+        val opts = MapLibreMapOptions.createFromAttributes(context).textureMode(true)
+        MapView(context, opts).apply {
             onCreate(null)
+        }
+    }
+
+    // Toggle GPU Night Mode filter cleanly when Google Maps HD style is active
+    LaunchedEffect(mapView, isNight, mapEngineStyle) {
+        if (isNight && mapEngineStyle == MapEngineStyle.GOOGLE_TRAFFIC_TILES) {
+            mapView.setLayerType(View.LAYER_TYPE_HARDWARE, googleNightPaint)
+        } else {
+            mapView.setLayerType(View.LAYER_TYPE_NONE, null)
         }
     }
 
