@@ -7,6 +7,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -58,6 +60,7 @@ import kotlin.math.roundToInt
  * Papago, Waze, etc. — rendered with real App Icon + Name) to occupy the left 70% area
  * alongside the pure Music Album-Cover Controller on the right 30%.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PlanCNavAppCard(
     selectedNavPackage: String,
@@ -212,9 +215,9 @@ fun PlanCNavAppCard(
                     }
                 }
 
-                Row(
+                FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Button(
                         onClick = { onLaunchFreeformHere(effectivePkg) },
@@ -223,7 +226,7 @@ fun PlanCNavAppCard(
                     ) {
                         Icon(Icons.Rounded.Map, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("貼合左側 $ratioPct% 開啟", fontWeight = FontWeight.Bold)
+                        Text("開啟左導航 ($ratioPct%) ＋ 右音樂控盤", fontWeight = FontWeight.Bold)
                     }
 
                     OutlinedButton(
@@ -241,7 +244,7 @@ fun PlanCNavAppCard(
                     ) {
                         Icon(Icons.Rounded.OpenInFull, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("全螢幕")
+                        Text("全螢幕開啟")
                     }
                 }
             }

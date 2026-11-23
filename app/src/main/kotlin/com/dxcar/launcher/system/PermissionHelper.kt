@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import android.service.notification.NotificationListenerService
 import androidx.core.content.ContextCompat
 import com.dxcar.launcher.accessibility.DxCarAccessibilityService
 import com.dxcar.launcher.comms.BoxNotificationListenerService
@@ -150,5 +151,45 @@ object PermissionHelper {
             Uri.parse("package:${context.packageName}")
         ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { context.startActivity(intent) }
+    }
+
+    fun openAppDetailsSettings(context: Context) {
+        val intent = Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:${context.packageName}")
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(intent) }
+    }
+
+    fun openDeveloperSettings(context: Context) {
+        val devIntent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val ok = runCatching {
+            context.startActivity(devIntent)
+            true
+        }.getOrDefault(false)
+        if (!ok) {
+            runCatching {
+                context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+        }
+    }
+
+    fun isFreeformSupported(context: Context): Boolean {
+        val globalEnabled = runCatching {
+            Settings.Global.getInt(context.contentResolver, "enable_freeform_support", 0) == 1
+        }.getOrDefault(false)
+        val featureEnabled = runCatching {
+            context.packageManager.hasSystemFeature(PackageManager.FEATURE_FREEFORM_WINDOW_MANAGEMENT)
+        }.getOrDefault(false)
+        return globalEnabled || featureEnabled
+    }
+
+    fun requestNotificationListenerRebind(context: Context) {
+        runCatching {
+            NotificationListenerService.requestRebind(
+                ComponentName(context, BoxNotificationListenerService::class.java)
+            )
+        }
     }
 }

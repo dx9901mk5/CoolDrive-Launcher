@@ -2,6 +2,8 @@ package com.dxcar.launcher.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.content.res.Configuration
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -125,6 +127,7 @@ enum class GestureAction {
 @Serializable
 data class LauncherConfig(
     val deviceRole: DeviceRole = DeviceRole.AI_BOX_LAUNCHER,
+    val roleUserPinned: Boolean = false,
     val dockPositionMode: DockPositionMode = DockPositionMode.AUTO_GOOGLE_DPI,
     val rightHandDrive: Boolean = false,
     val themeMode: ThemeMode = ThemeMode.AUTO_TIME,
@@ -139,6 +142,7 @@ data class LauncherConfig(
     val mapTrafficEnabled: Boolean = true,
     val homeMapDisplayMode: HomeMapDisplayMode = HomeMapDisplayMode.BUILTIN_LIVE_MAP,
     val planCNavPackage: String = "com.google.android.apps.maps",
+    val planCOverlayMusicPanelEnabled: Boolean = true,
     val showSixShortcutsInMediaPanel: Boolean = true,
     val primarySplitRatio: Float = 0.70f,
     val is24HourClock: Boolean = false,
@@ -168,6 +172,7 @@ data class LauncherConfig(
     val companionTargetDeviceAddress: String = "",
     val companionTargetDeviceName: String = "",
     val companionAutoConnect: Boolean = true,
+    val companionSyncAllApps: Boolean = false,
     val companionAllowedPackages: List<String> = DEFAULT_COMPANION_PACKAGES,
     val quickReplies: List<String> = DEFAULT_QUICK_REPLIES,
     val lastKnownLat: Double = 25.0330,
@@ -189,6 +194,11 @@ data class LauncherConfig(
             "org.telegram.messenger",
             "com.google.android.apps.messaging",
             "com.samsung.android.messaging",
+            "com.android.mms",
+            "com.vivo.mms",
+            "com.bbk.mms",
+            "com.coloros.mms",
+            "com.miui.mms",
             "com.tencent.mm",
             "com.instagram.android",
             "com.discord"
@@ -200,6 +210,40 @@ data class LauncherConfig(
             "好，收到",
             "請稍等一下"
         )
+    }
+}
+
+object DeviceFormFactor {
+    /**
+     * Compact Smartphone or Folded Cover Display (portrait & narrow < 580dp).
+     * Never misclassifies wide landscape AI Box head units (e.g. 1280x720@240dpi = 853x480dp).
+     */
+    fun isCompactPhoneScreen(configuration: Configuration): Boolean {
+        return configuration.screenHeightDp > configuration.screenWidthDp &&
+            configuration.screenWidthDp < 580
+    }
+
+    /**
+     * Tablet or unfolded foldable screen (>= 580dp width).
+     */
+    fun isTabletOrExpandedScreen(configuration: Configuration): Boolean {
+        return configuration.screenWidthDp >= 580
+    }
+
+    /**
+     * Auto-selects Phone Companion mode on first launch when opened on a portrait phone
+     * that is NOT configured as the system HOME launcher.
+     */
+    fun shouldAutoDefaultToPhone(context: Context, configuration: Configuration, config: LauncherConfig): Boolean {
+        if (config.roleUserPinned) return false
+        if (!isCompactPhoneScreen(configuration)) return false
+        val homeIntent = android.content.Intent(android.content.Intent.ACTION_MAIN)
+            .addCategory(android.content.Intent.CATEGORY_HOME)
+        val defaultPkg = runCatching {
+            context.packageManager.resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
+                ?.activityInfo?.packageName
+        }.getOrNull()
+        return defaultPkg != context.packageName
     }
 }
 

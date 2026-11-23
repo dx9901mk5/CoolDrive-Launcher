@@ -1,5 +1,7 @@
 package com.dxcar.launcher.layout
 
+import android.content.res.Configuration
+import com.dxcar.launcher.data.DeviceFormFactor
 import com.dxcar.launcher.data.DockPositionMode
 import com.dxcar.launcher.data.MapEngineStyle
 import com.dxcar.launcher.map.MapStyleFactory
@@ -93,5 +95,29 @@ class CoolwalkLayoutEngineTest {
         val darkVector = MapStyleFactory.resolve(MapEngineStyle.OPENFREEMAP_DARK, isNight = false, trafficEnabled = true)
             as MapStyleFactory.ResolvedMapStyle.StyleUrl
         assertEquals(MapStyleFactory.OPENFREEMAP_NIGHT_URL, darkVector.url)
+    }
+
+    @Test
+    fun `device form factor distinguishes portrait phone vs wide car screen`() {
+        val phoneCfg = Configuration().apply {
+            screenWidthDp = 412
+            screenHeightDp = 915
+        }
+        assertTrue(DeviceFormFactor.isCompactPhoneScreen(phoneCfg))
+        assertFalse(DeviceFormFactor.isTabletOrExpandedScreen(phoneCfg))
+
+        val foldableExpandedCfg = Configuration().apply {
+            screenWidthDp = 712
+            screenHeightDp = 820
+        }
+        assertFalse(DeviceFormFactor.isCompactPhoneScreen(foldableExpandedCfg))
+        assertTrue(DeviceFormFactor.isTabletOrExpandedScreen(foldableExpandedCfg))
+
+        val carHeadUnitCfg = Configuration().apply {
+            screenWidthDp = 1280
+            screenHeightDp = 480
+        }
+        assertFalse(DeviceFormFactor.isCompactPhoneScreen(carHeadUnitCfg))
+        assertTrue(DeviceFormFactor.isTabletOrExpandedScreen(carHeadUnitCfg))
     }
 }

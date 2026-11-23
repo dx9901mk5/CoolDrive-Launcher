@@ -14,7 +14,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.dxcar.launcher.comms.BluetoothCompanionService
 import com.dxcar.launcher.comms.CarMessageItem
+import com.dxcar.launcher.system.PermissionHelper
 import com.dxcar.launcher.system.SystemStatusMonitor
 import com.dxcar.launcher.ui.DxCarRootScreen
 import java.util.Locale
@@ -30,6 +32,10 @@ class MainActivity : ComponentActivity() {
         val app = application as DxCarApp
         app.locationTracker.startIfPermitted()
         app.systemStatusMonitor.refreshAll()
+        if (app.preferences.config.value.companionAutoConnect) {
+            BluetoothCompanionService.startOrReconnect(this)
+        }
+        PermissionHelper.requestNotificationListenerRebind(this)
     }
 
     private val homeRoleLauncher = registerForActivityResult(
@@ -99,6 +105,10 @@ class MainActivity : ComponentActivity() {
         app.locationTracker.startIfPermitted()
         app.mediaControlBridge.refreshSessions()
         app.installedAppsRepository.refreshHomeLaunchers()
+        PermissionHelper.requestNotificationListenerRebind(this)
+        if (app.preferences.config.value.companionAutoConnect) {
+            BluetoothCompanionService.startOrReconnect(this)
+        }
         hideSystemBarsForCar()
     }
 

@@ -388,84 +388,124 @@ fun LiveMapCard(
                 }
             } else if (isPrimary || isFullscreen) {
                 val isPlanB = experimentMode == HomeExperimentMode.PLAN_B_BUILTIN_NAV
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        color = colors.glassOverlay,
-                        shape = RoundedCornerShape(24.dp),
-                        shadowElevation = 4.dp,
-                        modifier = Modifier
-                            .weight(1f, fill = false)
-                            .border(1.dp, colors.cardBorder, RoundedCornerShape(24.dp))
-                            .bouncyClickable {
-                                if (isPlanB) {
-                                    showBuiltInSearchPanel = !showBuiltInSearchPanel
-                                } else {
-                                    onLaunchGoogleMapsApp(null)
-                                }
-                            }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        Surface(
+                            color = if (isPlanB) colors.navGreenBanner.copy(alpha = 0.92f) else colors.glassOverlay,
+                            shape = RoundedCornerShape(24.dp),
+                            shadowElevation = 4.dp,
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .border(
+                                    1.2.dp,
+                                    if (isPlanB) Color(0xFF4ADE80) else colors.cardBorder,
+                                    RoundedCornerShape(24.dp)
+                                )
+                                .bouncyClickable {
+                                    if (isPlanB) {
+                                        showBuiltInSearchPanel = !showBuiltInSearchPanel
+                                    } else {
+                                        onLaunchGoogleMapsApp(null)
+                                    }
+                                }
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Search,
-                                contentDescription = "搜尋目的地",
-                                tint = colors.accent,
-                                modifier = Modifier.size(20.dp)
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = if (isPlanB) Icons.Rounded.Navigation else Icons.Rounded.Search,
+                                    contentDescription = "搜尋目的地",
+                                    tint = if (isPlanB) Color.White else colors.accent,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = if (isPlanB) "方案 B · 首頁內建導航搜尋 (點此規劃藍線)…" else "Google 地圖導航搜尋…",
+                                    color = if (isPlanB) Color.White else colors.primaryText,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isPlanB) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.width(8.dp))
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            MapChipButton(
+                                icon = Icons.Rounded.Traffic,
+                                label = if (trafficEnabled) "路況 開" else "路況 關",
+                                highlight = trafficEnabled &&
+                                    (mapEngineStyle == MapEngineStyle.GOOGLE_TRAFFIC_TILES ||
+                                        mapEngineStyle == MapEngineStyle.GOOGLE_SATELLITE_HYBRID),
+                                onClick = onToggleTraffic
                             )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = if (isPlanB) "搜尋目的地（首頁內建導航）…" else "Google 地圖導航搜尋…",
-                                color = colors.primaryText,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                            MapChipButton(
+                                icon = Icons.Rounded.Home,
+                                label = "回家",
+                                onClick = {
+                                    onLaunchGoogleMapsApp(homeAddress.ifBlank { "家" })
+                                }
+                            )
+                            if (workAddress.isNotBlank()) {
+                                MapChipButton(
+                                    icon = Icons.Rounded.Work,
+                                    label = "公司",
+                                    onClick = { onLaunchGoogleMapsApp(workAddress) }
+                                )
+                            }
+                            if (!isPlanB) {
+                                MapChipButton(
+                                    icon = Icons.Rounded.Splitscreen,
+                                    label = "分割G地圖",
+                                    onClick = onLaunchRealMapsSplit
+                                )
+                            }
+                            MapChipButton(
+                                icon = Icons.Rounded.Navigation,
+                                label = "G地圖",
+                                highlight = !isPlanB,
+                                onClick = { onLaunchGoogleMapsApp(null) }
                             )
                         }
                     }
 
-                    Spacer(Modifier.width(8.dp))
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        MapChipButton(
-                            icon = Icons.Rounded.Traffic,
-                            label = if (trafficEnabled) "路況 開" else "路況 關",
-                            highlight = trafficEnabled &&
-                                (mapEngineStyle == MapEngineStyle.GOOGLE_TRAFFIC_TILES ||
-                                    mapEngineStyle == MapEngineStyle.GOOGLE_SATELLITE_HYBRID),
-                            onClick = onToggleTraffic
-                        )
-                        MapChipButton(
-                            icon = Icons.Rounded.Home,
-                            label = "回家",
-                            onClick = {
-                                onLaunchGoogleMapsApp(homeAddress.ifBlank { "家" })
+                    // Plan A displays direct Quick-Layer Pills right below the top bar so A vs B feels immediately distinct!
+                    if (!isPlanB) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            MapEngineStyle.entries.forEach { st ->
+                                val active = mapEngineStyle == st
+                                Surface(
+                                    color = if (active) colors.accent else colors.glassOverlay.copy(alpha = 0.85f),
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .border(1.dp, if (active) colors.accent else colors.cardBorder, RoundedCornerShape(14.dp))
+                                        .bouncyClickable { onSelectMapStyle(st) }
+                                ) {
+                                    Text(
+                                        text = when (st) {
+                                            MapEngineStyle.GOOGLE_TRAFFIC_TILES -> "G標準"
+                                            MapEngineStyle.GOOGLE_SATELLITE_HYBRID -> "G衛星"
+                                            MapEngineStyle.OPENFREEMAP_VECTOR_3D -> "3D向量"
+                                            MapEngineStyle.OPENFREEMAP_DARK -> "深色向量"
+                                        },
+                                        color = if (active) colors.onAccent else colors.primaryText,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                    )
+                                }
                             }
-                        )
-                        if (workAddress.isNotBlank()) {
-                            MapChipButton(
-                                icon = Icons.Rounded.Work,
-                                label = "公司",
-                                onClick = { onLaunchGoogleMapsApp(workAddress) }
-                            )
                         }
-                        MapChipButton(
-                            icon = Icons.Rounded.Splitscreen,
-                            label = "分割G地圖",
-                            onClick = onLaunchRealMapsSplit
-                        )
-                        MapChipButton(
-                            icon = Icons.Rounded.Navigation,
-                            label = "G地圖",
-                            highlight = true,
-                            onClick = { onLaunchGoogleMapsApp(null) }
-                        )
                     }
                 }
             } else {

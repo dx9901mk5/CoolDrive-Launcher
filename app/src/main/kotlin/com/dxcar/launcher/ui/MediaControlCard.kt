@@ -27,6 +27,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -57,13 +59,14 @@ import com.dxcar.launcher.data.SplitScreenShortcut
 import com.dxcar.launcher.media.ActiveMediaState
 import com.dxcar.launcher.system.InstalledAppInfo
 import com.dxcar.launcher.theme.LocalDxCarColors
+import kotlin.math.min
 
 /**
- * Integrated Android Auto Coolwalk Media Controller Card:
- * - Automatically detects any active media player (YouTube, YT Music, KKBOX, Apple Music,
- *   Spotify, NetEase Cloud Music, VLC, etc.) and shows its real App Icon + Name.
- * - Features crisp static Album Artwork (expanded showcase when space allows / in Plan C).
- * - Optionally integrates the 6-slot Custom App Shortcuts right inside the bottom of the card!
+ * Album-Cover-First Media Controller Card:
+ * - Enlarged square Album Artwork always takes visual priority in the center, with Track Title + Artist neatly below.
+ * - Includes Like / Heart / Favorite button supporting Spotify, YT Music, KKBOX, Apple Music, NetEase Cloud Music, VLC, etc.
+ * - Automatically detects active media app & renders its real App Icon + Name.
+ * - Optionally integrates the 6 Custom Shortcuts seamlessly at the bottom.
  */
 @Composable
 fun MediaControlCard(
@@ -78,6 +81,7 @@ fun MediaControlCard(
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
+    onToggleFavorite: () -> Unit = {},
     onSelectSession: (String) -> Unit,
     onOpenMediaApp: () -> Unit,
     onOpenYoutubeFullscreen: () -> Unit = {},
@@ -107,7 +111,6 @@ fun MediaControlCard(
                 onClick = onSwapRequested
             )
     ) {
-        // Ambient Album Art Backdrop Wash
         if (artBitmap != null) {
             Image(
                 bitmap = artBitmap,
@@ -123,8 +126,8 @@ fun MediaControlCard(
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                colors.cardSurface.copy(alpha = 0.50f),
-                                colors.cardSurface.copy(alpha = 0.94f)
+                                colors.cardSurface.copy(alpha = 0.48f),
+                                colors.cardSurface.copy(alpha = 0.93f)
                             )
                         )
                     )
@@ -147,17 +150,14 @@ fun MediaControlCard(
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = if (isPrimary) 18.dp else 13.dp, vertical = 12.dp)
+                .padding(horizontal = if (isPrimary) 16.dp else 12.dp, vertical = 10.dp)
         ) {
-            val tightHeight = maxHeight < 430.dp
-            val tallShowcase = (pureMusicMode || !showSixShortcuts || isPrimary) && maxHeight >= 360.dp
-            val stackedCoverLayout = tallShowcase && !tightHeight && maxWidth <= 420.dp
-
+            val tightHeight = maxHeight < 410.dp
             Column(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // HEADER ROW: Real App Icon + App Name Badge + Session Switcher + Actions
+                // HEADER ROW: Detected Player Icon + Name + Session Switcher + Swap/Open
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -204,7 +204,7 @@ fun MediaControlCard(
 
                     Spacer(Modifier.width(6.dp))
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (media.availableSessions.size > 1) {
                             media.availableSessions.take(3).forEach { sess ->
                                 val selected = sess.packageName == media.packageName
@@ -213,7 +213,7 @@ fun MediaControlCard(
                                     color = if (selected) colors.accent.copy(alpha = 0.25f) else colors.cardSurfaceElevated,
                                     shape = CircleShape,
                                     modifier = Modifier
-                                        .size(30.dp)
+                                        .size(28.dp)
                                         .border(
                                             width = if (selected) 1.5.dp else 0.75.dp,
                                             color = if (selected) colors.accent else colors.cardBorder,
@@ -227,7 +227,7 @@ fun MediaControlCard(
                                                 bitmap = sessIcon,
                                                 contentDescription = sess.appLabel,
                                                 modifier = Modifier
-                                                    .size(19.dp)
+                                                    .size(18.dp)
                                                     .clip(RoundedCornerShape(5.dp))
                                             )
                                         } else {
@@ -235,7 +235,7 @@ fun MediaControlCard(
                                                 imageVector = Icons.Rounded.MusicNote,
                                                 contentDescription = sess.appLabel,
                                                 tint = colors.primaryText,
-                                                modifier = Modifier.size(15.dp)
+                                                modifier = Modifier.size(14.dp)
                                             )
                                         }
                                     }
@@ -248,7 +248,7 @@ fun MediaControlCard(
                                 color = colors.cardSurfaceElevated,
                                 shape = CircleShape,
                                 modifier = Modifier
-                                    .size(32.dp)
+                                    .size(30.dp)
                                     .bouncyClickable(pressedScale = 0.85f, onClick = onSwapRequested)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
@@ -256,7 +256,7 @@ fun MediaControlCard(
                                         imageVector = Icons.Rounded.SwapHoriz,
                                         contentDescription = "左右互換",
                                         tint = colors.primaryText,
-                                        modifier = Modifier.size(17.dp)
+                                        modifier = Modifier.size(16.dp)
                                     )
                                 }
                             }
@@ -266,7 +266,7 @@ fun MediaControlCard(
                             color = colors.cardSurfaceElevated,
                             shape = CircleShape,
                             modifier = Modifier
-                                .size(32.dp)
+                                .size(30.dp)
                                 .bouncyClickable(pressedScale = 0.85f) {
                                     if (media.hasSession) onOpenMediaApp() else onOpenYoutubeFullscreen()
                                 }
@@ -276,105 +276,62 @@ fun MediaControlCard(
                                     imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
                                     contentDescription = "開啟播放器",
                                     tint = colors.primaryText,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(15.dp)
                                 )
                             }
                         }
                     }
                 }
 
-                // MIDDLE: Album Artwork Showcase + Track Info
-                Box(
+                // ALBUM-COVER-PRIORITY HERO SECTION (Artwork centered & enlarged, Title/Artist below!)
+                BoxWithConstraints(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(vertical = 6.dp)
+                        .padding(vertical = 4.dp)
                 ) {
-                    if (stackedCoverLayout) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            val coverDp = if (showSixShortcuts) 96.dp else 132.dp
-                            AlbumCoverFrame(
-                                artBitmap = artBitmap,
-                                appIconBitmap = sourceIconBitmap,
-                                modifier = Modifier.size(coverDp)
-                            )
-                            Spacer(Modifier.height(10.dp))
-                            Text(
-                                text = media.title,
-                                color = colors.primaryText,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                text = media.artist,
-                                color = colors.secondaryText,
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    } else {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            val coverDp = when {
-                                isPrimary -> 108.dp
-                                tightHeight -> 62.dp
-                                else -> 76.dp
-                            }
-                            AlbumCoverFrame(
-                                artBitmap = artBitmap,
-                                appIconBitmap = sourceIconBitmap,
-                                modifier = Modifier.size(coverDp)
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = media.title,
-                                    color = colors.primaryText,
-                                    fontSize = if (isPrimary) 20.sp else 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(Modifier.height(3.dp))
-                                Text(
-                                    text = media.artist,
-                                    color = colors.secondaryText,
-                                    fontSize = if (isPrimary) 14.sp else 12.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                if (media.album.isNotBlank() && !tightHeight) {
-                                    Spacer(Modifier.height(2.dp))
-                                    Text(
-                                        text = media.album,
-                                        color = colors.secondaryText.copy(alpha = 0.8f),
-                                        fontSize = 11.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
+                    val reservedTextH = 44f
+                    val coverSizeDp = min(maxWidth.value * 0.72f, maxHeight.value - reservedTextH)
+                        .coerceIn(58f, if (pureMusicMode || !showSixShortcuts) 230f else 180f)
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        AlbumCoverFrame(
+                            artBitmap = artBitmap,
+                            appIconBitmap = sourceIconBitmap,
+                            modifier = Modifier.size(coverSizeDp.dp)
+                        )
+                        Spacer(Modifier.height(if (tightHeight) 5.dp else 8.dp))
+                        Text(
+                            text = media.title,
+                            color = colors.primaryText,
+                            fontSize = if (isPrimary) 18.sp else 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp)
+                        )
+                        Text(
+                            text = media.artist,
+                            color = colors.secondaryText,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp)
+                        )
                     }
                 }
 
-                // TRANSPORT + PROGRESS + INTEGRATED 6 SHORTCUTS
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // PROGRESS + LIKE/FAVORITE + TRANSPORT + INTEGRATED 6 SHORTCUTS
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     if (media.durationMs > 0L) {
-                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             LinearProgressIndicator(
                                 progress = { progress },
                                 color = colors.accent,
@@ -399,6 +356,34 @@ fun MediaControlCard(
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Like / Heart / Favorite button (supports NetEase, Spotify, YT Music, KKBOX, Apple Music, VLC!)
+                        val heartPink = Color(0xFFF43F5E)
+                        Surface(
+                            color = if (media.isFavorited) heartPink.copy(alpha = 0.22f) else colors.cardSurfaceElevated,
+                            shape = CircleShape,
+                            modifier = Modifier
+                                .size(if (tightHeight) 40.dp else 44.dp)
+                                .border(
+                                    width = if (media.isFavorited) 1.2.dp else 0.75.dp,
+                                    color = if (media.isFavorited) heartPink else colors.cardBorder.copy(alpha = 0.6f),
+                                    shape = CircleShape
+                                )
+                                .bouncyClickable(pressedScale = 0.84f, onClick = onToggleFavorite)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (media.isFavorited) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                    contentDescription = "喜歡／點讚收藏",
+                                    tint = when {
+                                        media.isFavorited -> heartPink
+                                        media.canFavorite -> colors.primaryText
+                                        else -> colors.secondaryText.copy(alpha = 0.75f)
+                                    },
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
                         TransportButton(
                             icon = Icons.Rounded.SkipPrevious,
                             contentDescription = "上一首",
@@ -426,7 +411,7 @@ fun MediaControlCard(
                         HorizontalDivider(
                             color = colors.cardBorder.copy(alpha = 0.65f),
                             thickness = 1.dp,
-                            modifier = Modifier.padding(vertical = 2.dp)
+                            modifier = Modifier.padding(vertical = 1.dp)
                         )
                         CustomSixShortcutsSection(
                             slots = customShortcutSlots,
@@ -453,9 +438,9 @@ private fun AlbumCoverFrame(
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(20.dp))
             .background(colors.cardSurfaceElevated)
-            .border(1.dp, colors.cardBorder, RoundedCornerShape(18.dp))
+            .border(1.2.dp, colors.cardBorder, RoundedCornerShape(20.dp))
     ) {
         when {
             artBitmap != null -> {
@@ -471,8 +456,8 @@ private fun AlbumCoverFrame(
                     bitmap = appIconBitmap,
                     contentDescription = "播放器圖示",
                     modifier = Modifier
-                        .fillMaxSize(0.56f)
-                        .clip(RoundedCornerShape(14.dp))
+                        .fillMaxSize(0.54f)
+                        .clip(RoundedCornerShape(16.dp))
                 )
             }
             else -> {
@@ -480,7 +465,7 @@ private fun AlbumCoverFrame(
                     imageVector = Icons.Rounded.Album,
                     contentDescription = null,
                     tint = colors.accent,
-                    modifier = Modifier.fillMaxSize(0.54f)
+                    modifier = Modifier.fillMaxSize(0.52f)
                 )
             }
         }
@@ -497,10 +482,10 @@ private fun TransportButton(
 ) {
     val colors = LocalDxCarColors.current
     val btnSize = when {
-        large && compact -> 52.dp
-        large -> 60.dp
-        compact -> 42.dp
-        else -> 46.dp
+        large && compact -> 50.dp
+        large -> 56.dp
+        compact -> 40.dp
+        else -> 44.dp
     }
     Surface(
         color = if (large) colors.accent else colors.cardSurfaceElevated,
@@ -523,7 +508,7 @@ private fun TransportButton(
                     imageVector = targetIcon,
                     contentDescription = contentDescription,
                     tint = if (large) colors.onAccent else colors.primaryText,
-                    modifier = Modifier.size(if (large) 30.dp else 23.dp)
+                    modifier = Modifier.size(if (large) 28.dp else 22.dp)
                 )
             }
         }

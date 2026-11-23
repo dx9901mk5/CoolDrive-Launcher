@@ -17,6 +17,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,15 +32,20 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Splitscreen
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -51,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,7 +67,9 @@ import androidx.compose.ui.unit.sp
 import com.dxcar.launcher.data.SplitLaunchEngine
 import com.dxcar.launcher.data.SplitRatioPreset
 import com.dxcar.launcher.data.SplitScreenShortcut
+import com.dxcar.launcher.system.AppCategory
 import com.dxcar.launcher.system.InstalledAppInfo
+import com.dxcar.launcher.system.PermissionHelper
 import com.dxcar.launcher.theme.LocalDxCarColors
 import java.util.UUID
 
@@ -120,24 +130,29 @@ fun DualSplitShortcutIcon(
 }
 
 /**
- * Split-Screen Shortcut Creator inspired directly by Video 1 ("分屏設定 -> 選擇應用"):
- * - Interactive 5-ratio selector: 3:7, 4:6, 5:5, 6:4, 7:3 with live spring-animated box preview!
- * - Left "+" and Right "+" slots open full App Icon Grid picker
- * - Select Split Engine (Native Split-Screen / Freeform Exact-Ratio Dual Windows)
- * - Tap "儲存" to create a dual-icon Split-Screen Shortcut right in the App Drawer!
+ * Responsive Split-Screen Shortcut Creator:
+ * - Defaults to Freeform Exact-Ratio Dual Windows (respects 3:7..7:3 ratios & Dock margins)
+ * - Displays Freeform system capability status + direct link to Developer Options if disabled
+ * - Includes category filter tabs in App picker & instant "Test Launch" preview button!
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SplitShortcutCreatorDialog(
     apps: List<InstalledAppInfo>,
     onSaveShortcut: (SplitScreenShortcut) -> Unit,
+    onTestLaunchShortcut: ((SplitScreenShortcut) -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val colors = LocalDxCarColors.current
+    val context = LocalContext.current
+    val freeformSupported = remember { PermissionHelper.isFreeformSupported(context) }
+
     var selectedRatio by remember { mutableStateOf(SplitRatioPreset.R_7_3) }
-    var selectedEngine by remember { mutableStateOf(SplitLaunchEngine.NATIVE_SPLIT_SCREEN) }
+    var selectedEngine by remember { mutableStateOf(SplitLaunchEngine.FREEFORM_EXACT_RATIO) }
     var leftApp by remember { mutableStateOf<InstalledAppInfo?>(null) }
     var rightApp by remember { mutableStateOf<InstalledAppInfo?>(null) }
-    var pickingSide by remember { mutableStateOf<String?>(null) } // "LEFT" or "RIGHT"
+    var pickingSide by remember { mutableStateOf<String?>(null) }
+    var pickerCategory by remember { mutableStateOf(AppCategory.ALL) }
 
     val animatedLeftWeight by animateFloatAsState(
         targetValue = selectedRatio.leftWeight,
@@ -152,18 +167,18 @@ fun SplitShortcutCreatorDialog(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.72f))
+            .background(Color.Black.copy(alpha = 0.74f))
             .clickable { onDismiss() },
         contentAlignment = Alignment.Center
     ) {
         Surface(
             color = colors.cardSurface,
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(26.dp),
             shadowElevation = 24.dp,
             modifier = Modifier
-                .fillMaxWidth(0.86f)
-                .fillMaxHeight(0.86f)
-                .border(1.2.dp, colors.cardBorder, RoundedCornerShape(28.dp))
+                .fillMaxWidth(0.90f)
+                .fillMaxHeight(0.90f)
+                .border(1.2.dp, colors.cardBorder, RoundedCornerShape(26.dp))
                 .clickable(enabled = false) {}
         ) {
             AnimatedContent(
@@ -175,11 +190,14 @@ fun SplitShortcutCreatorDialog(
                 label = "splitCreatorStep"
             ) { side ->
                 if (side != null) {
-                    // STEP B: Pick Left or Right App with REAL App Icons + Rubber-Band Bounce!
+                    val filteredApps = remember(apps, pickerCategory) {
+                        if (pickerCategory == AppCategory.ALL) apps
+                        else apps.filter { it.category == pickerCategory }
+                    }
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(20.dp)
+                            .padding(18.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -189,24 +207,50 @@ fun SplitShortcutCreatorDialog(
                             Text(
                                 text = if (side == "LEFT") "選擇左側分割應用" else "選擇右側分割應用",
                                 color = colors.primaryText,
-                                fontSize = 20.sp,
+                                fontSize = 19.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             IconButton(onClick = { pickingSide = null }) {
                                 Icon(Icons.Rounded.Close, contentDescription = "返回", tint = colors.primaryText)
                             }
                         }
-                        Spacer(Modifier.height(10.dp))
+
+                        Spacer(Modifier.height(6.dp))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            AppCategory.entries.forEach { cat ->
+                                val selected = pickerCategory == cat
+                                Surface(
+                                    color = if (selected) colors.accent else colors.cardSurfaceElevated,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .border(1.dp, if (selected) colors.accent else colors.cardBorder, RoundedCornerShape(14.dp))
+                                        .bouncyClickable { pickerCategory = cat }
+                                ) {
+                                    Text(
+                                        text = cat.labelZh,
+                                        color = if (selected) colors.onAccent else colors.secondaryText,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(8.dp))
                         LazyVerticalGrid(
-                            columns = GridCells.Adaptive(minSize = 138.dp),
-                            contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(18.dp),
+                            columns = GridCells.Adaptive(minSize = 128.dp),
+                            contentPadding = PaddingValues(top = 6.dp, bottom = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp),
                             modifier = Modifier
                                 .fillMaxSize()
                                 .springBounceOverscroll(maxOverscrollPx = 170f)
                         ) {
-                            items(apps, key = { it.packageName }) { app ->
+                            items(filteredApps, key = { it.packageName }) { app ->
                                 val bmp = remember(app.icon) { app.icon.asImageBitmap() }
                                 Surface(
                                     color = colors.cardSurfaceElevated,
@@ -220,17 +264,17 @@ fun SplitShortcutCreatorDialog(
                                         }
                                 ) {
                                     Column(
-                                        modifier = Modifier.padding(14.dp),
+                                        modifier = Modifier.padding(12.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         Image(
                                             bitmap = bmp,
                                             contentDescription = app.label,
                                             modifier = Modifier
-                                                .size(62.dp)
-                                                .clip(RoundedCornerShape(16.dp))
+                                                .size(56.dp)
+                                                .clip(RoundedCornerShape(14.dp))
                                         )
-                                        Spacer(Modifier.height(8.dp))
+                                        Spacer(Modifier.height(6.dp))
                                         Text(
                                             text = app.label,
                                             color = colors.primaryText,
@@ -245,13 +289,13 @@ fun SplitShortcutCreatorDialog(
                         }
                     }
                 } else {
-                    // STEP A: Ratio Selector (3:7, 4:6, 5:5, 6:4, 7:3) + Live Animated Left/Right Preview + Save
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(horizontal = 24.dp, vertical = 18.dp),
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 20.dp, vertical = 14.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.SpaceBetween
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         // Top Header
                         Row(
@@ -259,11 +303,10 @@ fun SplitShortcutCreatorDialog(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Spacer(Modifier.width(40.dp))
                             Text(
-                                text = "分屏設定 · 選擇應用",
+                                text = "分屏設定 · 建立左右分割捷徑",
                                 color = colors.primaryText,
-                                fontSize = 21.sp,
+                                fontSize = 19.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             IconButton(onClick = onDismiss) {
@@ -271,30 +314,60 @@ fun SplitShortcutCreatorDialog(
                             }
                         }
 
-                        // Ratio Pills: 3:7 | 4:6 | 5:5 | 6:4 | 7:3 (Exact Video 1 Layout!)
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        // System Freeform Support Health Hint
+                        if (!freeformSupported && selectedEngine == SplitLaunchEngine.FREEFORM_EXACT_RATIO) {
+                            Surface(
+                                color = Color(0xFFF59E0B).copy(alpha = 0.14f),
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "偵測到此車機系統可能未開啟「自由視窗 / 強制調整活動大小」，若測試無法左右並排請開啟開發者選項內該兩項設定",
+                                        color = colors.primaryText,
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.weight(1f).padding(end = 8.dp)
+                                    )
+                                    OutlinedButton(
+                                        onClick = { PermissionHelper.openDeveloperSettings(context) },
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Icon(Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("開發者設定", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Ratio Pills
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             SplitRatioPreset.entries.forEach { ratio ->
                                 val selected = ratio == selectedRatio
                                 Surface(
                                     color = if (selected) Color(0xFF22C55E) else colors.cardSurfaceElevated,
-                                    shape = RoundedCornerShape(22.dp),
+                                    shape = RoundedCornerShape(20.dp),
                                     modifier = Modifier
                                         .border(
                                             width = 1.2.dp,
                                             color = if (selected) Color(0xFF22C55E) else colors.cardBorder,
-                                            shape = RoundedCornerShape(22.dp)
+                                            shape = RoundedCornerShape(20.dp)
                                         )
                                         .bouncyClickable(pressedScale = 0.89f) { selectedRatio = ratio }
                                 ) {
                                     Text(
                                         text = ratio.label,
                                         color = if (selected) Color.White else colors.primaryText,
-                                        fontSize = 15.sp,
+                                        fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 9.dp)
+                                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp)
                                     )
                                 }
                             }
@@ -304,12 +377,11 @@ fun SplitShortcutCreatorDialog(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .weight(1f)
-                                .padding(vertical = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                .height(165.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             SplitSlotBox(
-                                sideLabel = "左側畫面 (${(selectedRatio.leftWeight * 100).toInt()}%)",
+                                sideLabel = "點擊選擇左側 (${(selectedRatio.leftWeight * 100).toInt()}%)",
                                 app = leftApp,
                                 onClick = { pickingSide = "LEFT" },
                                 modifier = Modifier
@@ -317,7 +389,7 @@ fun SplitShortcutCreatorDialog(
                                     .fillMaxHeight()
                             )
                             SplitSlotBox(
-                                sideLabel = "右側畫面 (${((1f - selectedRatio.leftWeight) * 100).toInt()}%)",
+                                sideLabel = "點擊選擇右側 (${((1f - selectedRatio.leftWeight) * 100).toInt()}%)",
                                 app = rightApp,
                                 onClick = { pickingSide = "RIGHT" },
                                 modifier = Modifier
@@ -326,13 +398,16 @@ fun SplitShortcutCreatorDialog(
                             )
                         }
 
-                        // Bottom Engine Toggle + Save Button
-                        Row(
+                        // Engine Selection & Action Buttons (Never clipped on compact car heights!)
+                        FlowRow(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
                                 SplitLaunchEngine.entries.forEach { eng ->
                                     val selected = eng == selectedEngine
                                     Surface(
@@ -358,36 +433,49 @@ fun SplitShortcutCreatorDialog(
                             }
 
                             val canSave = leftApp != null && rightApp != null
-                            Button(
-                                onClick = {
-                                    val l = leftApp ?: return@Button
-                                    val r = rightApp ?: return@Button
-                                    val combinedName = "${l.label}/${r.label}"
-                                    onSaveShortcut(
-                                        SplitScreenShortcut(
-                                            id = UUID.randomUUID().toString().take(8),
-                                            leftPackage = l.packageName,
-                                            rightPackage = r.packageName,
-                                            ratio = selectedRatio,
-                                            engine = selectedEngine,
-                                            label = combinedName
-                                        )
-                                    )
-                                },
-                                enabled = canSave,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF22C55E),
-                                    contentColor = Color.White
-                                ),
-                                shape = RoundedCornerShape(18.dp),
-                                modifier = Modifier.height(46.dp)
-                            ) {
-                                Text(
-                                    text = "儲存為捷徑",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 14.dp)
+                            val buildShortcut: () -> SplitScreenShortcut? = {
+                                val l = leftApp
+                                val r = rightApp
+                                if (l == null || r == null) null
+                                else SplitScreenShortcut(
+                                    id = UUID.randomUUID().toString().take(8),
+                                    leftPackage = l.packageName,
+                                    rightPackage = r.packageName,
+                                    ratio = selectedRatio,
+                                    engine = selectedEngine,
+                                    label = "${l.label}/${r.label}"
                                 )
+                            }
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (onTestLaunchShortcut != null) {
+                                    OutlinedButton(
+                                        enabled = canSave,
+                                        onClick = { buildShortcut()?.let(onTestLaunchShortcut) },
+                                        shape = RoundedCornerShape(16.dp)
+                                    ) {
+                                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("測試分屏")
+                                    }
+                                }
+
+                                Button(
+                                    onClick = { buildShortcut()?.let(onSaveShortcut) },
+                                    enabled = canSave,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFF22C55E),
+                                        contentColor = Color.White
+                                    ),
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Text(
+                                        text = "儲存為捷徑",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -409,18 +497,18 @@ private fun SplitSlotBox(
 
     Surface(
         color = colors.cardSurfaceElevated.copy(alpha = 0.85f),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(22.dp),
         modifier = modifier
             .border(
                 width = 1.5.dp,
                 color = if (app != null) colors.accent else colors.cardBorder,
-                shape = RoundedCornerShape(24.dp)
+                shape = RoundedCornerShape(22.dp)
             )
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(22.dp))
             .bouncyClickable(pressedScale = 0.96f, onClick = onClick)
     ) {
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().padding(10.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
@@ -429,14 +517,14 @@ private fun SplitSlotBox(
                     bitmap = bmp,
                     contentDescription = app.label,
                     modifier = Modifier
-                        .size(64.dp)
-                        .clip(RoundedCornerShape(16.dp))
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(14.dp))
                 )
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(8.dp))
                 Text(
                     text = app.label,
                     color = colors.primaryText,
-                    fontSize = 15.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -445,23 +533,24 @@ private fun SplitSlotBox(
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(56.dp)
-                        .clip(RoundedCornerShape(14.dp))
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(13.dp))
                         .background(Color(0xFF22C55E))
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Add,
                         contentDescription = sideLabel,
                         tint = Color.White,
-                        modifier = Modifier.size(34.dp)
+                        modifier = Modifier.size(28.dp)
                     )
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             Text(
                 text = sideLabel,
                 color = colors.secondaryText,
-                fontSize = 12.sp
+                fontSize = 11.sp,
+                textAlign = TextAlign.Center
             )
         }
     }

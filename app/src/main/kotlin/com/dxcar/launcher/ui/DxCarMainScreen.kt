@@ -65,6 +65,7 @@ import com.dxcar.launcher.accessibility.DxCarAccessibilityService
 import com.dxcar.launcher.comms.BluetoothCompanionService
 import com.dxcar.launcher.comms.CallActionCommand
 import com.dxcar.launcher.comms.CarMessageItem
+import com.dxcar.launcher.data.DeviceFormFactor
 import com.dxcar.launcher.data.DeviceRole
 import com.dxcar.launcher.data.HomeExperimentMode
 import com.dxcar.launcher.data.HomeMapDisplayMode
@@ -124,6 +125,17 @@ fun DxCarRootScreen(
     val builtInNavState by app.builtInNavEngine.state.collectAsState()
     val bridgeStatus by BluetoothCompanionService.bridgeState.collectAsState()
     val updateState by app.updateManager.state.collectAsState()
+
+    // Auto-detect Smartphone vs AI Box Car Head Unit on first launch when not pinned by user
+    LaunchedEffect(configuration.screenWidthDp, configuration.screenHeightDp, config.roleUserPinned) {
+        if (config.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
+            DeviceFormFactor.shouldAutoDefaultToPhone(context, configuration, config)
+        ) {
+            app.preferences.update {
+                it.copy(deviceRole = DeviceRole.PHONE_COMPANION)
+            }
+        }
+    }
 
     // Feed live GPS coordinates to Plan B OSRM navigation engine
     LaunchedEffect(location.latitude, location.longitude, config.homeExperimentMode) {
@@ -410,10 +422,15 @@ fun DxCarRootScreen(
                         current.copy(companionAllowedPackages = next)
                     }
                 },
+                onToggleSyncAllApps = { checked ->
+                    app.preferences.update { it.copy(companionSyncAllApps = checked) }
+                },
                 onRequestRuntimePermissions = onRequestRuntimePermissions,
                 onReconnectBridge = { BluetoothCompanionService.startOrReconnect(context) },
                 onSwitchToAiBoxMode = {
-                    app.preferences.update { it.copy(deviceRole = DeviceRole.AI_BOX_LAUNCHER) }
+                    app.preferences.update {
+                        it.copy(deviceRole = DeviceRole.AI_BOX_LAUNCHER, roleUserPinned = true)
+                    }
                     BluetoothCompanionService.startOrReconnect(context)
                 }
             )
@@ -592,9 +609,21 @@ fun DxCarRootScreen(
                                     val label = app.installedAppsRepository.findApp(pkg)?.label ?: pkg
                                     gestureHudText = "🧭 已指定左側導航：$label"
                                 },
-                                onLaunchPlanCFreeform = { pkg -> launchFreeformPrimaryBox(pkg) },
+                                onLaunchPlanCFreeform = { pkg ->
+                                    launchFreeformPrimaryBox(pkg)
+                                    if (config.planCOverlayMusicPanelEnabled) {
+                                        if (android.provider.Settings.canDrawOverlays(context)) {
+                                            PersistentDockOverlayService.showPlanCMusicPanel(context)
+                                        } else {
+                                            gestureHudText = "請授予「顯示在其他應用程式上層」權限以顯示右側懸浮音樂控盤"
+                                        }
+                                    }
+                                },
                                 onLaunchPlanCSplit = { pkg -> SplitSidePanelActivity.launchWithRealGoogleMaps(context, pkg) },
-                                onLaunchPlanCFullscreen = { pkg -> launchAppRespectingOptions(pkg) },
+                                onLaunchPlanCFullscreen = { pkg ->
+                                    PersistentDockOverlayService.hidePlanCMusicPanel()
+                                    launchAppRespectingOptions(pkg)
+                                },
                                 onSwapPanes = { isMapPrimary = !isMapPrimary },
                                 onOpenFullscreenMap = { destination = LauncherDestination.FULLSCREEN_MAP },
                                 onLaunchRealGoogleMaps = { query ->
@@ -606,6 +635,10 @@ fun DxCarRootScreen(
                                 onMediaPlayPause = { app.mediaControlBridge.togglePlayPause() },
                                 onMediaNext = { app.mediaControlBridge.skipNext() },
                                 onMediaPrev = { app.mediaControlBridge.skipPrevious() },
+                                onMediaToggleFavorite = {
+                                    val (_, msg) = app.mediaControlBridge.toggleFavoriteOrLike()
+                                    gestureHudText = msg
+                                },
                                 onSelectMediaSession = { app.mediaControlBridge.selectSession(it) },
                                 onOpenMediaApp = {
                                     val pkg = media.packageName
@@ -695,7 +728,15 @@ fun DxCarRootScreen(
                                 hasPendingUpdate = updateState.hasUpdate || updateState.downloadedReady,
                                 onLaunchApp = { pkg -> launchAppRespectingOptions(pkg) },
                                 onLaunchSplitShortcut = { sc ->
-                                    app.installedAppsRepository.launchSplitShortcut(sc, dm.widthPixels, dm.heightPixels)
+                                    val dockPx = if (config.showHomeDock) (layoutSpec.dockThicknessDp * dm.density).toInt() else 0
+                                    app.installedAppsRepository.launchSplitShortcut(
+                                        shortcut = sc,
+                                        screenWidthPx = dm.widthPixels,
+                                        screenHeightPx = dm.heightPixels,
+                                        dockOffsetLeftPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0,
+                                        dockOffsetRightPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
+                                        dockOffsetBottomPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0
+                                    )
                                     gestureHudText = "⊞ 正在開啟分屏：${sc.label} (${sc.ratio.label})"
                                 },
                                 onRemoveSplitShortcut = { sc ->
@@ -775,7 +816,9 @@ fun DxCarRootScreen(
                                 onSwitchToPhoneCompanion = {
                                     pairedBtDevices = app.systemStatusMonitor.getPairedBluetoothDevices()
                                     permissionHealth = PermissionHelper.check(context)
-                                    app.preferences.update { it.copy(deviceRole = DeviceRole.PHONE_COMPANION) }
+                                    app.preferences.update {
+                                        it.copy(deviceRole = DeviceRole.PHONE_COMPANION, roleUserPinned = true)
+                                    }
                                     BluetoothCompanionService.startOrReconnect(context)
                                 },
                                 onClose = { destination = LauncherDestination.APP_DRAWER }
@@ -980,6 +1023,18 @@ fun DxCarRootScreen(
                         showSplitCreator = false
                         gestureHudText = "✓ 創建分屏捷徑成功：${shortcut.label} (${shortcut.ratio.label})"
                     },
+                    onTestLaunchShortcut = { shortcut ->
+                        val dockPx = if (config.showHomeDock) (layoutSpec.dockThicknessDp * dm.density).toInt() else 0
+                        app.installedAppsRepository.launchSplitShortcut(
+                            shortcut = shortcut,
+                            screenWidthPx = dm.widthPixels,
+                            screenHeightPx = dm.heightPixels,
+                            dockOffsetLeftPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0,
+                            dockOffsetRightPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
+                            dockOffsetBottomPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0
+                        )
+                        gestureHudText = "⊞ 正在測試開啟分屏：${shortcut.label} (${shortcut.ratio.label})"
+                    },
                     onDismiss = { showSplitCreator = false }
                 )
             }
@@ -1037,6 +1092,7 @@ private fun CoolwalkSplitDashboard(
     onMediaPlayPause: () -> Unit,
     onMediaNext: () -> Unit,
     onMediaPrev: () -> Unit,
+    onMediaToggleFavorite: () -> Unit,
     onSelectMediaSession: (String) -> Unit,
     onOpenMediaApp: () -> Unit,
     onOpenYoutubeFullscreen: () -> Unit,
@@ -1186,6 +1242,7 @@ private fun CoolwalkSplitDashboard(
                 onPlayPause = onMediaPlayPause,
                 onNext = onMediaNext,
                 onPrevious = onMediaPrev,
+                onToggleFavorite = onMediaToggleFavorite,
                 onSelectSession = onSelectMediaSession,
                 onOpenMediaApp = onOpenMediaApp,
                 onOpenYoutubeFullscreen = onOpenYoutubeFullscreen,

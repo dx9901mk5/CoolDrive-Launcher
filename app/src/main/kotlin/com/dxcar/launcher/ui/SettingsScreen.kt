@@ -158,13 +158,16 @@ fun SettingsScreen(
             .background(colors.canvasBackground)
             .padding(horizontal = 20.dp, vertical = 14.dp)
     ) {
-        // TOP BAR
+        // TOP BAR (weight(1f) keeps Switch button always visible even on narrow phone screens!)
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f).padding(end = 8.dp)
+            ) {
                 IconButton(onClick = onClose) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
@@ -173,17 +176,21 @@ fun SettingsScreen(
                     )
                 }
                 Spacer(Modifier.width(4.dp))
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "DX-Car Launcher 設定",
                         color = colors.primaryText,
-                        fontSize = 21.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "啟動器切換與預設 · 風格與日夜 · DPI 常駐 Dock · 多指手勢 · 更新與 GitHub",
+                        text = "實驗切換 · 啟動器管理 · 風格日夜 · Dock 與更新",
                         color = colors.secondaryText,
-                        fontSize = 12.sp
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -194,7 +201,7 @@ fun SettingsScreen(
             ) {
                 Icon(Icons.Rounded.PhoneAndroid, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("切換手機同步端模式")
+                Text("切換手機同步端", maxLines = 1)
             }
         }
 
@@ -353,6 +360,15 @@ fun SettingsScreen(
                             }
                         }
                     }
+                }
+
+                if (config.homeExperimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA) {
+                    SettingsToggleRow(
+                        title = "方案 C 開啟左側導航時於右側 30% 顯示懸浮純音樂控盤",
+                        subtitle = "確保在未開放系統原生分割的車機上，也能一邊看真實導航 App 一邊操作大封面音樂控制（可隨時縮小或回首頁）",
+                        checked = config.planCOverlayMusicPanelEnabled,
+                        onCheckedChange = { checked -> onUpdateConfig { it.copy(planCOverlayMusicPanelEnabled = checked) } }
+                    )
                 }
 
                 SettingsToggleRow(
@@ -1013,16 +1029,20 @@ fun SettingsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "藍牙橋接狀態：${bridgeStatus.status.labelZh}",
+                                text = if (bridgeStatus.transportLabel.isNotBlank()) {
+                                    "通知同步狀態：${bridgeStatus.status.labelZh} (${bridgeStatus.transportLabel})"
+                                } else {
+                                    "通知同步狀態：${bridgeStatus.status.labelZh}"
+                                },
                                 color = colors.primaryText,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = if (bridgeStatus.peerName.isNotBlank()) {
-                                    "目前配對裝置：${bridgeStatus.peerName}"
+                                    "目前連線手機：${bridgeStatus.peerName}"
                                 } else {
-                                    "將同一 APK 裝在手機並切換「手機同步端」，即可透過已配對藍牙同步 LINE／Messenger／簡訊／來電"
+                                    "支援藍牙 SPP ＋ 同 Wi-Fi 熱點自動直連；於手機安裝同一 APK 即同步 LINE／簡訊／來電"
                                 },
                                 color = colors.secondaryText,
                                 fontSize = 12.sp

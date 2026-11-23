@@ -37,12 +37,16 @@ class BoxNotificationListenerService : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         instance = this
+        BluetoothCompanionService.syncListenerBoundState(true)
         DxCarApp.instance?.mediaControlBridge?.refreshSessions()
     }
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
-        if (instance == this) instance = null
+        if (instance == this) {
+            instance = null
+            BluetoothCompanionService.syncListenerBoundState(false)
+        }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
@@ -77,6 +81,7 @@ class BoxNotificationListenerService : NotificationListenerService() {
 
         val handle = extractActionHandle(statusBarNotif.key, notif)
         actionHandles[statusBarNotif.key] = handle
+        cacheFavoriteMediaActionIfPresent(pkg, notif)
 
         val isCallNotif = notif.category == Notification.CATEGORY_CALL ||
             handle.answerAction != null ||
@@ -136,9 +141,9 @@ class BoxNotificationListenerService : NotificationListenerService() {
         isCall: Boolean,
         canReply: Boolean
     ) {
-        val allowed = app.preferences.config.value.companionAllowedPackages
+        val cfg = app.preferences.config.value
         if (isCall) {
-            BluetoothCompanionService.sendPacketFromPhone(
+            val ok = BluetoothCompanionService.sendPacketFromPhone(
                 BridgePacket(
                     type = PacketType.CALL_STATE,
                     id = UUID.randomUUID().toString(),
@@ -150,12 +155,17 @@ class BoxNotificationListenerService : NotificationListenerService() {
                     callStatus = CallStatus.RINGING
                 )
             )
+            BluetoothCompanionService.appendExternalLog(
+                if (ok) "已轉傳來電 [$appLabel] $title" else "攔截來電但尚未連線車機"
+            )
             return
         }
 
-        if (!allowed.contains(pkg)) return
+        if (!cfg.companionSyncAllApps && !cfg.companionAllowedPackages.contains(pkg)) return
+        // Skip noisy OS background status shells when syncing all apps
+        if (cfg.companionSyncAllApps && (pkg == "android" || pkg == "com.android.systemui")) return
 
-        BluetoothCompanionService.sendPacketFromPhone(
+        val ok = BluetoothCompanionService.sendPacketFromPhone(
             BridgePacket(
                 type = PacketType.MESSAGE,
                 id = UUID.randomUUID().toString(),
@@ -166,6 +176,9 @@ class BoxNotificationListenerService : NotificationListenerService() {
                 text = text,
                 canReply = canReply
             )
+        )
+        BluetoothCompanionService.appendExternalLog(
+            if (ok) "已送出 [$appLabel] $title" else "攔截 [$appLabel] 但尚未連上車機"
         )
     }
 
@@ -338,6 +351,37 @@ class BoxNotificationListenerService : NotificationListenerService() {
         }.getOrDefault(false)
     }
 
+    private fun cacheFavoriteMediaActionIfPresent(pkg: String, notif: Notification) {
+        val favKeywords = listOf(
+            "喜歡", "紅心", "愛心", "收藏", "點讚", "按讚", "讚",
+            "love", "like", "heart", "favorite", "favourite", "thumb"
+        )
+        val unlikeKeywords = listOf("取消喜歡", "取消收藏", "已收藏", "unlike", "unfavorite", "remove")
+        val actions = notif.actions ?: return
+        for (act in actions) {
+            val title = act.title?.toString()?.trim().orEmpty()
+            val lower = title.lowercase()
+            if (favKeywords.any { lower.contains(it) }) {
+                val isAlreadyLiked = unlikeKeywords.any { lower.contains(it) }
+                favoriteMediaActions[pkg] = act to isAlreadyLiked
+                DxCarApp.instance?.mediaControlBridge?.refreshSessions()
+                return
+            }
+        }
+    }
+
+    fun hasFavoriteNotificationAction(pkg: String): Boolean = favoriteMediaActions.containsKey(pkg)
+
+    fun isFavoriteMarkedInNotification(pkg: String): Boolean = favoriteMediaActions[pkg]?.second == true
+
+    fun executeFavoriteNotificationAction(pkg: String): Boolean {
+        val action = favoriteMediaActions[pkg]?.first ?: return false
+        return runCatching {
+            action.actionIntent.send()
+            true
+        }.getOrDefault(false)
+    }
+
     companion object {
         const val GOOGLE_MAPS_PACKAGE = "com.google.android.apps.maps"
 
@@ -345,5 +389,6 @@ class BoxNotificationListenerService : NotificationListenerService() {
         var instance: BoxNotificationListenerService? = null
 
         private val actionHandles = ConcurrentHashMap<String, NotificationActionHandle>()
+        private val favoriteMediaActions = ConcurrentHashMap<String, Pair<Notification.Action, Boolean>>()
     }
 }

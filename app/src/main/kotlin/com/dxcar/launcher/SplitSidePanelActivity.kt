@@ -232,6 +232,7 @@ class SplitSidePanelActivity : ComponentActivity() {
                                 onPlayPause = { app.mediaControlBridge.togglePlayPause() },
                                 onNext = { app.mediaControlBridge.skipNext() },
                                 onPrevious = { app.mediaControlBridge.skipPrevious() },
+                                onToggleFavorite = { app.mediaControlBridge.toggleFavoriteOrLike() },
                                 onSelectSession = { app.mediaControlBridge.selectSession(it) },
                                 onOpenMediaApp = {
                                     val pkg = media.packageName

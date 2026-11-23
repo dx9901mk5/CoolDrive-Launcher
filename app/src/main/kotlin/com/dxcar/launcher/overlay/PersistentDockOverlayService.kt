@@ -21,13 +21,26 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -43,8 +56,11 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
@@ -64,6 +80,7 @@ import com.dxcar.launcher.accessibility.DxCarAccessibilityService
 import com.dxcar.launcher.comms.CallActionCommand
 import com.dxcar.launcher.comms.CallStatus
 import com.dxcar.launcher.data.DeviceRole
+import com.dxcar.launcher.data.HomeExperimentMode
 import com.dxcar.launcher.layout.CoolwalkLayoutEngine
 import com.dxcar.launcher.layout.ResolvedDockPlacement
 import com.dxcar.launcher.layout.ScreenMetrics
@@ -74,6 +91,8 @@ import com.dxcar.launcher.theme.LocalDxCarColors
 import com.dxcar.launcher.ui.CoolwalkDock
 import com.dxcar.launcher.ui.IncomingCallBanner
 import com.dxcar.launcher.ui.IncomingMessageBanner
+import com.dxcar.launcher.ui.MediaControlCard
+import com.dxcar.launcher.ui.bouncyClickable
 import com.dxcar.launcher.ui.buildRecentDockSlots
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -100,11 +119,14 @@ class PersistentDockOverlayService :
     private lateinit var windowManager: WindowManager
     private var dockView: View? = null
     private var bannerView: ComposeView? = null
+    private var planCPanelView: ComposeView? = null
     private var dockParams: WindowManager.LayoutParams? = null
     private var bannerParams: WindowManager.LayoutParams? = null
+    private var planCPanelParams: WindowManager.LayoutParams? = null
 
     private val isCollapsed = MutableStateFlow(true)
     private val isPinnedOpen = MutableStateFlow(false)
+    private val planCPanelMinimized = MutableStateFlow(false)
     private val interactionTick = MutableStateFlow(0L)
     private val metricsFlow = MutableStateFlow(ScreenMetrics(1280, 720, 240))
     private var lastHomeForeground = true
@@ -132,14 +154,25 @@ class PersistentDockOverlayService :
         val app = DxCarApp.instance ?: return
         setupDockWindow(app)
         setupBannerWindow(app)
+        setupPlanCPanelWindow(app)
         observeVisibilityAndLayout(app)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
-        if (intent?.action == ACTION_STOP) {
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_STOP -> {
+                planCPanelRequested.value = false
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_SHOW_PLAN_C_PANEL -> {
+                planCPanelMinimized.value = false
+                planCPanelRequested.value = true
+            }
+            ACTION_HIDE_PLAN_C_PANEL -> {
+                planCPanelRequested.value = false
+            }
         }
         updateMetrics()
         return START_STICKY
@@ -154,8 +187,10 @@ class PersistentDockOverlayService :
         super.onDestroy()
         removeOverlaySafe(dockView)
         removeOverlaySafe(bannerView)
+        removeOverlaySafe(planCPanelView)
         dockView = null
         bannerView = null
+        planCPanelView = null
         viewModelStore.clear()
     }
 
@@ -540,6 +575,154 @@ class PersistentDockOverlayService :
         runCatching { windowManager.addView(view, params) }
     }
 
+    private fun setupPlanCPanelWindow(app: DxCarApp) {
+        val view = ComposeView(this).apply {
+            setViewTreeLifecycleOwner(this@PersistentDockOverlayService)
+            setViewTreeSavedStateRegistryOwner(this@PersistentDockOverlayService)
+            setViewTreeViewModelStoreOwner(this@PersistentDockOverlayService)
+            setContent {
+                val config by app.preferences.config.collectAsState()
+                val sysStatus by app.systemStatusMonitor.status.collectAsState()
+                val media by app.mediaControlBridge.mediaState.collectAsState()
+                val installedApps by app.installedAppsRepository.apps.collectAsState()
+                val minimized by planCPanelMinimized.collectAsState()
+
+                val isNight = DayNightEngine.isNightNow(
+                    config = config,
+                    now = sysStatus.now,
+                    systemIsDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+                )
+
+                DxCarTheme(
+                    isNight = isNight,
+                    accentIndex = config.accentColorIndex,
+                    stylePreset = config.stylePreset
+                ) {
+                    val palette = LocalDxCarColors.current
+                    if (minimized) {
+                        Surface(
+                            color = palette.glassOverlay,
+                            shape = CircleShape,
+                            shadowElevation = 10.dp,
+                            modifier = Modifier
+                                .padding(10.dp)
+                                .size(50.dp)
+                                .border(1.5.dp, palette.accent, CircleShape)
+                                .bouncyClickable { planCPanelMinimized.value = false }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Rounded.MusicNote, contentDescription = "展開音樂控盤", tint = palette.accent, modifier = Modifier.size(24.dp))
+                            }
+                        }
+                    } else {
+                        Surface(
+                            color = palette.cardSurface.copy(alpha = 0.96f),
+                            shape = RoundedCornerShape(22.dp),
+                            shadowElevation = 14.dp,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(6.dp)
+                                .border(1.2.dp, palette.cardBorder, RoundedCornerShape(22.dp))
+                        ) {
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(palette.cardSurfaceElevated)
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        color = palette.accent,
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.bouncyClickable {
+                                            planCPanelRequested.value = false
+                                            bringDxCarToFront(null)
+                                        }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(Icons.Rounded.Home, contentDescription = null, tint = palette.onAccent, modifier = Modifier.size(14.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("回首頁", color = palette.onAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Surface(
+                                            color = palette.cardSurface,
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.bouncyClickable { planCPanelMinimized.value = true }
+                                        ) {
+                                            Text(
+                                                text = "縮小",
+                                                color = palette.secondaryText,
+                                                fontSize = 11.sp,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                        Surface(
+                                            color = palette.cardSurface,
+                                            shape = CircleShape,
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .bouncyClickable { planCPanelRequested.value = false }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = palette.secondaryText, modifier = Modifier.size(14.dp))
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                    MediaControlCard(
+                                        media = media,
+                                        isPrimary = false,
+                                        pureMusicMode = true,
+                                        showSwapButton = false,
+                                        showSixShortcuts = config.showSixShortcutsInMediaPanel,
+                                        customShortcutSlots = config.customShortcutSlots,
+                                        splitShortcuts = config.splitShortcuts,
+                                        installedApps = installedApps,
+                                        onPlayPause = { app.mediaControlBridge.togglePlayPause() },
+                                        onNext = { app.mediaControlBridge.skipNext() },
+                                        onPrevious = { app.mediaControlBridge.skipPrevious() },
+                                        onToggleFavorite = { app.mediaControlBridge.toggleFavoriteOrLike() },
+                                        onSelectSession = { app.mediaControlBridge.selectSession(it) },
+                                        onOpenMediaApp = {
+                                            if (media.packageName.isNotBlank()) {
+                                                app.installedAppsRepository.launchAppFullscreen(media.packageName)
+                                            }
+                                        },
+                                        onCustomSlotLaunch = { token ->
+                                            if (!token.startsWith("__")) {
+                                                app.installedAppsRepository.launchAppFullscreen(token)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        val params = createOverlayParams(
+            width = 360,
+            height = WindowManager.LayoutParams.MATCH_PARENT,
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        )
+        planCPanelView = view
+        planCPanelParams = params
+        view.visibility = View.GONE
+        runCatching { windowManager.addView(view, params) }
+    }
+
     private fun observeVisibilityAndLayout(app: DxCarApp) {
         lifecycleScope.launch {
             combine(
@@ -632,6 +815,58 @@ class PersistentDockOverlayService :
                 bannerView?.visibility = if (showBanner) View.VISIBLE else View.GONE
             }
         }
+
+        lifecycleScope.launch {
+            combine(
+                app.preferences.config,
+                app.isLauncherForeground,
+                planCPanelRequested,
+                planCPanelMinimized,
+                metricsFlow
+            ) { config, isHomeFg, requested, minimized, metrics ->
+                Triple(config, isHomeFg, Triple(requested, minimized, metrics))
+            }.collect { (config, isHomeFg, state) ->
+                val (requested, minimized, metrics) = state
+                val showPlanCPanel = requested &&
+                    !isHomeFg &&
+                    config.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
+                    config.homeExperimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA &&
+                    config.planCOverlayMusicPanelEnabled
+
+                val view = planCPanelView
+                val params = planCPanelParams
+                if (view != null && params != null) {
+                    view.visibility = if (showPlanCPanel) View.VISIBLE else View.GONE
+                    if (showPlanCPanel) {
+                        val spec = CoolwalkLayoutEngine.compute(
+                            metrics = metrics,
+                            dockMode = config.dockPositionMode,
+                            rightHandDrive = config.rightHandDrive,
+                            customPrimaryRatio = config.primarySplitRatio
+                        )
+                        val dockPx = if (spec.dockPlacement != ResolvedDockPlacement.BOTTOM) {
+                            (spec.dockThicknessDp * metrics.density).roundToInt()
+                        } else 0
+                        val availW = (metrics.widthPx - dockPx).coerceAtLeast(480)
+                        val panelW = (availW * (1f - spec.primaryWeight)).roundToInt().coerceIn(260, (availW * 0.45f).roundToInt())
+
+                        params.gravity = if (config.rightHandDrive) {
+                            Gravity.START or Gravity.CENTER_VERTICAL
+                        } else {
+                            Gravity.END or Gravity.CENTER_VERTICAL
+                        }
+                        if (minimized) {
+                            params.width = WindowManager.LayoutParams.WRAP_CONTENT
+                            params.height = WindowManager.LayoutParams.WRAP_CONTENT
+                        } else {
+                            params.width = panelW
+                            params.height = WindowManager.LayoutParams.MATCH_PARENT
+                        }
+                        runCatching { windowManager.updateViewLayout(view, params) }
+                    }
+                }
+            }
+        }
     }
 
     private fun bringDxCarToFront(extraAction: String?) {
@@ -705,6 +940,10 @@ class PersistentDockOverlayService :
         private const val CHANNEL_ID = "dxcar_persistent_dock"
         private const val NOTIF_ID = 2001
         const val ACTION_STOP = "com.dxcar.launcher.overlay.STOP"
+        const val ACTION_SHOW_PLAN_C_PANEL = "com.dxcar.launcher.overlay.SHOW_PLAN_C"
+        const val ACTION_HIDE_PLAN_C_PANEL = "com.dxcar.launcher.overlay.HIDE_PLAN_C"
+
+        private val planCPanelRequested = MutableStateFlow(false)
 
         fun start(context: Context) {
             if (!Settings.canDrawOverlays(context)) return
@@ -712,7 +951,21 @@ class PersistentDockOverlayService :
             runCatching { ContextCompat.startForegroundService(context, intent) }
         }
 
+        fun showPlanCMusicPanel(context: Context) {
+            if (!Settings.canDrawOverlays(context)) return
+            planCPanelRequested.value = true
+            val intent = Intent(context, PersistentDockOverlayService::class.java).apply {
+                action = ACTION_SHOW_PLAN_C_PANEL
+            }
+            runCatching { ContextCompat.startForegroundService(context, intent) }
+        }
+
+        fun hidePlanCMusicPanel() {
+            planCPanelRequested.value = false
+        }
+
         fun stop(context: Context) {
+            planCPanelRequested.value = false
             runCatching { context.stopService(Intent(context, PersistentDockOverlayService::class.java)) }
         }
     }

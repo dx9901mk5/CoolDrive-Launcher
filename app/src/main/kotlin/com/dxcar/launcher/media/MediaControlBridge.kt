@@ -8,6 +8,7 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.media.AudioManager
 import android.media.MediaMetadata
+import android.media.Rating
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
@@ -42,6 +43,8 @@ data class ActiveMediaState(
     val album: String = "",
     val albumArt: Bitmap? = null,
     val isPlaying: Boolean = false,
+    val canFavorite: Boolean = false,
+    val isFavorited: Boolean = false,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     val availableSessions: List<MediaSessionSummary> = emptyList()
@@ -169,6 +172,7 @@ class MediaControlBridge(private val context: Context) {
         val position = pb?.position?.coerceAtLeast(0L) ?: 0L
         val playing = pb?.state == PlaybackState.STATE_PLAYING ||
             pb?.state == PlaybackState.STATE_BUFFERING
+        val (canFav, isFav) = detectFavoriteCapability(controller, pkg, meta, pb)
 
         _mediaState.value = ActiveMediaState(
             hasSession = true,
@@ -180,10 +184,118 @@ class MediaControlBridge(private val context: Context) {
             album = album,
             albumArt = art,
             isPlaying = playing,
+            canFavorite = canFav,
+            isFavorited = isFav,
             positionMs = position,
             durationMs = duration,
             availableSessions = summaries
         )
+    }
+
+    private fun findFavoriteCustomAction(pb: PlaybackState?): PlaybackState.CustomAction? {
+        val keywords = listOf(
+            "like", "fav", "heart", "love", "thumb_up", "thumbs_up",
+            "喜歡", "紅心", "愛心", "收藏", "讚"
+        )
+        return pb?.customActions?.firstOrNull { act ->
+            val key = "${act.action} ${act.name}".lowercase()
+            keywords.any { key.contains(it) } && !key.contains("thumb_down") && !key.contains("dislike")
+        }
+    }
+
+    private fun detectFavoriteCapability(
+        controller: MediaController,
+        pkg: String,
+        meta: MediaMetadata?,
+        pb: PlaybackState?
+    ): Pair<Boolean, Boolean> {
+        val customAct = findFavoriteCustomAction(pb)
+        if (customAct != null) {
+            val label = "${customAct.action} ${customAct.name}".lowercase()
+            val liked = label.contains("unlike") || label.contains("unfav") ||
+                label.contains("remove") || label.contains("已收藏") || label.contains("取消")
+            return true to liked
+        }
+
+        val listener = BoxNotificationListenerService.instance
+        if (listener != null && listener.hasFavoriteNotificationAction(pkg)) {
+            return true to listener.isFavoriteMarkedInNotification(pkg)
+        }
+
+        val ratingType = controller.ratingType
+        if (ratingType == Rating.RATING_HEART || ratingType == Rating.RATING_THUMB_UP_DOWN) {
+            val userRating = meta?.getRating(MediaMetadata.METADATA_KEY_USER_RATING)
+            val liked = when (ratingType) {
+                Rating.RATING_HEART -> userRating?.hasHeart() == true
+                Rating.RATING_THUMB_UP_DOWN -> userRating?.isThumbUp == true
+                else -> false
+            }
+            return true to liked
+        }
+
+        return false to false
+    }
+
+    /**
+     * Triggers Like / Heart / Favorite on the active music player:
+     * 1. MediaSession CustomAction (Spotify, YT Music, KKBOX, Apple Music, supported NetEase)
+     * 2. Notification Action Button (NetEase Cloud Music & players exposing heart in notification)
+     * 3. Standard MediaSession Rating API (VLC, YouTube, etc.)
+     */
+    fun toggleFavoriteOrLike(): Pair<Boolean, String> {
+        val controller = selectedController ?: return false to "目前沒有播放中的媒體"
+        val pkg = controller.packageName
+        val appLabel = resolveAppLabel(pkg)
+        val pb = controller.playbackState
+        val meta = controller.metadata
+
+        // 1. CustomAction inside MediaSession
+        val customAct = findFavoriteCustomAction(pb)
+        if (customAct != null) {
+            val ok = runCatching {
+                controller.transportControls.sendCustomAction(customAct.action, customAct.extras)
+                true
+            }.getOrDefault(false)
+            if (ok) {
+                val curFav = _mediaState.value.isFavorited
+                _mediaState.value = _mediaState.value.copy(isFavorited = !curFav)
+                return true to if (!curFav) "♥ 已收藏／點讚 ($appLabel)" else "♡ 已取消收藏 ($appLabel)"
+            }
+        }
+
+        // 2. Notification Action (essential for NetEase Cloud Music / QQ Music etc.)
+        val listener = BoxNotificationListenerService.instance
+        if (listener != null && listener.executeFavoriteNotificationAction(pkg)) {
+            val curFav = _mediaState.value.isFavorited
+            _mediaState.value = _mediaState.value.copy(isFavorited = !curFav)
+            return true to "♥ 已觸發 $appLabel 紅心／喜歡"
+        }
+
+        // 3. Standard Rating API
+        val ratingType = controller.ratingType
+        if (ratingType == Rating.RATING_HEART || ratingType == Rating.RATING_THUMB_UP_DOWN) {
+            val userRating = meta?.getRating(MediaMetadata.METADATA_KEY_USER_RATING)
+            val nextLiked = when (ratingType) {
+                Rating.RATING_HEART -> userRating?.hasHeart() != true
+                Rating.RATING_THUMB_UP_DOWN -> userRating?.isThumbUp != true
+                else -> true
+            }
+            val newRating = if (ratingType == Rating.RATING_HEART) {
+                Rating.newHeartRating(nextLiked)
+            } else {
+                Rating.newThumbRating(nextLiked)
+            }
+            val ok = runCatching {
+                controller.transportControls.setRating(newRating)
+                true
+            }.getOrDefault(false)
+            if (ok) {
+                _mediaState.value = _mediaState.value.copy(isFavorited = nextLiked)
+                return true to if (nextLiked) "♥ 已點讚 ($appLabel)" else "♡ 已取消讚 ($appLabel)"
+            }
+        }
+
+        return false to "$appLabel 目前未開放背景紅心接口，可點上方開啟 App 收藏"
     }
 
     fun selectSession(packageName: String) {

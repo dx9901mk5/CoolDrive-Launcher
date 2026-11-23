@@ -419,15 +419,23 @@ class InstalledAppsRepository(private val context: Context) {
     fun launchSplitShortcut(
         shortcut: SplitScreenShortcut,
         screenWidthPx: Int,
-        screenHeightPx: Int
+        screenHeightPx: Int,
+        dockOffsetLeftPx: Int = 0,
+        dockOffsetRightPx: Int = 0,
+        dockOffsetBottomPx: Int = 0
     ) {
         scope.launch(Dispatchers.Main) {
             if (shortcut.engine == SplitLaunchEngine.FREEFORM_EXACT_RATIO) {
-                val splitX = (screenWidthPx * shortcut.ratio.leftWeight).toInt().coerceIn(200, (screenWidthPx - 200).coerceAtLeast(200))
-                val leftRect = Rect(0, 0, splitX, screenHeightPx)
-                val rightRect = Rect(splitX, 0, screenWidthPx, screenHeightPx)
+                val availW = (screenWidthPx - dockOffsetLeftPx - dockOffsetRightPx).coerceAtLeast(400)
+                val availH = (screenHeightPx - dockOffsetBottomPx).coerceAtLeast(300)
+                val splitW = (availW * shortcut.ratio.leftWeight).toInt()
+                    .coerceIn(200, (availW - 200).coerceAtLeast(200))
+                val leftX = dockOffsetLeftPx
+                val rightX = leftX + splitW
+                val leftRect = Rect(leftX, 0, rightX, availH)
+                val rightRect = Rect(rightX, 0, leftX + availW, availH)
                 launchPackageFreeform(shortcut.leftPackage, leftRect)
-                delay(280L)
+                delay(320L)
                 launchPackageFreeform(shortcut.rightPackage, rightRect)
             } else {
                 launchAppFullscreen(shortcut.leftPackage)
@@ -451,23 +459,45 @@ class InstalledAppsRepository(private val context: Context) {
                     Intent.FLAG_ACTIVITY_MULTIPLE_TASK
             )
         } ?: return false
+        val options = ActivityOptions.makeBasic().apply {
+            launchDisplayId = Display.DEFAULT_DISPLAY
+        }
         return runCatching {
-            context.startActivity(intent)
+            context.startActivity(intent, options.toBundle())
             recordRecent(packageName)
             true
-        }.getOrDefault(false)
+        }.getOrElse {
+            runCatching {
+                context.startActivity(intent)
+                recordRecent(packageName)
+                true
+            }.getOrDefault(false)
+        }
     }
 
     fun launchPackageFreeform(packageName: String, bounds: Rect): Boolean {
-        val intent = pm.getLaunchIntentForPackage(packageName)?.apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+        val knownActivity = findApp(packageName)?.activityName.orEmpty()
+        val intent = if (knownActivity.isNotBlank()) {
+            Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+                component = ComponentName(packageName, knownActivity)
+            }
+        } else {
+            pm.getLaunchIntentForPackage(packageName)
         } ?: return false
+        intent.addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+        )
         return runCatching {
-            val options = ActivityOptions.makeBasic()
-            options.launchBounds = bounds
-            runCatching {
-                val method = ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
-                method.invoke(options, 5)
+            val options = ActivityOptions.makeBasic().apply {
+                launchDisplayId = Display.DEFAULT_DISPLAY
+                launchBounds = bounds
+                runCatching {
+                    val method = ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
+                    method.invoke(this, 5) // WINDOWING_MODE_FREEFORM
+                }
             }
             context.startActivity(intent, options.toBundle())
             recordRecent(packageName)

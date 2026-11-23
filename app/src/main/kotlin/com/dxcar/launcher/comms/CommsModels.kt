@@ -76,15 +76,17 @@ data class ActiveNavBanner(
 
 enum class BridgeConnectionStatus(val labelZh: String) {
     DISABLED("未啟用"),
-    LISTENING("等待已配對手機連線…"),
-    CONNECTING("正在透過藍牙連線 AI Box…"),
+    LISTENING("等待手機藍牙／Wi-Fi 熱點連線…"),
+    CONNECTING("正在搜尋並連線 AI Box…"),
     CONNECTED("已連線同步中"),
-    ERROR("藍牙通道未就緒")
+    ERROR("通道未就緒")
 }
 
 data class BridgeStatusState(
     val status: BridgeConnectionStatus = BridgeConnectionStatus.DISABLED,
     val peerName: String = "",
+    val transportLabel: String = "",
+    val isListenerBound: Boolean = false,
     val lastSyncedMs: Long = 0L,
     val recentLogs: List<String> = emptyList()
 )
