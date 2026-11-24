@@ -47,21 +47,6 @@ class BluetoothCallReceiver : BroadcastReceiver() {
                 }
                 val cfg = app?.preferences?.config?.value
 
-                // Immediately cycle Car AI Box Wi-Fi OFF -> ON when a phone connects over Bluetooth so it fast-joins hotspot
-                if (cfg == null || cfg.deviceRole == DeviceRole.AI_BOX_LAUNCHER) {
-                    @SuppressLint("MissingPermission")
-                    val majorClass = runCatching { connectedDevice?.bluetoothClass?.majorDeviceClass }.getOrNull()
-                    val isNonPhonePeripheral = majorClass == BluetoothClass.Device.Major.PERIPHERAL ||
-                        majorClass == BluetoothClass.Device.Major.IMAGING ||
-                        majorClass == BluetoothClass.Device.Major.TOY ||
-                        majorClass == BluetoothClass.Device.Major.HEALTH
-                    if (!isNonPhonePeripheral) {
-                        @SuppressLint("MissingPermission")
-                        val devName = runCatching { connectedDevice?.name }.getOrNull().orEmpty()
-                        WifiHotspotFastRestarter.onPhoneBluetoothConnected(context, devName)
-                    }
-                }
-
                 app?.systemStatusMonitor?.refreshBluetoothState()
                 if (cfg?.companionAutoConnect == true) {
                     if (cfg.deviceRole == DeviceRole.AI_BOX_LAUNCHER) {
@@ -92,15 +77,6 @@ class BluetoothCallReceiver : BroadcastReceiver() {
                 if (state == BluetoothProfile.STATE_CONNECTED) {
                     val cfg = app?.preferences?.config?.value
                     if (cfg == null || cfg.deviceRole == DeviceRole.AI_BOX_LAUNCHER) {
-                        val connectedDevice = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
-                        } else {
-                            @Suppress("DEPRECATION")
-                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
-                        }
-                        @SuppressLint("MissingPermission")
-                        val devName = runCatching { connectedDevice?.name }.getOrNull().orEmpty()
-                        WifiHotspotFastRestarter.onPhoneBluetoothConnected(context, devName)
                         if (cfg?.companionAutoConnect == true) {
                             BluetoothCompanionService.startOrReconnect(context)
                         }

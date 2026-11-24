@@ -732,6 +732,14 @@ class BluetoothCompanionService : Service() {
             }
         }
 
+        // 4. Android Emulator host-loopback bridge (when running dual-emulator tests via `adb forward tcp:47681`)
+        val isEmu = android.os.Build.FINGERPRINT.contains("generic", ignoreCase = true) ||
+            android.os.Build.HARDWARE.contains("ranchu", ignoreCase = true) ||
+            android.os.Build.PRODUCT.contains("sdk_gphone", ignoreCase = true)
+        if (isEmu) {
+            found.add("10.0.2.2")
+        }
+
         return found.toList()
     }
 

@@ -2,6 +2,8 @@ package com.dxcar.launcher.ui
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
@@ -116,6 +118,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.dxcar.launcher.BuildConfig
+import com.dxcar.launcher.billing.BillingTrialState
 import com.dxcar.launcher.comms.BluetoothCompanionService
 import com.dxcar.launcher.comms.BoxNotificationListenerService
 import com.dxcar.launcher.comms.BridgeConnectionStatus
@@ -191,8 +194,11 @@ fun PhoneCompanionScreen(
     bridgeStatus: BridgeStatusState,
     permissionHealth: PermissionHealth,
     updateState: UpdateUiState,
+    billingState: BillingTrialState = BillingTrialState(),
     onCheckUpdate: () -> Unit,
     onDownloadOrInstallUpdate: () -> Unit,
+    onPurchasePro: () -> Unit = {},
+    onRestorePurchases: () -> Unit = {},
     onRefreshPairedDevices: () -> Unit,
     onSelectTargetDevice: (PairedBtDevice) -> Unit,
     onToggleAllowedPackage: (String) -> Unit,
@@ -777,66 +783,79 @@ fun PhoneCompanionScreen(
                 shape = RoundedCornerShape(22.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, colors.cardBorder, RoundedCornerShape(22.dp))
+                    .border(1.dp, colors.accent.copy(alpha = 0.55f), RoundedCornerShape(22.dp))
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "App 版本與 GitHub 更新（目前 v${BuildConfig.VERSION_NAME}）",
+                        text = if (billingState.isProUnlocked) {
+                            str("👑 DX-Car Pro 永久買斷版（已啟用）", "👑 DX-Car Pro 永久买断版（已激活）", "👑 DX-Car Pro Lifetime (Unlocked)", "👑 DX-Car Pro 買い切り版（有効）")
+                        } else if (billingState.isInTrial) {
+                            str(
+                                "🎁 七天全功能免費試用中（剩餘 ${billingState.remainingDays} 天 ${billingState.remainingHoursRemainder} 小時）",
+                                "🎁 七天全功能免费试用中（剩余 ${billingState.remainingDays} 天 ${billingState.remainingHoursRemainder} 小时）",
+                                "🎁 7-Day Full Trial (${billingState.remainingDays}d ${billingState.remainingHoursRemainder}h left)",
+                                "🎁 7日間フル機能トライアル中（残り ${billingState.remainingDays}日 ${billingState.remainingHoursRemainder}時間）"
+                            )
+                        } else {
+                            str("🔒 七天免費試用已結束", "🔒 七天免费试用已结束", "🔒 7-Day Free Trial Ended", "🔒 7日間無料トライアル終了")
+                        },
                         color = colors.primaryText,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = updateState.statusMessage.ifBlank { "點擊檢查 GitHub Releases 最新版本" },
-                        color = if (updateState.hasUpdate || updateState.downloadedReady) colors.accent else colors.secondaryText,
+                        text = str(
+                            "v${BuildConfig.VERSION_NAME} · 一次買斷 ${billingState.formattedPrice} 永久解鎖雙端全功能（含 Google Play 授權同步）",
+                            "v${BuildConfig.VERSION_NAME} · 一次买断 ${billingState.formattedPrice} 永久解锁双端全功能（含 Google Play 授权同步）",
+                            "v${BuildConfig.VERSION_NAME} · One-time ${billingState.formattedPrice} lifetime unlock for Car & Phone",
+                            "v${BuildConfig.VERSION_NAME} · ${billingState.formattedPrice} 買い切りで全機能を永久利用可能"
+                        ),
+                        color = colors.secondaryText,
                         fontSize = 12.sp
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = onCheckUpdate,
-                            enabled = !updateState.checking && !updateState.downloading,
-                            shape = RoundedCornerShape(14.dp)
-                        ) {
-                            Text(if (updateState.checking) "檢查中…" else "檢查更新")
-                        }
-                        if (updateState.hasUpdate || updateState.downloadedReady || updateState.downloading) {
+                    if (billingState.statusMessage.isNotBlank()) {
+                        Text(billingState.statusMessage, color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    if (!billingState.isProUnlocked) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
-                                onClick = onDownloadOrInstallUpdate,
-                                enabled = !updateState.downloading,
+                                onClick = onPurchasePro,
                                 colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
                                 shape = RoundedCornerShape(14.dp)
                             ) {
                                 Text(
-                                    when {
-                                        updateState.downloadedReady -> "立即安裝 v${updateState.latestVersion}"
-                                        updateState.downloading -> {
-                                            if (updateState.totalBytes > 0L) "下載中 ${(updateState.progress * 100).toInt()}%"
-                                            else "下載中…"
-                                        }
-                                        else -> "下載更新 v${updateState.latestVersion}"
-                                    }
+                                    str(
+                                        "立即買斷 ${billingState.formattedPrice}",
+                                        "立即买断 ${billingState.formattedPrice}",
+                                        "Unlock ${billingState.formattedPrice}",
+                                        "買い切り購入 ${billingState.formattedPrice}"
+                                    ),
+                                    fontWeight = FontWeight.Bold
                                 )
+                            }
+                            OutlinedButton(
+                                onClick = onRestorePurchases,
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Text(str("恢復購買", "Restore Purchase", "購入を復元"))
                             }
                         }
                     }
-                    if (updateState.downloading) {
-                        if (updateState.totalBytes > 0L) {
-                            LinearProgressIndicator(
-                                progress = { updateState.progress },
-                                color = colors.accent,
-                                trackColor = colors.cardBorder,
-                                modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp))
-                            )
-                        } else {
-                            LinearProgressIndicator(
-                                color = colors.accent,
-                                trackColor = colors.cardBorder,
-                                modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp))
-                            )
-                        }
+                    OutlinedButton(
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(com.dxcar.launcher.update.UpdateManager.GITHUB_URL))
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            runCatching { context.startActivity(intent) }
+                        },
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text(
+                            str("GitHub 開源主頁：dx9901mk5/DX-Car-Launcher", "GitHub: dx9901mk5/DX-Car-Launcher", "GitHub: dx9901mk5/DX-Car-Launcher"),
+                            fontSize = 12.sp
+                        )
                     }
                 }
             }

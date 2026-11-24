@@ -1,6 +1,7 @@
 package com.dxcar.launcher
 
 import android.app.Application
+import com.dxcar.launcher.billing.BillingTrialManager
 import com.dxcar.launcher.comms.CarNotificationCenter
 import com.dxcar.launcher.comms.TtsAnnouncer
 import com.dxcar.launcher.data.LauncherPreferences
@@ -41,6 +42,8 @@ class DxCarApp : Application() {
         private set
     lateinit var updateManager: UpdateManager
         private set
+    lateinit var billingTrialManager: BillingTrialManager
+        private set
 
     private val _isLauncherForeground = MutableStateFlow(false)
     val isLauncherForeground: StateFlow<Boolean> = _isLauncherForeground.asStateFlow()
@@ -67,6 +70,7 @@ class DxCarApp : Application() {
         builtInNavEngine = BuiltInNavEngine(ttsAnnouncer)
         notificationCenter = CarNotificationCenter(preferences, ttsAnnouncer)
         updateManager = UpdateManager(this)
+        billingTrialManager = BillingTrialManager(this).apply { start() }
     }
 
     fun setLauncherForeground(foreground: Boolean) {

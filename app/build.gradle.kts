@@ -12,8 +12,8 @@ android {
     applicationId = "com.dxcar.launcher"
     minSdk = 28
     targetSdk = 35
-    versionCode = 18
-    versionName = "1.5.5"
+    versionCode = 19
+    versionName = "1.6.0"
   }
 
   signingConfigs {
@@ -75,6 +75,7 @@ dependencies {
   implementation(libs.androidx.lifecycle.service)
   implementation(libs.androidx.savedstate.ktx)
   implementation(libs.androidx.activity.compose)
+  implementation(libs.androidx.fragment.ktx)
 
   implementation(libs.androidx.compose.ui)
   implementation(libs.androidx.compose.ui.tooling.preview)
@@ -88,6 +89,9 @@ dependencies {
   // Networking & Image loading
   implementation(libs.okhttp)
   implementation(libs.coil.compose)
+
+  // Google Play Billing (7-day full-feature trial + NT$500 one-time lifetime unlock)
+  implementation(libs.play.billing.ktx)
 
   // Coroutines & JSON Serialization (for Bluetooth SPP Companion Protocol & Preferences)
   implementation(libs.kotlinx.coroutines.android)

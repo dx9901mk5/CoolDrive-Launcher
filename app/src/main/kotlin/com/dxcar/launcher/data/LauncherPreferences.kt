@@ -78,13 +78,16 @@ enum class HomeExperimentMode(
     PLAN_C_APP_AND_MEDIA(
         shortTitleZh = "方案 C",
         titleZh = "方案 C：指定導航 App ＋ 純粹音樂封面控制",
-        descZh = "左側 70% 指定真實導航 App（Google 地圖／導航王等），右側 30% 專注大專輯封面、天氣與 6 格整合"
+        descZh = "左側 70% 指定真實導航 App（Google 地圖／導航王等），右側 30% 專注大專輯封面、天氣與 6 格整合",
+        isAvailable = false,
+        showInSettings = false
     ),
     PLAN_D_ROOT_RESERVED(
         shortTitleZh = "方案 D（保留）",
         titleZh = "方案 D：Root 特權進階模式（保留開發中）",
         descZh = "需取得車機 Root (su) 權限後啟用全域真常駐 Dock 避讓與系統級雙視窗，敬請期待",
-        isAvailable = false
+        isAvailable = false,
+        showInSettings = false
     );
 
     companion object {
@@ -248,7 +251,7 @@ data class LauncherConfig(
     val companionTargetDeviceAddress: String = "",
     val companionTargetDeviceName: String = "",
     val companionAutoConnect: Boolean = true,
-    val autoCycleWifiOnBtConnect: Boolean = true,
+    val autoCycleWifiOnBtConnect: Boolean = false,
     val companionSyncAllApps: Boolean = false,
     val companionAllowedPackages: List<String> = DEFAULT_COMPANION_PACKAGES,
     val quickReplies: List<String> = DEFAULT_QUICK_REPLIES,
@@ -361,6 +364,10 @@ class LauncherPreferences(context: Context) {
         }
         var decoded = runCatching { json.decodeFromString<LauncherConfig>(raw) }
             .getOrElse { LauncherConfig() }
+
+        if (decoded.homeExperimentMode != HomeExperimentMode.PLAN_A_MULTI_LAYER) {
+            decoded = decoded.copy(homeExperimentMode = HomeExperimentMode.PLAN_A_MULTI_LAYER)
+        }
 
         if (!prefs.getBoolean(KEY_MIGRATED_V150, false)) {
             val safeMode = if (decoded.homeExperimentMode == HomeExperimentMode.PLAN_B_BUILTIN_NAV) {

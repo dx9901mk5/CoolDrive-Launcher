@@ -61,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -157,6 +158,7 @@ fun DxCarRootScreen(
     val builtInNavState by app.builtInNavEngine.state.collectAsState()
     val bridgeStatus by BluetoothCompanionService.bridgeState.collectAsState()
     val updateState by app.updateManager.state.collectAsState()
+    val billingState by app.billingTrialManager.state.collectAsState()
     val cursor3DActive by Cursor3DStateHolder.active.collectAsState()
     val cursor3DTutorial by Cursor3DStateHolder.showTutorial.collectAsState()
     val remoteCursor by RemoteTouchpadController.cursorState.collectAsState()
@@ -273,11 +275,8 @@ fun DxCarRootScreen(
         }
     }
 
-    LaunchedEffect(config.autoCheckAndDownloadUpdate) {
-        delay(2_500L)
-        if (config.autoCheckAndDownloadUpdate) {
-            app.updateManager.checkForUpdate(autoDownload = true)
-        }
+    LaunchedEffect(Unit) {
+        app.billingTrialManager.refreshTrialClock()
     }
 
     val dm = context.resources.displayMetrics
@@ -439,16 +438,15 @@ fun DxCarRootScreen(
                 bridgeStatus = bridgeStatus,
                 permissionHealth = permissionHealth,
                 updateState = updateState,
-                onCheckUpdate = {
-                    scope.launch { app.updateManager.checkForUpdate(autoDownload = false) }
-                },
-                onDownloadOrInstallUpdate = {
-                    if (updateState.downloadedReady) {
-                        app.updateManager.installDownloadedApk()
-                    } else {
-                        scope.launch { app.updateManager.downloadAndInstall(autoLaunchInstaller = true) }
+                billingState = billingState,
+                onCheckUpdate = { },
+                onDownloadOrInstallUpdate = { },
+                onPurchasePro = {
+                    (context as? android.app.Activity)?.let { act ->
+                        app.billingTrialManager.launchPurchaseFlow(act)
                     }
                 },
+                onRestorePurchases = { app.billingTrialManager.restorePurchases() },
                 onRefreshPairedDevices = {
                     pairedBtDevices = app.systemStatusMonitor.getPairedBluetoothDevices()
                     permissionHealth = PermissionHelper.check(context)
@@ -957,6 +955,7 @@ fun DxCarRootScreen(
                                 permissionHealth = permissionHealth,
                                 bridgeStatus = bridgeStatus,
                                 updateState = updateState,
+                                billingState = billingState,
                                 offlineState = offlineState,
                                 offlinePresets = app.offlineMapManager.presets,
                                 onDownloadOfflineRegion = { presetId ->
@@ -1006,18 +1005,14 @@ fun DxCarRootScreen(
                                 onRequestRuntimePermissions = onRequestRuntimePermissions,
                                 onSimulateCall = { app.notificationCenter.triggerSimulatedCall() },
                                 onSimulateMessage = { app.notificationCenter.triggerSimulatedMessage() },
-                                onCheckUpdateNow = {
-                                    scope.launch {
-                                        app.updateManager.checkForUpdate(autoDownload = config.autoCheckAndDownloadUpdate)
+                                onCheckUpdateNow = { },
+                                onDownloadOrInstallUpdate = { },
+                                onPurchasePro = {
+                                    (context as? android.app.Activity)?.let { act ->
+                                        app.billingTrialManager.launchPurchaseFlow(act)
                                     }
                                 },
-                                onDownloadOrInstallUpdate = {
-                                    if (updateState.downloadedReady) {
-                                        app.updateManager.installDownloadedApk()
-                                    } else {
-                                        scope.launch { app.updateManager.downloadAndInstall(autoLaunchInstaller = true) }
-                                    }
-                                },
+                                onRestorePurchases = { app.billingTrialManager.restorePurchases() },
                                 onSwitchToPhoneCompanion = {
                                     pairedBtDevices = app.systemStatusMonitor.getPairedBluetoothDevices()
                                     permissionHealth = PermissionHelper.check(context)
@@ -1086,57 +1081,79 @@ fun DxCarRootScreen(
                 }
             }
 
-            // AUTO-UPDATE BANNER
-            AnimatedVisibility(
-                visible = (updateState.downloading || updateState.downloadedReady) && destination == LauncherDestination.DASHBOARD_SPLIT,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) 84.dp else 16.dp)
-            ) {
-                Surface(
-                    color = colors.accent,
-                    shape = RoundedCornerShape(22.dp),
-                    shadowElevation = 10.dp,
-                    modifier = Modifier.bouncyClickable(pressedScale = 0.93f) {
-                        if (updateState.downloadedReady) {
-                            app.updateManager.installDownloadedApk()
-                        }
-                    }
+            // 7-DAY TRIAL EXPIRED PAYWALL OVERLAY (NT$500 Lifetime Unlock via Google Play Billing)
+            if (!billingState.hasFullAccess) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(99f)
+                        .background(Color.Black.copy(alpha = 0.88f))
+                        .clickable(enabled = false) {}
                 ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    Surface(
+                        color = colors.cardSurface,
+                        shape = RoundedCornerShape(28.dp),
+                        modifier = Modifier
+                            .padding(24.dp)
+                            .border(1.5.dp, colors.accent, RoundedCornerShape(28.dp))
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.CloudDownload, contentDescription = null, tint = colors.onAccent)
-                            Spacer(Modifier.width(8.dp))
+                        Column(
+                            modifier = Modifier.padding(28.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
                             Text(
-                                text = if (updateState.downloadedReady) {
-                                    "新版本 v${updateState.latestVersion} 已下載完成 · 點擊立即安裝"
-                                } else {
-                                    updateState.statusMessage.ifBlank { "正在下載更新…" }
-                                },
-                                color = colors.onAccent,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
+                                text = com.dxcar.launcher.i18n.DxCarI18n.str(
+                                    "🔒 七天全功能免費試用已結束",
+                                    "🔒 七天全功能免费试用已结束",
+                                    "🔒 7-Day Full-Feature Trial Ended",
+                                    "🔒 7日間フル機能トライアル終了"
+                                ),
+                                color = colors.primaryText,
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.ExtraBold
                             )
-                        }
-                        if (updateState.downloading) {
-                            if (updateState.totalBytes > 0L) {
-                                LinearProgressIndicator(
-                                    progress = { updateState.progress },
-                                    color = colors.onAccent,
-                                    trackColor = colors.onAccent.copy(alpha = 0.28f),
-                                    modifier = Modifier.width(240.dp).height(5.dp).clip(RoundedCornerShape(3.dp))
-                                )
-                            } else {
-                                LinearProgressIndicator(
-                                    color = colors.onAccent,
-                                    trackColor = colors.onAccent.copy(alpha = 0.28f),
-                                    modifier = Modifier.width(240.dp).height(5.dp).clip(RoundedCornerShape(3.dp))
-                                )
+                            Text(
+                                text = com.dxcar.launcher.i18n.DxCarI18n.str(
+                                    "一次買斷 ${billingState.formattedPrice} 即可永久解鎖全部車機啟動器與手機遙控同步功能（無任何訂閱月費）",
+                                    "一次买断 ${billingState.formattedPrice} 即可永久解锁全部车机启动器与手机遥控同步功能（无任何订阅月费）",
+                                    "Unlock all Car Launcher & Phone Remote features forever for a one-time ${billingState.formattedPrice} payment.",
+                                    "${billingState.formattedPrice} の買い切りで、車載ランチャー＆スマホ連携の全機能を永久にご利用いただけます。"
+                                ),
+                                color = colors.secondaryText,
+                                fontSize = 14.sp
+                            )
+                            if (billingState.statusMessage.isNotBlank()) {
+                                Text(billingState.statusMessage, color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Button(
+                                    onClick = {
+                                        (context as? android.app.Activity)?.let { act ->
+                                            app.billingTrialManager.launchPurchaseFlow(act)
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Text(
+                                        com.dxcar.launcher.i18n.DxCarI18n.str(
+                                            "立即買斷 ${billingState.formattedPrice}",
+                                            "立即买断 ${billingState.formattedPrice}",
+                                            "Unlock ${billingState.formattedPrice}",
+                                            "買い切り購入 ${billingState.formattedPrice}"
+                                        ),
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                OutlinedButton(
+                                    onClick = { app.billingTrialManager.restorePurchases() },
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Text(com.dxcar.launcher.i18n.DxCarI18n.str("恢復購買", "Restore Purchase", "購入を復元"), fontSize = 14.sp)
+                                }
                             }
                         }
                     }
@@ -1297,10 +1314,10 @@ fun DxCarRootScreen(
 }
 
 /**
- * Infinite-Loop Two-Interface Dashboard Container:
+ * Finite Two-Interface Dashboard Container (NO infinite wrap-around, strictly clipped so Page 2 never bleeds over Dock):
  * - Page 0 (第一介面): Coolwalk Split Dashboard (70/30 adjustable, Map + Weather/Media/6-Shortcuts)
  * - Page 1 (第二介面): 1:1 Equal Split Dashboard (Left = Plan A Built-in Map, Right = Inline Playable YouTube)
- * - Dragging the center divider line ("兩個視窗中間的線") rightward (or leftward) slides smoothly and wraps infinitely (0 -> 1 -> 0 -> 1)!
+ * - Dragging the center divider line switches cleanly between Page 0 (left) and Page 1 (right).
  */
 @Composable
 private fun InfiniteLoopTwoPageDashboard(
@@ -1312,13 +1329,21 @@ private fun InfiniteLoopTwoPageDashboard(
     val scope = rememberCoroutineScope()
     val dragPx = remember { Animatable(0f) }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .clipToBounds()
+    ) {
         val widthPx = constraints.maxWidth.toFloat().coerceAtLeast(320f)
         val thresholdPx = (widthPx * 0.10f).coerceIn(55f, 150f)
 
         val handleDragDelta: (Float) -> Unit = { delta ->
             scope.launch {
-                val next = (dragPx.value + delta).coerceIn(-widthPx * 0.95f, widthPx * 0.95f)
+                val next = if (currentPage == 0) {
+                    (dragPx.value + delta).coerceIn(-widthPx * 0.95f, 0f)
+                } else {
+                    (dragPx.value + delta).coerceIn(0f, widthPx * 0.95f)
+                }
                 dragPx.snapTo(next)
             }
         }
@@ -1326,17 +1351,25 @@ private fun InfiniteLoopTwoPageDashboard(
         val handleDragEnd: () -> Unit = {
             val cur = dragPx.value
             scope.launch {
-                if (abs(cur) >= thresholdPx) {
-                    val target = if (cur >= 0f) widthPx else -widthPx
+                if (currentPage == 0 && cur <= -thresholdPx) {
                     dragPx.animateTo(
-                        targetValue = target,
+                        targetValue = -widthPx,
                         animationSpec = tween(
                             durationMillis = 360,
                             easing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1.0f)
                         )
                     )
-                    // Infinite cyclic wrap-around: 0 -> 1 -> 0 -> 1 ...
-                    onPageChanged((currentPage + 1) % 2)
+                    onPageChanged(1)
+                    dragPx.snapTo(0f)
+                } else if (currentPage == 1 && cur >= thresholdPx) {
+                    dragPx.animateTo(
+                        targetValue = widthPx,
+                        animationSpec = tween(
+                            durationMillis = 360,
+                            easing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1.0f)
+                        )
+                    )
+                    onPageChanged(0)
                     dragPx.snapTo(0f)
                 } else {
                     dragPx.animateTo(0f, spring(stiffness = Spring.StiffnessMedium))
@@ -1347,36 +1380,38 @@ private fun InfiniteLoopTwoPageDashboard(
         val curDx = dragPx.value
         val isDragging = abs(curDx) > 0.5f
 
-        val page0OffsetX = when {
-            currentPage == 0 -> curDx.roundToInt()
-            !isDragging -> -constraints.maxWidth - 40
-            curDx >= 0f -> (-widthPx + curDx).roundToInt()
+        val page0OffsetX = when (currentPage) {
+            0 -> curDx.roundToInt()
+            else -> (-widthPx + curDx).roundToInt()
+        }
+
+        val page1OffsetX = when (currentPage) {
+            1 -> curDx.roundToInt()
             else -> (widthPx + curDx).roundToInt()
         }
 
-        val page1OffsetX = when {
-            currentPage == 1 -> curDx.roundToInt()
-            !isDragging -> -constraints.maxWidth - 40
-            curDx >= 0f -> (-widthPx + curDx).roundToInt()
-            else -> (widthPx + curDx).roundToInt()
+        if (currentPage == 0 || isDragging) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clipToBounds()
+                    .zIndex(if (currentPage == 0) 2f else 1f)
+                    .offset { IntOffset(page0OffsetX, 0) }
+            ) {
+                pageOneContent(handleDragDelta, handleDragEnd)
+            }
         }
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .zIndex(if (currentPage == 0) 2f else 1f)
-                .offset { IntOffset(page0OffsetX, 0) }
-        ) {
-            pageOneContent(handleDragDelta, handleDragEnd)
-        }
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .zIndex(if (currentPage == 1) 2f else 1f)
-                .offset { IntOffset(page1OffsetX, 0) }
-        ) {
-            pageTwoContent(handleDragDelta, handleDragEnd)
+        if (currentPage == 1 || isDragging) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clipToBounds()
+                    .zIndex(if (currentPage == 1) 2f else 1f)
+                    .offset { IntOffset(page1OffsetX, 0) }
+            ) {
+                pageTwoContent(handleDragDelta, handleDragEnd)
+            }
         }
     }
 }
@@ -1823,6 +1858,14 @@ private fun CoolwalkSplitDashboard(
                     )
                 }
             }
+            if (!primary && !isPlanC) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(30f)
+                        .clickable { onSwapPanes() }
+                )
+            }
         }
     }
 
@@ -1855,6 +1898,14 @@ private fun CoolwalkSplitDashboard(
                 onCustomSlotLaunch = onCustomSlotLaunch,
                 onCustomSlotRemove = onCustomSlotRemove
             )
+            if (!primary && !isPlanC) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(30f)
+                        .clickable { onSwapPanes() }
+                )
+            }
         }
     }
 

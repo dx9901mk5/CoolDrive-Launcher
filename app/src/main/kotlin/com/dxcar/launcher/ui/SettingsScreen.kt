@@ -79,6 +79,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dxcar.launcher.BuildConfig
+import com.dxcar.launcher.billing.BillingTrialState
 import com.dxcar.launcher.comms.BridgeStatusState
 import com.dxcar.launcher.data.AppLanguage
 import com.dxcar.launcher.data.DockPositionMode
@@ -139,6 +140,7 @@ fun SettingsScreen(
     permissionHealth: PermissionHealth,
     bridgeStatus: BridgeStatusState,
     updateState: UpdateUiState,
+    billingState: BillingTrialState = BillingTrialState(),
     offlineState: OfflineMapUiState = OfflineMapUiState(),
     offlinePresets: List<OfflineRegionPreset> = emptyList(),
     onDownloadOfflineRegion: (String) -> Unit = {},
@@ -159,6 +161,8 @@ fun SettingsScreen(
     onSimulateMessage: () -> Unit,
     onCheckUpdateNow: () -> Unit,
     onDownloadOrInstallUpdate: () -> Unit,
+    onPurchasePro: () -> Unit = {},
+    onRestorePurchases: () -> Unit = {},
     onSwitchToPhoneCompanion: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
@@ -433,40 +437,6 @@ fun SettingsScreen(
                                     }
                                 }
                             }
-                        }
-
-                        if (config.homeExperimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA) {
-                            Text("方案 C 左側預設導航 App", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            val orderedNavApps = remember(installedApps) {
-                                val navFirst = installedApps.filter { it.category == AppCategory.NAVIGATION }
-                                val others = installedApps.filterNot { it.category == AppCategory.NAVIGATION }
-                                navFirst + others.take(10)
-                            }
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                orderedNavApps.forEach { appInfo ->
-                                    val isSelected = config.planCNavPackage == appInfo.packageName
-                                    val bmp = remember(appInfo.icon) { appInfo.icon.asImageBitmap() }
-                                    Surface(
-                                        color = if (isSelected) colors.accent else colors.cardSurfaceElevated,
-                                        shape = RoundedCornerShape(14.dp),
-                                        modifier = Modifier
-                                            .border(1.dp, if (isSelected) colors.accent else colors.cardBorder, RoundedCornerShape(14.dp))
-                                            .clickable { onUpdateConfig { it.copy(planCNavPackage = appInfo.packageName) } }
-                                    ) {
-                                        Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            Image(bitmap = bmp, contentDescription = appInfo.label, modifier = Modifier.size(22.dp).clip(RoundedCornerShape(6.dp)))
-                                            Spacer(Modifier.width(6.dp))
-                                            Text(appInfo.label, color = if (isSelected) colors.onAccent else colors.primaryText, fontSize = 12.sp, maxLines = 1)
-                                        }
-                                    }
-                                }
-                            }
-                            SettingsToggleRow(
-                                title = "開啟左側導航時於右側 30% 顯示懸浮音樂控盤",
-                                subtitle = "包含上方當地天氣、大專輯封面與紅心收藏",
-                                checked = config.planCOverlayMusicPanelEnabled,
-                                onCheckedChange = { checked -> onUpdateConfig { it.copy(planCOverlayMusicPanelEnabled = checked) } }
-                            )
                         }
 
                         // Plan A Offline Map Download & Update Cycle Quick Controls ("依據所在區域，或是所在國家，可以全下載")
@@ -1088,23 +1058,6 @@ fun SettingsScreen(
 
                         SettingsToggleRow(
                             title = str(
-                                "偵測到手機連上藍牙時，強制關閉再開啟 Wi-Fi（加速連入熱點）",
-                                "检测到手机连上蓝牙时，强制关闭再开启 Wi-Fi（加速连入热点）",
-                                "Auto-Cycle Wi-Fi on Phone Bluetooth Connect (Fast Hotspot Join)",
-                                "スマホ Bluetooth 接続時に Wi-Fi を強制再起動（テザリング高速接続）"
-                            ),
-                            subtitle = str(
-                                "一上車連上藍牙即自動重啟系統 Wi-Fi 立即掃描並連入手機熱點（預設開啟）",
-                                "一上车连上蓝牙即自动重启系统 Wi-Fi 立即扫描并连入手机热点（默认开启）",
-                                "Automatically turns system Wi-Fi OFF then ON when phone Bluetooth connects (Default ON)",
-                                "乗車時の Bluetooth 接続でシステム Wi-Fi を再起動し、スマホのテザリングへ即座に接続（既定 ON）"
-                            ),
-                            checked = config.autoCycleWifiOnBtConnect,
-                            onCheckedChange = { checked -> onUpdateConfig { it.copy(autoCycleWifiOnBtConnect = checked) } }
-                        )
-
-                        SettingsToggleRow(
-                            title = str(
                                 "全螢幕導航／看影片時彈出頂部來電與訊息橫幅",
                                 "Show Top Call & Message Banner in Fullscreen Apps",
                                 "フルスクリーン時に着信・通知バナーを上部に表示"
@@ -1134,9 +1087,6 @@ fun SettingsScreen(
                         )
 
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = onTestWifiHotspotCycle, shape = RoundedCornerShape(12.dp)) {
-                                Text(str("📶 測試重啟 Wi-Fi 連熱點", "📶 Test Wi-Fi Cycle", "📶 Wi-Fi 再起動テスト"), fontSize = 12.sp)
-                            }
                             OutlinedButton(onClick = onSimulateCall, shape = RoundedCornerShape(12.dp)) {
                                 Text(str("測試來電橫幅", "Test Call Banner", "着信バナーテスト"), fontSize = 12.sp)
                             }
@@ -1204,71 +1154,73 @@ fun SettingsScreen(
                 val cardUpdatesAndGithub: @Composable (Modifier) -> Unit = { mod ->
                     SettingsSectionCard(
                         icon = Icons.Rounded.CloudDownload,
-                        title = str("App 自動更新與恢復預設", "Auto Update & Reset", "自動アップデート・初期化"),
+                        title = str("七天試用買斷、GitHub 主頁與恢復預設", "Trial, Pro Unlock, GitHub & Reset", "トライアル・買い切り・GitHub・初期化"),
                         modifier = mod
                     ) {
-                        SettingsToggleRow(
-                            title = str("啟動時自動檢測並下載新版 APK", "Auto-Check & Download Updates", "起動時に自動で更新を確認・取得"),
-                            subtitle = str(
-                                "目前版本：v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})",
-                                "Current: v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})",
-                                "現在: v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})"
-                            ),
-                            checked = config.autoCheckAndDownloadUpdate,
-                            onCheckedChange = { checked -> onUpdateConfig { it.copy(autoCheckAndDownloadUpdate = checked) } }
-                        )
-
-                        if (updateState.statusMessage.isNotBlank()) {
-                            Text(
-                                text = updateState.statusMessage,
-                                color = if (updateState.hasUpdate || updateState.downloadedReady) colors.accent else colors.secondaryText,
-                                fontSize = 12.sp
-                            )
-                        }
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(
-                                onClick = onCheckUpdateNow,
-                                enabled = !updateState.checking && !updateState.downloading,
-                                shape = RoundedCornerShape(14.dp)
+                        Surface(
+                            color = colors.cardSurfaceElevated,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.2.dp, colors.accent.copy(alpha = 0.65f), RoundedCornerShape(16.dp))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text(
-                                    if (updateState.checking) str("檢查中…", "Checking…", "確認中…")
-                                    else str("檢查更新", "Check Updates", "更新を確認")
+                                    text = if (billingState.isProUnlocked) {
+                                        str("👑 DX-Car Pro 永久買斷版（已解鎖）", "👑 DX-Car Pro 永久买断版（已解锁）", "👑 DX-Car Pro Lifetime (Unlocked)", "👑 DX-Car Pro 買い切り版（解除済み）")
+                                    } else if (billingState.isInTrial) {
+                                        str(
+                                            "🎁 七天全功能免費試用中（剩餘 ${billingState.remainingDays} 天 ${billingState.remainingHoursRemainder} 小時）",
+                                            "🎁 七天全功能免费试用中（剩余 ${billingState.remainingDays} 天 ${billingState.remainingHoursRemainder} 小时）",
+                                            "🎁 7-Day Full Trial (${billingState.remainingDays}d ${billingState.remainingHoursRemainder}h left)",
+                                            "🎁 7日間フル機能トライアル（残り ${billingState.remainingDays}日 ${billingState.remainingHoursRemainder}時間）"
+                                        )
+                                    } else {
+                                        str("🔒 七天免費試用已結束，請一次買斷永久解鎖", "🔒 七天免费试用已结束，请一次买断永久解锁", "🔒 7-Day Trial Ended — Unlock Lifetime Pro", "🔒 7日間トライアル終了 — 買い切りで解除")
+                                    },
+                                    color = colors.primaryText,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
-                            }
-                            if (updateState.hasUpdate || updateState.downloadedReady) {
-                                Button(
-                                    onClick = onDownloadOrInstallUpdate,
-                                    enabled = !updateState.downloading,
-                                    colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
-                                    shape = RoundedCornerShape(14.dp)
-                                ) {
-                                    Text(
-                                        when {
-                                            updateState.downloadedReady -> str("立即安裝 v${updateState.latestVersion}", "Install v${updateState.latestVersion}", "今すぐインストール v${updateState.latestVersion}")
-                                            updateState.downloading -> str("下載中 ${(updateState.progress * 100).toInt()}%", "Downloading ${(updateState.progress * 100).toInt()}%", "ダウンロード中 ${(updateState.progress * 100).toInt()}%")
-                                            else -> str("下載更新", "Download Update", "更新をダウンロード")
-                                        }
-                                    )
+                                Text(
+                                    text = str(
+                                        "目前版本：v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE}) · 一次買斷 ${billingState.formattedPrice} 永久使用全功能",
+                                        "当前版本：v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE}) · 一次买断 ${billingState.formattedPrice} 永久使用全功能",
+                                        "Version v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · One-time ${billingState.formattedPrice} lifetime unlock",
+                                        "バージョン v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · ${billingState.formattedPrice} 買い切りで全機能開放"
+                                    ),
+                                    color = colors.secondaryText,
+                                    fontSize = 11.sp
+                                )
+                                if (billingState.statusMessage.isNotBlank()) {
+                                    Text(billingState.statusMessage, color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                                 }
-                            }
-                        }
-
-                        if (updateState.downloading) {
-                            if (updateState.totalBytes > 0L) {
-                                LinearProgressIndicator(
-                                    progress = { updateState.progress },
-                                    color = colors.accent,
-                                    trackColor = colors.cardBorder,
-                                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp))
-                                )
-                            } else {
-                                LinearProgressIndicator(
-                                    color = colors.accent,
-                                    trackColor = colors.cardBorder,
-                                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp))
-                                )
+                                if (!billingState.isProUnlocked) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = onPurchasePro,
+                                            colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Text(
+                                                str(
+                                                    "立即買斷 ${billingState.formattedPrice}",
+                                                    "立即买断 ${billingState.formattedPrice}",
+                                                    "Unlock ${billingState.formattedPrice}",
+                                                    "買い切り購入 ${billingState.formattedPrice}"
+                                                ),
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        OutlinedButton(onClick = onRestorePurchases, shape = RoundedCornerShape(12.dp)) {
+                                            Text(str("恢復購買", "Restore", "購入を復元"), fontSize = 12.sp)
+                                        }
+                                    }
+                                }
                             }
                         }
 
