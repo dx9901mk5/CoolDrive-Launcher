@@ -25,7 +25,29 @@ data class PermissionHealth(
     val hasWriteSettings: Boolean,
     val hasIgnoreBatteryOpt: Boolean,
     val hasPostNotifications: Boolean
-)
+) {
+    fun summaryForPhone(): Pair<Int, Int> {
+        val checks = listOf(
+            hasNotificationListener,
+            hasBluetooth && hasPhoneState && hasPostNotifications,
+            hasIgnoreBatteryOpt
+        )
+        return checks.count { it } to checks.size
+    }
+
+    fun summaryForCar(): Pair<Int, Int> {
+        val checks = listOf(
+            isDefaultHome,
+            hasOverlay,
+            hasNotificationListener,
+            hasAccessibility,
+            hasLocation && hasBluetooth && hasPhoneState,
+            hasWriteSettings,
+            hasIgnoreBatteryOpt
+        )
+        return checks.count { it } to checks.size
+    }
+}
 
 object PermissionHelper {
 

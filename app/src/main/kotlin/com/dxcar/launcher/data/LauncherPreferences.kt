@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.util.UUID
 
 @Serializable
 enum class DeviceRole {
@@ -19,6 +20,8 @@ enum class DeviceRole {
 
 @Serializable
 enum class DockPositionMode {
+    DRIVER_SIDE,
+    FORCE_TOP,
     AUTO_GOOGLE_DPI,
     FORCE_LEFT,
     FORCE_RIGHT,
@@ -47,34 +50,43 @@ enum class HomeExperimentMode(
     val shortTitleZh: String,
     val titleZh: String,
     val descZh: String,
-    val isAvailable: Boolean = true
+    val isAvailable: Boolean = true,
+    val showInSettings: Boolean = true
 ) {
     PLAN_A_MULTI_LAYER(
         shortTitleZh = "方案 A",
-        titleZh = "方案 A：多圖層 ＋ 即時路況開關",
-        descZh = "左側 70% 內建免 Key 地圖，自由切換繁中標準／衛星混合／3D 向量／深色向量與即時路況開關"
+        titleZh = "方案 A：多圖層 ＋ 即時路況 ＋ 離線地圖（推薦）",
+        descZh = "左側 70% 內建免 Key 地圖，支援繁中標準／衛星混合／3D 向量／離線地圖下載與即時路況開關"
     ),
+    @Deprecated("Plan B removed per real-car test feedback; auto-migrated to Plan A")
     PLAN_B_BUILTIN_NAV(
-        shortTitleZh = "方案 B",
-        titleZh = "方案 B：方案 A ＋ 免 Key 內建導航試做",
-        descZh = "整合 Photon 繁中地點搜尋與 OSRM 路線規劃，直接於首頁 70% 繪製藍線導航與中文 TTS 語音提示"
+        shortTitleZh = "方案 B（已停用）",
+        titleZh = "方案 B（已取消）",
+        descZh = "已整合回方案 A",
+        isAvailable = false,
+        showInSettings = false
     ),
     PLAN_C_APP_AND_MEDIA(
         shortTitleZh = "方案 C",
         titleZh = "方案 C：指定導航 App ＋ 純粹音樂封面控制",
-        descZh = "左側 70% 指定真實導航 App（Google 地圖／導航王等），右側 30% 專注大專輯封面、自動音源辨識與 6 格整合"
+        descZh = "左側 70% 指定真實導航 App（Google 地圖／導航王等），右側 30% 專注大專輯封面、天氣與 6 格整合"
     ),
     PLAN_D_ROOT_RESERVED(
         shortTitleZh = "方案 D（保留）",
         titleZh = "方案 D：Root 特權進階模式（保留開發中）",
         descZh = "需取得車機 Root (su) 權限後啟用全域真常駐 Dock 避讓與系統級雙視窗，敬請期待",
         isAvailable = false
-    )
+    );
+
+    companion object {
+        val visibleEntries: List<HomeExperimentMode>
+            get() = entries.filter { it.showInSettings }
+    }
 }
 
 @Serializable
 enum class HomeMapDisplayMode(val labelZh: String, val descZh: String) {
-    BUILTIN_LIVE_MAP("內建免 Key 即時地圖（穩固）", "於 70% 主畫面渲染即時路況／多圖層地圖，點 G地圖 展開原版"),
+    BUILTIN_LIVE_MAP("內建免 Key 即時地圖（穩固）", "於 70% 主畫面渲染即時路況／多圖層／離線地圖，點 G地圖 展開原版"),
     REAL_GMAPS_FREEFORM_EMBED("真實 Google 地圖本體貼合（70%）", "以 Freeform 視窗將真實 Google 地圖 App 貼合至首頁 70% 比例位置")
 }
 
@@ -89,8 +101,8 @@ enum class SplitRatioPreset(val label: String, val leftWeight: Float) {
 
 @Serializable
 enum class SplitLaunchEngine(val labelZh: String) {
-    NATIVE_SPLIT_SCREEN("系統原生分割螢幕"),
-    FREEFORM_EXACT_RATIO("Freeform 精準比例雙視窗")
+    NATIVE_SPLIT_SCREEN("AOSP 系統原生可拖動分屏（推薦）"),
+    FREEFORM_EXACT_RATIO("Freeform 自由雙視窗")
 }
 
 @Serializable
@@ -101,6 +113,36 @@ data class SplitScreenShortcut(
     val ratio: SplitRatioPreset = SplitRatioPreset.R_7_3,
     val engine: SplitLaunchEngine = SplitLaunchEngine.NATIVE_SPLIT_SCREEN,
     val label: String = ""
+)
+
+@Serializable
+data class AppFolderItem(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val packages: List<String>
+)
+
+@Serializable
+enum class OfflineUpdatePolicy(val days: Int, val labelZh: String) {
+    DAYS_7(7, "每 7 天提醒更新"),
+    DAYS_15(15, "每 15 天提醒更新"),
+    DAYS_30(30, "每 30 天提醒更新（推薦）"),
+    MANUAL_ONLY(0, "僅手動更新")
+}
+
+@Serializable
+data class OfflineRegionRecord(
+    val regionId: String,
+    val titleZh: String,
+    val centerLat: Double,
+    val centerLon: Double,
+    val minLat: Double,
+    val maxLat: Double,
+    val minLon: Double,
+    val maxLon: Double,
+    val downloadedAtMs: Long,
+    val approxSizeMb: Float = 0f,
+    val maplibreRegionId: Long = -1L
 )
 
 @Serializable
@@ -128,7 +170,7 @@ enum class GestureAction {
 data class LauncherConfig(
     val deviceRole: DeviceRole = DeviceRole.AI_BOX_LAUNCHER,
     val roleUserPinned: Boolean = false,
-    val dockPositionMode: DockPositionMode = DockPositionMode.AUTO_GOOGLE_DPI,
+    val dockPositionMode: DockPositionMode = DockPositionMode.DRIVER_SIDE,
     val rightHandDrive: Boolean = false,
     val themeMode: ThemeMode = ThemeMode.AUTO_TIME,
     val dayStartHour: Int = 6,
@@ -146,9 +188,11 @@ data class LauncherConfig(
     val showSixShortcutsInMediaPanel: Boolean = true,
     val primarySplitRatio: Float = 0.70f,
     val is24HourClock: Boolean = false,
+    val prefer60FpsEnabled: Boolean = true,
     val autoCheckAndDownloadUpdate: Boolean = true,
     val showHomeDock: Boolean = true,
     val persistentOverlayDockEnabled: Boolean = true,
+    val overlayDockOnOtherLaunchers: Boolean = true,
     val overlayAutoCollapseEnabled: Boolean = true,
     val overlayAutoRetractSeconds: Int = 4,
     val overlayHandleThicknessDp: Int = 26,
@@ -156,7 +200,7 @@ data class LauncherConfig(
     val launchAppsAvoidDockFreeform: Boolean = false,
     val globalCallMessageBannerEnabled: Boolean = true,
     val autoReadMessagesTts: Boolean = false,
-    val multiFingerGesturesEnabled: Boolean = true,
+    val multiFingerGesturesEnabled: Boolean = false,
     val twoFingerVerticalAction: GestureAction = GestureAction.BRIGHTNESS_AND_VOLUME,
     val twoFingerHorizontalAction: GestureAction = GestureAction.MEDIA_PREV_NEXT,
     val threeFingerSwipeDownAction: GestureAction = GestureAction.GO_HOME,
@@ -167,12 +211,21 @@ data class LauncherConfig(
     val recentDockPackages: List<String> = DEFAULT_PINNED_PACKAGES,
     val customShortcutSlots: List<String> = List(6) { "" },
     val splitShortcuts: List<SplitScreenShortcut> = emptyList(),
+    val appFolders: List<AppFolderItem> = emptyList(),
+    val lastMediaPackage: String = "",
+    val lastMediaAppName: String = "",
+    val lastMediaTitle: String = "",
+    val lastMediaArtist: String = "",
+    val offlineUpdatePolicy: OfflineUpdatePolicy = OfflineUpdatePolicy.DAYS_30,
+    val offlineRegions: List<OfflineRegionRecord> = emptyList(),
+    val dismissedOfflineUpdateAtMs: Long = 0L,
+    val phoneTouchpadSensitivity: Float = 1.5f,
     val homeAddress: String = "",
     val workAddress: String = "",
     val companionTargetDeviceAddress: String = "",
     val companionTargetDeviceName: String = "",
     val companionAutoConnect: Boolean = true,
-    val companionSyncAllApps: Boolean = false,
+    val companionSyncAllApps: Boolean = true,
     val companionAllowedPackages: List<String> = DEFAULT_COMPANION_PACKAGES,
     val quickReplies: List<String> = DEFAULT_QUICK_REPLIES,
     val lastKnownLat: Double = 25.0330,
@@ -214,19 +267,11 @@ data class LauncherConfig(
 }
 
 object DeviceFormFactor {
-    /**
-     * Compact Smartphone or Folded Cover Display (portrait & narrow < 580dp).
-     * Never misclassifies wide landscape AI Box head units (e.g. 1280x720@240dpi = 853x480dp).
-     */
     fun isCompactPhoneScreen(configuration: Configuration): Boolean {
         return configuration.screenHeightDp > configuration.screenWidthDp &&
             configuration.screenWidthDp < 580
     }
 
-    /**
-     * Unfolded Foldable inner display (nearly square / large inner screen in either orientation).
-     * Car AI Box head units are wide landscape (aspect >= 1.45), so they are never misclassified.
-     */
     fun isFoldableInnerDisplay(configuration: Configuration): Boolean {
         val minSide = minOf(configuration.screenWidthDp, configuration.screenHeightDp)
         val maxSide = maxOf(configuration.screenWidthDp, configuration.screenHeightDp)
@@ -235,21 +280,17 @@ object DeviceFormFactor {
         return aspect < 1.45f
     }
 
-    /**
-     * Tablet or unfolded foldable screen (>= 580dp width or unfolded foldable inner display).
-     * When true, the Phone Companion header reveals a tap toggle to switch to Car Launcher mode.
-     */
+    fun isPhoneDevice(configuration: Configuration): Boolean {
+        return isCompactPhoneScreen(configuration) || isFoldableInnerDisplay(configuration)
+    }
+
     fun isTabletOrExpandedScreen(configuration: Configuration): Boolean {
         return configuration.screenWidthDp >= 580 || isFoldableInnerDisplay(configuration)
     }
 
-    /**
-     * Auto-selects Phone Companion mode on first launch when opened on a smartphone or foldable
-     * (whether folded cover screen OR unfolded inner screen) that is NOT set as system HOME launcher.
-     */
     fun shouldAutoDefaultToPhone(context: Context, configuration: Configuration, config: LauncherConfig): Boolean {
         if (config.roleUserPinned) return false
-        if (!isCompactPhoneScreen(configuration) && !isFoldableInnerDisplay(configuration)) return false
+        if (!isPhoneDevice(configuration)) return false
         val homeIntent = android.content.Intent(android.content.Intent.ACTION_MAIN)
             .addCategory(android.content.Intent.CATEGORY_HOME)
         val defaultPkg = runCatching {
@@ -272,29 +313,40 @@ class LauncherPreferences(context: Context) {
     private val _config = MutableStateFlow(loadConfig())
     val config: StateFlow<LauncherConfig> = _config.asStateFlow()
 
+    @Suppress("DEPRECATION")
     private fun loadConfig(): LauncherConfig {
         val raw = prefs.getString(KEY_CONFIG_JSON, null)
         if (raw == null) {
-            prefs.edit().putBoolean(KEY_MIGRATED_V140, true).apply()
+            prefs.edit()
+                .putBoolean(KEY_MIGRATED_V140, true)
+                .putBoolean(KEY_MIGRATED_V150, true)
+                .apply()
             return LauncherConfig()
         }
         val decoded = runCatching { json.decodeFromString<LauncherConfig>(raw) }
             .getOrElse { LauncherConfig() }
 
-        if (!prefs.getBoolean(KEY_MIGRATED_V140, false)) {
-            val migratedRatio = if (kotlin.math.abs(decoded.primarySplitRatio - 0.63f) < 0.005f) {
-                0.70f
+        if (!prefs.getBoolean(KEY_MIGRATED_V150, false)) {
+            val safeMode = if (decoded.homeExperimentMode == HomeExperimentMode.PLAN_B_BUILTIN_NAV) {
+                HomeExperimentMode.PLAN_A_MULTI_LAYER
             } else {
-                decoded.primarySplitRatio
+                decoded.homeExperimentMode
+            }
+            val safeDock = if (decoded.dockPositionMode == DockPositionMode.AUTO_GOOGLE_DPI) {
+                DockPositionMode.DRIVER_SIDE
+            } else {
+                decoded.dockPositionMode
             }
             val migrated = decoded.copy(
-                primarySplitRatio = migratedRatio,
-                is24HourClock = false,
+                homeExperimentMode = safeMode,
+                dockPositionMode = safeDock,
+                multiFingerGesturesEnabled = false,
                 overlayHandleThicknessDp = decoded.overlayHandleThicknessDp.coerceAtLeast(26)
             )
             prefs.edit()
                 .putString(KEY_CONFIG_JSON, json.encodeToString(migrated))
                 .putBoolean(KEY_MIGRATED_V140, true)
+                .putBoolean(KEY_MIGRATED_V150, true)
                 .apply()
             return migrated
         }
@@ -313,18 +365,28 @@ class LauncherPreferences(context: Context) {
         prefs.edit().putString(KEY_CONFIG_JSON, json.encodeToString(defaults)).apply()
     }
 
-    fun togglePinnedPackage(packageName: String) {
-        update { current ->
-            val list = current.pinnedDockPackages.toMutableList()
-            if (list.contains(packageName)) {
-                list.remove(packageName)
-            } else {
-                if (list.size >= 6) {
-                    list.removeAt(list.lastIndex)
-                }
-                list.add(packageName)
-            }
-            current.copy(pinnedDockPackages = list)
+    fun recordLastMediaSession(
+        packageName: String,
+        appName: String,
+        title: String,
+        artist: String
+    ) {
+        if (packageName.isBlank()) return
+        val cur = _config.value
+        if (cur.lastMediaPackage == packageName &&
+            cur.lastMediaAppName == appName &&
+            cur.lastMediaTitle == title &&
+            cur.lastMediaArtist == artist
+        ) {
+            return
+        }
+        update {
+            it.copy(
+                lastMediaPackage = packageName,
+                lastMediaAppName = appName,
+                lastMediaTitle = title,
+                lastMediaArtist = artist
+            )
         }
     }
 
@@ -368,8 +430,73 @@ class LauncherPreferences(context: Context) {
         }
     }
 
+    fun createAppFolder(name: String, packages: List<String>) {
+        val distinctPkgs = packages.filter { it.isNotBlank() }.distinct()
+        if (distinctPkgs.isEmpty()) return
+        update { current ->
+            // Remove those packages from any existing folder first to prevent duplicates
+            val cleanedExisting = current.appFolders.mapNotNull { folder ->
+                val rem = folder.packages.filterNot { distinctPkgs.contains(it) }
+                if (rem.isEmpty()) null else folder.copy(packages = rem)
+            }
+            val newFolder = AppFolderItem(
+                name = name.trim().ifBlank { "應用程式資料夾" },
+                packages = distinctPkgs
+            )
+            current.copy(appFolders = cleanedExisting + newFolder)
+        }
+    }
+
+    fun addAppToFolder(folderId: String, packageName: String) {
+        if (packageName.isBlank()) return
+        update { current ->
+            val updated = current.appFolders.mapNotNull { folder ->
+                when {
+                    folder.id == folderId -> folder.copy(packages = (folder.packages + packageName).distinct())
+                    folder.packages.contains(packageName) -> {
+                        val rem = folder.packages - packageName
+                        if (rem.isEmpty()) null else folder.copy(packages = rem)
+                    }
+                    else -> folder
+                }
+            }
+            current.copy(appFolders = updated)
+        }
+    }
+
+    fun renameAppFolder(folderId: String, newName: String) {
+        val trimmed = newName.trim().ifBlank { return }
+        update { current ->
+            current.copy(
+                appFolders = current.appFolders.map {
+                    if (it.id == folderId) it.copy(name = trimmed) else it
+                }
+            )
+        }
+    }
+
+    fun removeAppFromFolder(folderId: String, packageName: String) {
+        update { current ->
+            val updated = current.appFolders.mapNotNull { folder ->
+                if (folder.id != folderId) folder
+                else {
+                    val rem = folder.packages - packageName
+                    if (rem.isEmpty()) null else folder.copy(packages = rem)
+                }
+            }
+            current.copy(appFolders = updated)
+        }
+    }
+
+    fun deleteAppFolder(folderId: String) {
+        update { current ->
+            current.copy(appFolders = current.appFolders.filterNot { it.id == folderId })
+        }
+    }
+
     companion object {
         private const val KEY_CONFIG_JSON = "config_json_v1"
         private const val KEY_MIGRATED_V140 = "migrated_v140_defaults"
+        private const val KEY_MIGRATED_V150 = "migrated_v150_defaults"
     }
 }

@@ -18,7 +18,6 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -59,8 +58,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.abs
-import kotlin.math.roundToInt
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
@@ -79,14 +76,16 @@ import com.dxcar.launcher.R
 import com.dxcar.launcher.accessibility.DxCarAccessibilityService
 import com.dxcar.launcher.comms.CallActionCommand
 import com.dxcar.launcher.comms.CallStatus
+import com.dxcar.launcher.comms.RemoteTouchpadController
+import com.dxcar.launcher.data.DeviceFormFactor
 import com.dxcar.launcher.data.DeviceRole
 import com.dxcar.launcher.data.HomeExperimentMode
 import com.dxcar.launcher.layout.CoolwalkLayoutEngine
 import com.dxcar.launcher.layout.ResolvedDockPlacement
 import com.dxcar.launcher.layout.ScreenMetrics
 import com.dxcar.launcher.system.SystemStatusMonitor
-import com.dxcar.launcher.theme.DxCarTheme
 import com.dxcar.launcher.theme.DayNightEngine
+import com.dxcar.launcher.theme.DxCarTheme
 import com.dxcar.launcher.theme.LocalDxCarColors
 import com.dxcar.launcher.ui.CoolwalkDock
 import com.dxcar.launcher.ui.IncomingCallBanner
@@ -98,13 +97,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
- * System-wide TYPE_APPLICATION_OVERLAY Service keeping:
- * 1. Persistent AA Dock visible over ALL full-screen apps (YouTube, Google Maps, Spotify, etc.),
- *    auto-positioned Left / Right / Bottom by Google Coolwalk DPI rules, and automatically
- *    hidden whenever DX-Car Launcher Home itself is in the foreground.
- * 2. Global AA Incoming Call & Message Popup Banners visible over every app!
+ * System-wide TYPE_APPLICATION_OVERLAY Service powering:
+ * 1. Persistent AA Dock (Left / Right / Top / Bottom) over fullscreen apps AND other car launchers
+ *    (explicitly blocked on smartphone screens per user preference).
+ * 2. Interactive 3D Mouse-Like Pointer Overlay (single-touch drag FX + 2s hold -> zoom / 3D tilt).
+ * 3. Car-Side Remote Mouse Pointer controlled live from the Smartphone Companion Touchpad.
+ * 4. Global AA Incoming Call & Message Banners + Plan C Music Side-Panel.
  */
 class PersistentDockOverlayService :
     LifecycleService(),
@@ -120,9 +122,14 @@ class PersistentDockOverlayService :
     private var dockView: View? = null
     private var bannerView: ComposeView? = null
     private var planCPanelView: ComposeView? = null
+    private var cursor3DView: ComposeView? = null
+    private var remoteMouseView: ComposeView? = null
+
     private var dockParams: WindowManager.LayoutParams? = null
     private var bannerParams: WindowManager.LayoutParams? = null
     private var planCPanelParams: WindowManager.LayoutParams? = null
+    private var cursor3DParams: WindowManager.LayoutParams? = null
+    private var remoteMouseParams: WindowManager.LayoutParams? = null
 
     private val isCollapsed = MutableStateFlow(true)
     private val isPinnedOpen = MutableStateFlow(false)
@@ -130,6 +137,7 @@ class PersistentDockOverlayService :
     private val interactionTick = MutableStateFlow(0L)
     private val metricsFlow = MutableStateFlow(ScreenMetrics(1280, 720, 240))
     private var lastHomeForeground = true
+
     @Volatile
     private var lastRawX = 0f
     @Volatile
@@ -152,9 +160,18 @@ class PersistentDockOverlayService :
         }
 
         val app = DxCarApp.instance ?: return
+        if (app.preferences.config.value.deviceRole == DeviceRole.PHONE_COMPANION ||
+            DeviceFormFactor.isCompactPhoneScreen(resources.configuration)
+        ) {
+            stopSelf()
+            return
+        }
+
         setupDockWindow(app)
         setupBannerWindow(app)
         setupPlanCPanelWindow(app)
+        setupCursor3DWindow(app)
+        setupRemoteMouseWindow(app)
         observeVisibilityAndLayout(app)
     }
 
@@ -163,6 +180,7 @@ class PersistentDockOverlayService :
         when (intent?.action) {
             ACTION_STOP -> {
                 planCPanelRequested.value = false
+                Cursor3DStateHolder.setActive(false)
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -172,6 +190,9 @@ class PersistentDockOverlayService :
             }
             ACTION_HIDE_PLAN_C_PANEL -> {
                 planCPanelRequested.value = false
+            }
+            ACTION_TOGGLE_3D_CURSOR -> {
+                Cursor3DStateHolder.toggle()
             }
         }
         updateMetrics()
@@ -188,9 +209,13 @@ class PersistentDockOverlayService :
         removeOverlaySafe(dockView)
         removeOverlaySafe(bannerView)
         removeOverlaySafe(planCPanelView)
+        removeOverlaySafe(cursor3DView)
+        removeOverlaySafe(remoteMouseView)
         dockView = null
         bannerView = null
         planCPanelView = null
+        cursor3DView = null
+        remoteMouseView = null
         viewModelStore.clear()
     }
 
@@ -214,10 +239,10 @@ class PersistentDockOverlayService :
                 val messages by app.notificationCenter.messages.collectAsState()
                 val collapsed by isCollapsed.collectAsState()
                 val pinnedOpen by isPinnedOpen.collectAsState()
+                val cursor3DOn by Cursor3DStateHolder.active.collectAsState()
                 val tick by interactionTick.collectAsState()
                 val metrics by metricsFlow.collectAsState()
 
-                // Auto-retract back to edge handle after idle seconds (when auto-collapse is ON & not pinned)
                 LaunchedEffect(collapsed, pinnedOpen, tick, config.overlayAutoCollapseEnabled, config.overlayAutoRetractSeconds) {
                     if (!collapsed &&
                         config.overlayAutoCollapseEnabled &&
@@ -257,15 +282,15 @@ class PersistentDockOverlayService :
                 ) {
                     val palette = LocalDxCarColors.current
                     if (collapsed) {
-                        // Adjustable thickness translucent edge handle (default 26dp, 16-48dp) + Long-press drag to reposition!
                         val handleThicknessDp = config.overlayHandleThicknessDp.coerceIn(16, 48)
                         val handleLengthDp = 120
                         val handleShape = when (spec.dockPlacement) {
                             ResolvedDockPlacement.LEFT -> RoundedCornerShape(topEnd = 14.dp, bottomEnd = 14.dp)
                             ResolvedDockPlacement.RIGHT -> RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp)
+                            ResolvedDockPlacement.TOP -> RoundedCornerShape(bottomStart = 14.dp, bottomEnd = 14.dp)
                             ResolvedDockPlacement.BOTTOM -> RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)
                         }
-                        val isBottom = spec.dockPlacement == ResolvedDockPlacement.BOTTOM
+                        val isHorizontalEdge = spec.dockPlacement.isHorizontalBar
                         val haptic = LocalHapticFeedback.current
                         var isDraggingPosition by remember { mutableStateOf(false) }
 
@@ -275,7 +300,7 @@ class PersistentDockOverlayService :
                             config.overlayHandlePositionPercent
                         ) {
                             val handleLenPx = handleLengthDp * metrics.density
-                            val maxTravelPx = ((if (isBottom) metrics.widthPx else metrics.heightPx) - handleLenPx)
+                            val maxTravelPx = ((if (isHorizontalEdge) metrics.widthPx else metrics.heightPx) - handleLenPx)
                                 .coerceAtLeast(1f)
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
@@ -303,6 +328,7 @@ class PersistentDockOverlayService :
                                         val inwardTrigger = when (spec.dockPlacement) {
                                             ResolvedDockPlacement.LEFT -> dx > 22f && abs(dx) > abs(dy)
                                             ResolvedDockPlacement.RIGHT -> dx < -22f && abs(dx) > abs(dy)
+                                            ResolvedDockPlacement.TOP -> dy > 22f && abs(dy) > abs(dx)
                                             ResolvedDockPlacement.BOTTOM -> dy < -22f && abs(dy) > abs(dx)
                                         }
                                         if (inwardTrigger) {
@@ -312,7 +338,7 @@ class PersistentDockOverlayService :
                                             change.consume()
                                             break
                                         }
-                                        if (elapsed >= 340L || abs(if (isBottom) dx else dy) > 24f) {
+                                        if (elapsed >= 340L || abs(if (isHorizontalEdge) dx else dy) > 24f) {
                                             draggingPos = true
                                             isDraggingPosition = true
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -321,7 +347,7 @@ class PersistentDockOverlayService :
 
                                     if (draggingPos) {
                                         movedSignificant = true
-                                        val axisDelta = if (isBottom) dx else dy
+                                        val axisDelta = if (isHorizontalEdge) dx else dy
                                         latestPercent = (startPercent + axisDelta / maxTravelPx).coerceIn(0.05f, 0.95f)
                                         updateCollapsedHandlePosition(spec.dockPlacement, metrics, handleLengthDp, latestPercent)
                                         change.consume()
@@ -347,7 +373,7 @@ class PersistentDockOverlayService :
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
                                 .then(
-                                    if (isBottom) Modifier.width(handleLengthDp.dp).height(handleThicknessDp.dp)
+                                    if (isHorizontalEdge) Modifier.width(handleLengthDp.dp).height(handleThicknessDp.dp)
                                     else Modifier.width(handleThicknessDp.dp).height(handleLengthDp.dp)
                                 )
                                 .clip(handleShape)
@@ -365,7 +391,7 @@ class PersistentDockOverlayService :
                             Box(
                                 modifier = Modifier
                                     .then(
-                                        if (isBottom) Modifier.width(48.dp).height((handleThicknessDp * 0.22f).coerceIn(4f, 8f).dp)
+                                        if (isHorizontalEdge) Modifier.width(48.dp).height((handleThicknessDp * 0.22f).coerceIn(4f, 8f).dp)
                                         else Modifier.width((handleThicknessDp * 0.22f).coerceIn(4f, 8f).dp).height(48.dp)
                                     )
                                     .clip(CircleShape)
@@ -395,6 +421,7 @@ class PersistentDockOverlayService :
                                 rightHandDrive = config.rightHandDrive,
                                 isOverlayMode = true,
                                 isOverlayPinnedOpen = pinnedOpen,
+                                is3DCursorActive = cursor3DOn,
                                 onToggleAppDrawer = { bringDxCarToFront(MainActivity.EXTRA_OPEN_DRAWER) },
                                 onGoDashboard = { bringDxCarToFront(null) },
                                 onSlotClick = { slot ->
@@ -431,6 +458,13 @@ class PersistentDockOverlayService :
                                     }
                                 },
                                 onWifiClick = {
+                                    val pulledSystem = DxCarAccessibilityService.instance?.openQuickSettings() == true
+                                    if (!pulledSystem) {
+                                        bringDxCarToFront(MainActivity.EXTRA_OPEN_QUICK_PANEL)
+                                    }
+                                    if (config.overlayAutoCollapseEnabled && !pinnedOpen) isCollapsed.value = true
+                                },
+                                onWifiLongClick = {
                                     SystemStatusMonitor.openWifiSettings(this@PersistentDockOverlayService)
                                     if (config.overlayAutoCollapseEnabled && !pinnedOpen) isCollapsed.value = true
                                 },
@@ -448,11 +482,11 @@ class PersistentDockOverlayService :
                                     interactionTick.value++
                                     DxCarAccessibilityService.instance?.openRecents()
                                 },
-                                onTwoFingerTilt3D = {
-                                    triggerTwoFingerTiltGesture(tiltUpTo3D = true)
-                                },
-                                onTwoFingerTilt2D = {
-                                    triggerTwoFingerTiltGesture(tiltUpTo3D = false)
+                                onToggle3DCursor = {
+                                    val nowOn = Cursor3DStateHolder.toggle()
+                                    if (nowOn && config.overlayAutoCollapseEnabled && !pinnedOpen) {
+                                        isCollapsed.value = true
+                                    }
                                 },
                                 onCollapseOverlay = {
                                     isPinnedOpen.value = false
@@ -494,6 +528,97 @@ class PersistentDockOverlayService :
         runCatching { windowManager.addView(container, params) }
     }
 
+    private fun setupCursor3DWindow(app: DxCarApp) {
+        val view = ComposeView(this).apply {
+            setViewTreeLifecycleOwner(this@PersistentDockOverlayService)
+            setViewTreeSavedStateRegistryOwner(this@PersistentDockOverlayService)
+            setViewTreeViewModelStoreOwner(this@PersistentDockOverlayService)
+            setContent {
+                val config by app.preferences.config.collectAsState()
+                val sysStatus by app.systemStatusMonitor.status.collectAsState()
+                val showTut by Cursor3DStateHolder.showTutorial.collectAsState()
+                val isNight = DayNightEngine.isNightNow(
+                    config = config,
+                    now = sysStatus.now,
+                    systemIsDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+                )
+                DxCarTheme(
+                    isNight = isNight,
+                    accentIndex = config.accentColorIndex,
+                    stylePreset = config.stylePreset
+                ) {
+                    Interactive3DCursorOverlay(
+                        showTutorial = showTut,
+                        onOpenTutorial = { Cursor3DStateHolder.openTutorial() },
+                        onCloseTutorial = { Cursor3DStateHolder.closeTutorial() },
+                        onExit3DMode = { Cursor3DStateHolder.setActive(false) },
+                        onSetWindowPassThrough = { pass -> setCursor3DPassThrough(pass) }
+                    )
+                }
+            }
+        }
+        val params = createOverlayParams(
+            width = WindowManager.LayoutParams.MATCH_PARENT,
+            height = WindowManager.LayoutParams.MATCH_PARENT,
+            gravity = Gravity.TOP or Gravity.START
+        )
+        cursor3DView = view
+        cursor3DParams = params
+        view.visibility = View.GONE
+        runCatching { windowManager.addView(view, params) }
+    }
+
+    private fun setCursor3DPassThrough(passThrough: Boolean) {
+        val view = cursor3DView ?: return
+        val params = cursor3DParams ?: return
+        params.flags = if (passThrough) {
+            params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        } else {
+            params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        }
+        runCatching { windowManager.updateViewLayout(view, params) }
+    }
+
+    private fun setupRemoteMouseWindow(app: DxCarApp) {
+        val view = ComposeView(this).apply {
+            setViewTreeLifecycleOwner(this@PersistentDockOverlayService)
+            setViewTreeSavedStateRegistryOwner(this@PersistentDockOverlayService)
+            setViewTreeViewModelStoreOwner(this@PersistentDockOverlayService)
+            setContent {
+                val config by app.preferences.config.collectAsState()
+                val sysStatus by app.systemStatusMonitor.status.collectAsState()
+                val cursor by RemoteTouchpadController.cursorState.collectAsState()
+                val isNight = DayNightEngine.isNightNow(
+                    config = config,
+                    now = sysStatus.now,
+                    systemIsDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+                )
+                DxCarTheme(
+                    isNight = isNight,
+                    accentIndex = config.accentColorIndex,
+                    stylePreset = config.stylePreset
+                ) {
+                    RemoteCarMousePointerOverlay(cursorState = cursor)
+                }
+            }
+        }
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+        }
+        remoteMouseView = view
+        remoteMouseParams = params
+        view.visibility = View.GONE
+        runCatching { windowManager.addView(view, params) }
+    }
+
     private fun updateCollapsedHandlePosition(
         placement: ResolvedDockPlacement,
         metrics: ScreenMetrics,
@@ -505,6 +630,12 @@ class PersistentDockOverlayService :
         val handleLenPx = (handleLengthDp * metrics.density).toInt()
         val p = percent.coerceIn(0.05f, 0.95f)
         when (placement) {
+            ResolvedDockPlacement.TOP -> {
+                val maxX = (metrics.widthPx - handleLenPx).coerceAtLeast(0)
+                params.gravity = Gravity.TOP or Gravity.START
+                params.x = (maxX * p).toInt()
+                params.y = 0
+            }
             ResolvedDockPlacement.BOTTOM -> {
                 val maxX = (metrics.widthPx - handleLenPx).coerceAtLeast(0)
                 params.gravity = Gravity.BOTTOM or Gravity.START
@@ -590,6 +721,7 @@ class PersistentDockOverlayService :
                 val config by app.preferences.config.collectAsState()
                 val sysStatus by app.systemStatusMonitor.status.collectAsState()
                 val media by app.mediaControlBridge.mediaState.collectAsState()
+                val weather by app.weatherRepository.weather.collectAsState()
                 val installedApps by app.installedAppsRepository.apps.collectAsState()
                 val minimized by planCPanelMinimized.collectAsState()
 
@@ -687,6 +819,7 @@ class PersistentDockOverlayService :
                                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                                     MediaControlCard(
                                         media = media,
+                                        weather = weather,
                                         isPrimary = false,
                                         pureMusicMode = true,
                                         showSwapButton = false,
@@ -694,6 +827,7 @@ class PersistentDockOverlayService :
                                         customShortcutSlots = config.customShortcutSlots,
                                         splitShortcuts = config.splitShortcuts,
                                         installedApps = installedApps,
+                                        onWeatherClick = { app.weatherRepository.openGoogleWeatherApp(this@PersistentDockOverlayService) },
                                         onPlayPause = { app.mediaControlBridge.togglePlayPause() },
                                         onNext = { app.mediaControlBridge.skipNext() },
                                         onPrevious = { app.mediaControlBridge.skipPrevious() },
@@ -735,12 +869,11 @@ class PersistentDockOverlayService :
                 app.preferences.config,
                 app.isLauncherForeground,
                 isCollapsed,
-                metricsFlow
-            ) { config, isHomeFg, collapsed, metrics ->
-                QuadState(config, isHomeFg, collapsed, metrics)
-            }.collect { (config, isHomeFg, collapsed, metrics) ->
-                // Whenever transitioning from Home -> Third-party Fullscreen App:
-                // auto-collapse to slim edge handle if Option 1 is enabled (and not pinned open)
+                metricsFlow,
+                DxCarAccessibilityService.foregroundPackage
+            ) { config, isHomeFg, collapsed, metrics, fgPkg ->
+                FiveState(config, isHomeFg, collapsed, metrics, fgPkg)
+            }.collect { (config, isHomeFg, collapsed, metrics, fgPkg) ->
                 if (lastHomeForeground && !isHomeFg) {
                     if (config.overlayAutoCollapseEnabled && !isPinnedOpen.value) {
                         isCollapsed.value = true
@@ -750,9 +883,18 @@ class PersistentDockOverlayService :
                 }
                 lastHomeForeground = isHomeFg
 
+                val isPhoneScreen = DeviceFormFactor.isCompactPhoneScreen(resources.configuration)
+                val otherLauncherPkgs = app.installedAppsRepository.homeLaunchers.value
+                    .filterNot { it.isSelf }
+                    .map { it.packageName }
+                    .toSet()
+                val onAnotherLauncher = fgPkg.isNotBlank() && otherLauncherPkgs.contains(fgPkg)
+
                 val showDock = config.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
+                    !isPhoneScreen &&
                     config.persistentOverlayDockEnabled &&
-                    !isHomeFg
+                    !isHomeFg &&
+                    (config.overlayDockOnOtherLaunchers || !onAnotherLauncher)
 
                 val view = dockView
                 val params = dockParams
@@ -777,6 +919,13 @@ class PersistentDockOverlayService :
                             runCatching { windowManager.updateViewLayout(view, params) }
                         } else {
                             when (spec.dockPlacement) {
+                                ResolvedDockPlacement.TOP -> {
+                                    params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                                    params.x = 0
+                                    params.y = 0
+                                    params.width = WindowManager.LayoutParams.MATCH_PARENT
+                                    params.height = WindowManager.LayoutParams.WRAP_CONTENT
+                                }
                                 ResolvedDockPlacement.BOTTOM -> {
                                     params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
                                     params.x = 0
@@ -803,6 +952,23 @@ class PersistentDockOverlayService :
                         }
                     }
                 }
+            }
+        }
+
+        // Observe 3D Mouse-Like Pointer Overlay visibility
+        lifecycleScope.launch {
+            Cursor3DStateHolder.active.collect { active ->
+                cursor3DView?.visibility = if (active) View.VISIBLE else View.GONE
+                if (!active) {
+                    setCursor3DPassThrough(false)
+                }
+            }
+        }
+
+        // Observe Car-Side Remote Mouse Pointer visibility
+        lifecycleScope.launch {
+            RemoteTouchpadController.cursorState.collect { cursor ->
+                remoteMouseView?.visibility = if (cursor.visible) View.VISIBLE else View.GONE
             }
         }
 
@@ -850,7 +1016,7 @@ class PersistentDockOverlayService :
                             rightHandDrive = config.rightHandDrive,
                             customPrimaryRatio = config.primarySplitRatio
                         )
-                        val dockPx = if (spec.dockPlacement != ResolvedDockPlacement.BOTTOM) {
+                        val dockPx = if (!spec.dockPlacement.isHorizontalBar) {
                             (spec.dockThicknessDp * metrics.density).roundToInt()
                         } else 0
                         val availW = (metrics.widthPx - dockPx).coerceAtLeast(480)
@@ -873,31 +1039,6 @@ class PersistentDockOverlayService :
                 }
             }
         }
-    }
-
-    private fun triggerTwoFingerTiltGesture(tiltUpTo3D: Boolean) {
-        val acc = DxCarAccessibilityService.instance
-        if (acc == null) {
-            android.widget.Toast.makeText(
-                this,
-                "請先至設定 → 權限健檢開啟「DX-Car Launcher 無障礙服務」，即可模擬雙指 3D 視角",
-                android.widget.Toast.LENGTH_SHORT
-            ).show()
-            return
-        }
-        isPinnedOpen.value = false
-        isCollapsed.value = true
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            acc.dispatchTwoFingerTilt(tiltUpTo3D) { ok ->
-                if (!ok) {
-                    android.widget.Toast.makeText(
-                        this,
-                        "系統未允許無障礙觸控注入，請確認車機無障礙設定",
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
-                }
-            }
-        }, 180L)
     }
 
     private fun bringDxCarToFront(extraAction: String?) {
@@ -952,8 +1093,8 @@ class PersistentDockOverlayService :
         )
         val notif: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("DX-Car Launcher 常駐 Dock 運作中")
-            .setContentText("開啟全螢幕 YouTube／地圖時保持 AA Dock 與來電橫幅常駐")
+            .setContentTitle("DX-Car Launcher 常駐懸浮與遠端觸控運作中")
+            .setContentText("支援跨啟動器常駐 Dock、3D 類滑鼠指標與來電訊息橫幅")
             .setContentIntent(pi)
             .setOngoing(true)
             .build()
@@ -965,7 +1106,13 @@ class PersistentDockOverlayService :
         }
     }
 
-    private data class QuadState<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+    private data class FiveState<A, B, C, D, E>(
+        val first: A,
+        val second: B,
+        val third: C,
+        val fourth: D,
+        val fifth: E
+    )
 
     companion object {
         private const val CHANNEL_ID = "dxcar_persistent_dock"
@@ -973,6 +1120,7 @@ class PersistentDockOverlayService :
         const val ACTION_STOP = "com.dxcar.launcher.overlay.STOP"
         const val ACTION_SHOW_PLAN_C_PANEL = "com.dxcar.launcher.overlay.SHOW_PLAN_C"
         const val ACTION_HIDE_PLAN_C_PANEL = "com.dxcar.launcher.overlay.HIDE_PLAN_C"
+        const val ACTION_TOGGLE_3D_CURSOR = "com.dxcar.launcher.overlay.TOGGLE_3D_CURSOR"
 
         private val planCPanelRequested = MutableStateFlow(false)
 
@@ -980,6 +1128,15 @@ class PersistentDockOverlayService :
             if (!Settings.canDrawOverlays(context)) return
             val intent = Intent(context, PersistentDockOverlayService::class.java)
             runCatching { ContextCompat.startForegroundService(context, intent) }
+        }
+
+        fun toggle3DCursor(context: Context): Boolean {
+            if (!Settings.canDrawOverlays(context)) return false
+            val intent = Intent(context, PersistentDockOverlayService::class.java).apply {
+                action = ACTION_TOGGLE_3D_CURSOR
+            }
+            runCatching { ContextCompat.startForegroundService(context, intent) }
+            return true
         }
 
         fun showPlanCMusicPanel(context: Context) {
@@ -997,6 +1154,7 @@ class PersistentDockOverlayService :
 
         fun stop(context: Context) {
             planCPanelRequested.value = false
+            Cursor3DStateHolder.setActive(false)
             runCatching { context.stopService(Intent(context, PersistentDockOverlayService::class.java)) }
         }
     }

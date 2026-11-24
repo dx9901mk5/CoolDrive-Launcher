@@ -2,6 +2,7 @@ package com.dxcar.launcher.ui
 
 import android.content.res.Configuration
 import android.graphics.Rect
+import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
@@ -12,7 +13,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
@@ -38,6 +41,7 @@ import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -65,28 +69,33 @@ import com.dxcar.launcher.accessibility.DxCarAccessibilityService
 import com.dxcar.launcher.comms.BluetoothCompanionService
 import com.dxcar.launcher.comms.CallActionCommand
 import com.dxcar.launcher.comms.CarMessageItem
+import com.dxcar.launcher.comms.RemoteTouchpadController
 import com.dxcar.launcher.data.DeviceFormFactor
 import com.dxcar.launcher.data.DeviceRole
 import com.dxcar.launcher.data.HomeExperimentMode
 import com.dxcar.launcher.data.HomeMapDisplayMode
 import com.dxcar.launcher.data.MapEngineStyle
+import com.dxcar.launcher.data.OfflineRegionRecord
+import com.dxcar.launcher.data.OfflineUpdatePolicy
 import com.dxcar.launcher.data.SplitScreenShortcut
 import com.dxcar.launcher.data.ThemeMode
-import com.dxcar.launcher.gestures.MultiFingerEvent
-import com.dxcar.launcher.gestures.dxCarMultiFingerGestures
 import com.dxcar.launcher.layout.CoolwalkLayoutEngine
 import com.dxcar.launcher.layout.ResolvedDockPlacement
 import com.dxcar.launcher.layout.ScreenMetrics
-import com.dxcar.launcher.map.BuiltInNavState
 import com.dxcar.launcher.map.LiveMapCard
-import com.dxcar.launcher.map.NavSearchResult
+import com.dxcar.launcher.map.OfflineMapUiState
+import com.dxcar.launcher.map.OfflineRegionPreset
+import com.dxcar.launcher.overlay.Cursor3DStateHolder
+import com.dxcar.launcher.overlay.Interactive3DCursorOverlay
 import com.dxcar.launcher.overlay.PersistentDockOverlayService
+import com.dxcar.launcher.overlay.RemoteCarMousePointerOverlay
 import com.dxcar.launcher.system.InstalledAppInfo
 import com.dxcar.launcher.system.PermissionHelper
 import com.dxcar.launcher.system.SystemStatusMonitor
-import com.dxcar.launcher.theme.DxCarTheme
 import com.dxcar.launcher.theme.DayNightEngine
+import com.dxcar.launcher.theme.DxCarTheme
 import com.dxcar.launcher.theme.LocalDxCarColors
+import com.dxcar.launcher.weather.LocalWeatherState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -115,6 +124,8 @@ fun DxCarRootScreen(
     val sysStatus by app.systemStatusMonitor.status.collectAsState()
     val location by app.locationTracker.location.collectAsState()
     val media by app.mediaControlBridge.mediaState.collectAsState()
+    val weather by app.weatherRepository.weather.collectAsState()
+    val offlineState by app.offlineMapManager.state.collectAsState()
     val installedApps by app.installedAppsRepository.apps.collectAsState()
     val liveRecentPackages by app.installedAppsRepository.recentPackages.collectAsState()
     val homeLaunchers by app.installedAppsRepository.homeLaunchers.collectAsState()
@@ -122,9 +133,11 @@ fun DxCarRootScreen(
     val popupMessage by app.notificationCenter.popupMessage.collectAsState()
     val messages by app.notificationCenter.messages.collectAsState()
     val activeNav by app.notificationCenter.activeNavigation.collectAsState()
-    val builtInNavState by app.builtInNavEngine.state.collectAsState()
     val bridgeStatus by BluetoothCompanionService.bridgeState.collectAsState()
     val updateState by app.updateManager.state.collectAsState()
+    val cursor3DActive by Cursor3DStateHolder.active.collectAsState()
+    val cursor3DTutorial by Cursor3DStateHolder.showTutorial.collectAsState()
+    val remoteCursor by RemoteTouchpadController.cursorState.collectAsState()
 
     // Auto-detect Smartphone vs AI Box Car Head Unit on first launch when not pinned by user
     LaunchedEffect(configuration.screenWidthDp, configuration.screenHeightDp, config.roleUserPinned) {
@@ -137,16 +150,14 @@ fun DxCarRootScreen(
         }
     }
 
-    // Feed live GPS coordinates to Plan B OSRM navigation engine
-    LaunchedEffect(location.latitude, location.longitude, config.homeExperimentMode) {
-        if (config.homeExperimentMode == HomeExperimentMode.PLAN_B_BUILTIN_NAV && builtInNavState.isNavigating) {
-            app.builtInNavEngine.onLocationUpdated(location.latitude, location.longitude)
-        }
+    // Feed live GPS coordinates to LocalWeatherRepository & OfflineMapManager staleness/region detector
+    LaunchedEffect(location.latitude, location.longitude, config.offlineUpdatePolicy, config.offlineRegions.size) {
+        app.weatherRepository.onLocationUpdated(location.latitude, location.longitude)
+        app.offlineMapManager.evaluateUpdateNeeded(location.latitude, location.longitude)
     }
 
     var destination by remember { mutableStateOf(LauncherDestination.DASHBOARD_SPLIT) }
     var isMapPrimary by remember { mutableStateOf(true) }
-    var isDockTemporarilyHidden by remember { mutableStateOf(false) }
     var showQuickControlCenter by remember { mutableStateOf(false) }
     var showNotificationCenter by remember { mutableStateOf(false) }
     var showSplitCreator by remember { mutableStateOf(false) }
@@ -156,22 +167,19 @@ fun DxCarRootScreen(
     var permissionHealth by remember { mutableStateOf(PermissionHelper.check(context)) }
     var pairedBtDevices by remember { mutableStateOf(app.systemStatusMonitor.getPairedBluetoothDevices()) }
 
-    // Refresh permission health & home launchers automatically when entering Settings or returning from RoleManager
     LaunchedEffect(destination, homeLaunchers) {
         if (destination == LauncherDestination.SETTINGS) {
             permissionHealth = PermissionHelper.check(context)
         }
     }
 
-    // Clear Gesture HUD pill automatically after 1.6s
     LaunchedEffect(gestureHudText) {
         if (gestureHudText != null) {
-            delay(1_600L)
+            delay(1_800L)
             gestureHudText = null
         }
     }
 
-    // Handle external actions triggered from Persistent Overlay Dock
     LaunchedEffect(externalNavCommand) {
         when (externalNavCommand) {
             com.dxcar.launcher.MainActivity.EXTRA_OPEN_DRAWER -> {
@@ -198,9 +206,10 @@ fun DxCarRootScreen(
         }
     }
 
-    // Keep Persistent Overlay Dock & Bluetooth Bridge synced with user config
-    LaunchedEffect(config.deviceRole, config.persistentOverlayDockEnabled) {
-        if (config.deviceRole == DeviceRole.AI_BOX_LAUNCHER && config.persistentOverlayDockEnabled) {
+    // Persistent Overlay Dock runs ONLY on Car / Tablet mode (never on compact Phone)
+    LaunchedEffect(config.deviceRole, config.persistentOverlayDockEnabled, configuration.screenWidthDp) {
+        val isPhone = DeviceFormFactor.isCompactPhoneScreen(configuration)
+        if (config.deviceRole == DeviceRole.AI_BOX_LAUNCHER && !isPhone && config.persistentOverlayDockEnabled) {
             PersistentDockOverlayService.start(context)
         } else {
             PersistentDockOverlayService.stop(context)
@@ -217,7 +226,6 @@ fun DxCarRootScreen(
         }
     }
 
-    // Automatic GitHub Update Check & Auto-Download on Startup
     LaunchedEffect(config.autoCheckAndDownloadUpdate) {
         delay(2_500L)
         if (config.autoCheckAndDownloadUpdate) {
@@ -282,6 +290,14 @@ fun DxCarRootScreen(
         destination = LauncherDestination.FULLSCREEN_YOUTUBE_WEB
     }
 
+    fun toggle3DPointerGlobal() {
+        if (Settings.canDrawOverlays(context)) {
+            PersistentDockOverlayService.toggle3DCursor(context)
+        } else {
+            Cursor3DStateHolder.toggle()
+        }
+    }
+
     fun launchFreeformPrimaryBox(targetPackage: String? = null) {
         val measured = latestMapCardRect
         val bounds = if (measured != null && measured.width() >= 200 && measured.height() >= 180) {
@@ -289,15 +305,16 @@ fun DxCarRootScreen(
         } else {
             val dockPx = if (config.showHomeDock) (layoutSpec.dockThicknessDp * dm.density).toInt() else 0
             val padPx = (12 * dm.density).toInt()
-            val availW = (dm.widthPixels - if (layoutSpec.dockPlacement != ResolvedDockPlacement.BOTTOM) dockPx else 0).coerceAtLeast(300)
-            val availH = (dm.heightPixels - if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0).coerceAtLeast(240)
+            val availW = (dm.widthPixels - if (!layoutSpec.dockPlacement.isHorizontalBar) dockPx else 0).coerceAtLeast(300)
+            val topY = if (layoutSpec.dockPlacement == ResolvedDockPlacement.TOP) dockPx + padPx else padPx
+            val bottomY = (dm.heightPixels - if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx + padPx else padPx).coerceAtLeast(topY + 200)
             val primaryW = (availW * layoutSpec.primaryWeight).toInt()
             val leftX = when {
                 config.rightHandDrive -> availW - primaryW + padPx
                 layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT -> dockPx + padPx
                 else -> padPx
             }
-            Rect(leftX, padPx, (leftX + primaryW - padPx * 2).coerceAtLeast(leftX + 200), availH - padPx)
+            Rect(leftX, topY, (leftX + primaryW - padPx * 2).coerceAtLeast(leftX + 200), bottomY)
         }
         val pct = (layoutSpec.primaryWeight * 100).toInt()
         if (targetPackage.isNullOrBlank()) {
@@ -308,6 +325,20 @@ fun DxCarRootScreen(
             val label = app.installedAppsRepository.findApp(targetPackage)?.label ?: "導航 App"
             gestureHudText = "🗺 已以 $pct% 比例貼合開啟 $label"
         }
+    }
+
+    fun dispatchSplitShortcutWithDockOffsets(sc: SplitScreenShortcut) {
+        val dockPx = if (config.showHomeDock) (layoutSpec.dockThicknessDp * dm.density).toInt() else 0
+        app.installedAppsRepository.launchSplitShortcut(
+            shortcut = sc,
+            screenWidthPx = dm.widthPixels,
+            screenHeightPx = dm.heightPixels,
+            dockOffsetLeftPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0,
+            dockOffsetRightPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
+            dockOffsetTopPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.TOP) dockPx else 0,
+            dockOffsetBottomPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0
+        )
+        gestureHudText = "⊞ 正在開啟 AOSP 分屏：${sc.label} (${sc.ratio.label})"
     }
 
     fun handleCustomShortcutLaunch(token: String) {
@@ -330,10 +361,7 @@ fun DxCarRootScreen(
             token.startsWith(BuiltInShortcutTokens.SPLIT_PREFIX) -> {
                 val id = token.removePrefix(BuiltInShortcutTokens.SPLIT_PREFIX)
                 val sc = config.splitShortcuts.firstOrNull { it.id == id }
-                if (sc != null) {
-                    app.installedAppsRepository.launchSplitShortcut(sc, dm.widthPixels, dm.heightPixels)
-                    gestureHudText = "⊞ 正在開啟分屏：${sc.label} (${sc.ratio.label})"
-                }
+                if (sc != null) dispatchSplitShortcutWithDockOffsets(sc)
             }
             else -> {
                 if (!launchAppRespectingOptions(token)) {
@@ -347,50 +375,6 @@ fun DxCarRootScreen(
         val nextMode = if (isNight) ThemeMode.FORCE_DAY else ThemeMode.FORCE_NIGHT
         app.preferences.update { it.copy(themeMode = nextMode) }
         gestureHudText = if (nextMode == ThemeMode.FORCE_NIGHT) "🌙 已切換為夜間模式" else "☀️ 已切換為白天模式"
-    }
-
-    fun handleMultiFingerEvent(event: MultiFingerEvent) {
-        when (event) {
-            is MultiFingerEvent.TwoFingerBrightnessDelta -> {
-                val (pct, written) = app.systemStatusMonitor.adjustBrightnessByDelta(event.deltaPercent)
-                gestureHudText = if (written) "☀️ 螢幕亮度 $pct%" else "☀️ 亮度調整需開啟「修改系統設定」權限"
-            }
-            is MultiFingerEvent.TwoFingerVolumeDelta -> {
-                val pct = app.systemStatusMonitor.adjustMediaVolumeByDelta(event.deltaPercent)
-                gestureHudText = "🔊 媒體音量 $pct%"
-            }
-            MultiFingerEvent.TwoFingerSwipeLeft -> {
-                app.mediaControlBridge.skipNext()
-                gestureHudText = "⏭ 下一首"
-            }
-            MultiFingerEvent.TwoFingerSwipeRight -> {
-                app.mediaControlBridge.skipPrevious()
-                gestureHudText = "⏮ 上一首"
-            }
-            MultiFingerEvent.ThreeFingerSwipeDown -> {
-                destination = LauncherDestination.DASHBOARD_SPLIT
-                showQuickControlCenter = false
-                showNotificationCenter = false
-                gestureHudText = "🏠 返回 AA 首頁"
-            }
-            MultiFingerEvent.ThreeFingerSwipeLeft,
-            MultiFingerEvent.ThreeFingerSwipeRight -> {
-                isMapPrimary = !isMapPrimary
-                destination = LauncherDestination.DASHBOARD_SPLIT
-                gestureHudText = "⇄ 左右分割視窗互換"
-            }
-            MultiFingerEvent.ThreeFingerTap -> {
-                handleToggleDayNight()
-            }
-            MultiFingerEvent.FourFingerPinch -> {
-                isDockTemporarilyHidden = true
-                gestureHudText = "⛶ 隱藏 Dock（四指展開恢復）"
-            }
-            MultiFingerEvent.FourFingerSpread -> {
-                isDockTemporarilyHidden = false
-                gestureHudText = "▤ 顯示常駐 Dock"
-            }
-        }
     }
 
     DxCarTheme(
@@ -440,6 +424,9 @@ fun DxCarRootScreen(
                 onToggleSyncAllApps = { checked ->
                     app.preferences.update { it.copy(companionSyncAllApps = checked) }
                 },
+                onChangeTouchpadSensitivity = { sens ->
+                    app.preferences.update { it.copy(phoneTouchpadSensitivity = sens) }
+                },
                 onRequestRuntimePermissions = onRequestRuntimePermissions,
                 onReconnectBridge = { BluetoothCompanionService.forceReconnect(context) },
                 onSwitchToAiBoxMode = {
@@ -452,15 +439,11 @@ fun DxCarRootScreen(
             return@DxCarTheme
         }
 
-        // AI BOX CAR LAUNCHER ROOT CONTAINER
+        // AI BOX CAR LAUNCHER ROOT CONTAINER (Multi-finger gestures removed per single-touch car display spec)
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(colors.canvasBackground)
-                .dxCarMultiFingerGestures(
-                    enabled = config.multiFingerGesturesEnabled,
-                    onGesture = ::handleMultiFingerEvent
-                )
         ) {
             val dockComposable: @Composable () -> Unit = {
                 CoolwalkDock(
@@ -473,6 +456,7 @@ fun DxCarRootScreen(
                     unreadCount = unreadCount,
                     pinnedSlots = dockSlots,
                     rightHandDrive = config.rightHandDrive,
+                    is3DCursorActive = cursor3DActive,
                     onToggleAppDrawer = {
                         destination = if (destination == LauncherDestination.APP_DRAWER) {
                             LauncherDestination.DASHBOARD_SPLIT
@@ -485,13 +469,13 @@ fun DxCarRootScreen(
                         when {
                             slot.id == "youtube" -> launchYoutubeBest()
                             slot.packageName == "ACTION_DIAL" -> app.installedAppsRepository.launchDialer()
-                            !slot.packageName.isNullOrBlank() -> {
-                                launchAppRespectingOptions(slot.packageName)
-                            }
+                            !slot.packageName.isNullOrBlank() -> launchAppRespectingOptions(slot.packageName)
                             else -> destination = LauncherDestination.APP_DRAWER
                         }
                     },
-                    onWifiClick = { SystemStatusMonitor.openWifiSettings(context) },
+                    // Top-left Wi-Fi click expands Dropdown Quick Toggles Shade! Long-press opens System Wi-Fi!
+                    onWifiClick = { showQuickControlCenter = !showQuickControlCenter },
+                    onWifiLongClick = { SystemStatusMonitor.openWifiSettings(context) },
                     onBluetoothClick = { SystemStatusMonitor.openBluetoothSettings(context) },
                     onBluetoothLongClick = {
                         permissionHealth = PermissionHelper.check(context)
@@ -500,6 +484,7 @@ fun DxCarRootScreen(
                     },
                     onClockClick = { showQuickControlCenter = !showQuickControlCenter },
                     onNotificationsClick = { showNotificationCenter = !showNotificationCenter },
+                    onToggle3DCursor = ::toggle3DPointerGlobal,
                     onBackClick = {
                         when {
                             showQuickControlCenter -> showQuickControlCenter = false
@@ -518,7 +503,7 @@ fun DxCarRootScreen(
                                 if (acc != null) {
                                     acc.goBack()
                                 } else {
-                                    gestureHudText = "請至設定開啟「無障礙服務」以啟用全域返回鍵"
+                                    gestureHudText = "請點設定最上方「權限需求」開啟無障礙服務"
                                 }
                             }
                         }
@@ -528,7 +513,7 @@ fun DxCarRootScreen(
                         if (acc != null) {
                             acc.openRecents()
                         } else {
-                            gestureHudText = "請至設定開啟「無障礙服務」以進入多工視窗"
+                            gestureHudText = "請點設定最上方「權限需求」開啟無障礙服務"
                         }
                     }
                 )
@@ -541,10 +526,7 @@ fun DxCarRootScreen(
                         when (targetState) {
                             LauncherDestination.APP_DRAWER ->
                                 (slideInVertically(
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioLowBouncy,
-                                        stiffness = Spring.StiffnessMediumLow
-                                    ),
+                                    animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow),
                                     initialOffsetY = { it / 6 }
                                 ) + scaleIn(initialScale = 0.95f, animationSpec = tween(220)) + fadeIn(tween(200))) togetherWith
                                     (scaleOut(targetScale = 0.96f, animationSpec = tween(160)) + fadeOut(tween(150)))
@@ -572,8 +554,12 @@ fun DxCarRootScreen(
                                 experimentMode = config.homeExperimentMode,
                                 location = location,
                                 activeNav = activeNav,
-                                builtInNavState = builtInNavState,
                                 media = media,
+                                weather = weather,
+                                offlineState = offlineState,
+                                offlinePresets = app.offlineMapManager.presets,
+                                downloadedRegions = config.offlineRegions,
+                                offlineUpdatePolicy = config.offlineUpdatePolicy,
                                 isNight = isNight,
                                 mapEngineStyle = config.mapEngineStyle,
                                 trafficEnabled = config.mapTrafficEnabled,
@@ -601,24 +587,24 @@ fun DxCarRootScreen(
                                 },
                                 onToggleMapStyle = {
                                     val allStyles = MapEngineStyle.entries
-                                    val nextIdx = (allStyles.indexOf(config.mapEngineStyle) + 1) % allStyles.size
-                                    val next = allStyles[nextIdx]
+                                    val next = allStyles[(allStyles.indexOf(config.mapEngineStyle) + 1) % allStyles.size]
                                     app.preferences.update { it.copy(mapEngineStyle = next) }
                                     gestureHudText = "🗺 切換至 ${next.labelZh}"
                                 },
-                                onSearchBuiltInPlaces = { q ->
-                                    app.builtInNavEngine.searchPlaces(q, location.latitude, location.longitude)
+                                onSelectOfflinePolicy = { pol ->
+                                    app.preferences.update { it.copy(offlineUpdatePolicy = pol) }
                                 },
-                                onStartBuiltInNav = { place ->
-                                    app.builtInNavEngine.startNavigation(
-                                        startLat = location.latitude,
-                                        startLon = location.longitude,
-                                        destName = place.name,
-                                        destLat = place.latitude,
-                                        destLon = place.longitude
+                                onDownloadOfflineRegion = { presetId ->
+                                    app.offlineMapManager.downloadOrUpdatePreset(
+                                        presetId = presetId,
+                                        currentLat = location.latitude,
+                                        currentLon = location.longitude,
+                                        style = config.mapEngineStyle
                                     )
                                 },
-                                onStopBuiltInNav = { app.builtInNavEngine.stopNavigation() },
+                                onCancelOfflineDownload = { app.offlineMapManager.cancelCurrentDownload() },
+                                onDeleteOfflineRegion = { rid -> app.offlineMapManager.deleteDownloadedRegion(rid) },
+                                onDismissOfflineSuggestion = { app.offlineMapManager.dismissUpdateSuggestion() },
                                 onSelectPlanCNavPkg = { pkg ->
                                     app.preferences.update { it.copy(planCNavPackage = pkg) }
                                     val label = app.installedAppsRepository.findApp(pkg)?.label ?: pkg
@@ -627,10 +613,10 @@ fun DxCarRootScreen(
                                 onLaunchPlanCFreeform = { pkg ->
                                     launchFreeformPrimaryBox(pkg)
                                     if (config.planCOverlayMusicPanelEnabled) {
-                                        if (android.provider.Settings.canDrawOverlays(context)) {
+                                        if (Settings.canDrawOverlays(context)) {
                                             PersistentDockOverlayService.showPlanCMusicPanel(context)
                                         } else {
-                                            gestureHudText = "請授予「顯示在其他應用程式上層」權限以顯示右側懸浮音樂控盤"
+                                            gestureHudText = "請點設定最上方「權限需求」授予懸浮權限以顯示右側音樂控盤"
                                         }
                                     }
                                 },
@@ -647,6 +633,7 @@ fun DxCarRootScreen(
                                 onLaunchRealMapsSplit = {
                                     SplitSidePanelActivity.launchWithRealGoogleMaps(context)
                                 },
+                                onWeatherClick = { app.weatherRepository.openGoogleWeatherApp(context) },
                                 onMediaPlayPause = { app.mediaControlBridge.togglePlayPause() },
                                 onMediaNext = { app.mediaControlBridge.skipNext() },
                                 onMediaPrev = { app.mediaControlBridge.skipPrevious() },
@@ -676,11 +663,7 @@ fun DxCarRootScreen(
                                     .fillMaxSize()
                                     .padding(10.dp)
                                     .clip(RoundedCornerShape(colors.cardCornerDp.dp))
-                                    .border(
-                                        colors.cardBorderWidthDp.dp,
-                                        colors.cardBorder,
-                                        RoundedCornerShape(colors.cardCornerDp.dp)
-                                    )
+                                    .border(colors.cardBorderWidthDp.dp, colors.cardBorder, RoundedCornerShape(colors.cardCornerDp.dp))
                             ) {
                                 LiveMapCard(
                                     location = location,
@@ -688,8 +671,10 @@ fun DxCarRootScreen(
                                     isNight = isNight,
                                     mapEngineStyle = config.mapEngineStyle,
                                     trafficEnabled = config.mapTrafficEnabled,
-                                    experimentMode = config.homeExperimentMode,
-                                    builtInNavState = builtInNavState,
+                                    offlineState = offlineState,
+                                    offlinePresets = app.offlineMapManager.presets,
+                                    downloadedRegions = config.offlineRegions,
+                                    offlineUpdatePolicy = config.offlineUpdatePolicy,
                                     isPrimary = true,
                                     isFullscreen = true,
                                     homeAddress = config.homeAddress,
@@ -705,19 +690,15 @@ fun DxCarRootScreen(
                                         val next = allStyles[(allStyles.indexOf(config.mapEngineStyle) + 1) % allStyles.size]
                                         app.preferences.update { it.copy(mapEngineStyle = next) }
                                     },
-                                    onSearchBuiltInPlaces = { q ->
-                                        app.builtInNavEngine.searchPlaces(q, location.latitude, location.longitude)
+                                    onSelectOfflinePolicy = { pol ->
+                                        app.preferences.update { it.copy(offlineUpdatePolicy = pol) }
                                     },
-                                    onStartBuiltInNav = { place ->
-                                        app.builtInNavEngine.startNavigation(
-                                            startLat = location.latitude,
-                                            startLon = location.longitude,
-                                            destName = place.name,
-                                            destLat = place.latitude,
-                                            destLon = place.longitude
-                                        )
+                                    onDownloadOfflineRegion = { presetId ->
+                                        app.offlineMapManager.downloadOrUpdatePreset(presetId, location.latitude, location.longitude, config.mapEngineStyle)
                                     },
-                                    onStopBuiltInNav = { app.builtInNavEngine.stopNavigation() },
+                                    onCancelOfflineDownload = { app.offlineMapManager.cancelCurrentDownload() },
+                                    onDeleteOfflineRegion = { rid -> app.offlineMapManager.deleteDownloadedRegion(rid) },
+                                    onDismissOfflineSuggestion = { app.offlineMapManager.dismissUpdateSuggestion() },
                                     onSwapRequested = { destination = LauncherDestination.DASHBOARD_SPLIT },
                                     onToggleFullscreen = { destination = LauncherDestination.DASHBOARD_SPLIT },
                                     onLaunchGoogleMapsApp = { q ->
@@ -740,26 +721,40 @@ fun DxCarRootScreen(
                             AppDrawerScreen(
                                 apps = installedApps,
                                 splitShortcuts = config.splitShortcuts,
+                                appFolders = config.appFolders,
                                 hasPendingUpdate = updateState.hasUpdate || updateState.downloadedReady,
                                 onLaunchApp = { pkg -> launchAppRespectingOptions(pkg) },
-                                onLaunchSplitShortcut = { sc ->
-                                    val dockPx = if (config.showHomeDock) (layoutSpec.dockThicknessDp * dm.density).toInt() else 0
-                                    app.installedAppsRepository.launchSplitShortcut(
-                                        shortcut = sc,
-                                        screenWidthPx = dm.widthPixels,
-                                        screenHeightPx = dm.heightPixels,
-                                        dockOffsetLeftPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0,
-                                        dockOffsetRightPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
-                                        dockOffsetBottomPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0
-                                    )
-                                    gestureHudText = "⊞ 正在開啟分屏：${sc.label} (${sc.ratio.label})"
-                                },
+                                onLaunchSplitShortcut = ::dispatchSplitShortcutWithDockOffsets,
                                 onRemoveSplitShortcut = { sc ->
                                     app.preferences.removeSplitShortcut(sc.id)
                                     gestureHudText = "🗑 已移除分屏捷徑：${sc.label}"
                                 },
                                 onUninstallApp = { targetApp ->
-                                    app.installedAppsRepository.requestUninstallApp(targetApp.packageName)
+                                    val launched = app.installedAppsRepository.requestUninstallApp(targetApp.packageName)
+                                    if (!launched) {
+                                        app.installedAppsRepository.openPackageDetails(targetApp.packageName)
+                                    }
+                                },
+                                onOpenAppInfo = { targetApp ->
+                                    app.installedAppsRepository.openPackageDetails(targetApp.packageName)
+                                },
+                                onCreateFolder = { name, pkgs ->
+                                    app.preferences.createAppFolder(name, pkgs)
+                                    gestureHudText = "📁 已建立資料夾：$name"
+                                },
+                                onAddAppToFolder = { folderId, pkg ->
+                                    app.preferences.addAppToFolder(folderId, pkg)
+                                    gestureHudText = "📁 已加入資料夾"
+                                },
+                                onRenameFolder = { folderId, newName ->
+                                    app.preferences.renameAppFolder(folderId, newName)
+                                },
+                                onRemoveAppFromFolder = { folderId, pkg ->
+                                    app.preferences.removeAppFromFolder(folderId, pkg)
+                                },
+                                onDeleteFolder = { folderId ->
+                                    app.preferences.deleteAppFolder(folderId)
+                                    gestureHudText = "📁 已解散資料夾"
                                 },
                                 onOpenSplitCreator = { showSplitCreator = true },
                                 onLaunchYoutube = ::launchYoutubeBest,
@@ -781,6 +776,16 @@ fun DxCarRootScreen(
                                 permissionHealth = permissionHealth,
                                 bridgeStatus = bridgeStatus,
                                 updateState = updateState,
+                                offlineState = offlineState,
+                                offlinePresets = app.offlineMapManager.presets,
+                                onDownloadOfflineRegion = { presetId ->
+                                    app.offlineMapManager.downloadOrUpdatePreset(
+                                        presetId = presetId,
+                                        currentLat = location.latitude,
+                                        currentLon = location.longitude,
+                                        style = config.mapEngineStyle
+                                    )
+                                },
                                 onUpdateConfig = { transform -> app.preferences.update(transform) },
                                 onRequestSetDefaultHome = {
                                     onRequestSetDefaultHome()
@@ -788,11 +793,7 @@ fun DxCarRootScreen(
                                 },
                                 onSwitchToLauncher = { targetLauncher ->
                                     val launched = app.installedAppsRepository.launchHomeLauncher(targetLauncher)
-                                    gestureHudText = if (launched) {
-                                        "🏠 正在切換至 ${targetLauncher.label}"
-                                    } else {
-                                        "無法啟動 ${targetLauncher.label}"
-                                    }
+                                    gestureHudText = if (launched) "🏠 正在切換至 ${targetLauncher.label}" else "無法啟動 ${targetLauncher.label}"
                                 },
                                 onRefreshHomeLaunchers = {
                                     app.installedAppsRepository.refreshHomeLaunchers()
@@ -847,8 +848,8 @@ fun DxCarRootScreen(
                 }
             }
 
-            val showHomeDockNow = config.showHomeDock && !isDockTemporarilyHidden
-            // MAIN DOCK + STAGE LAYOUT (Auto Left / Right / Bottom per Google Coolwalk DPI & User Toggle!)
+            val showHomeDockNow = config.showHomeDock
+            // MAIN DOCK + STAGE LAYOUT (Left / Right / Top / Bottom!)
             when (layoutSpec.dockPlacement) {
                 ResolvedDockPlacement.LEFT -> {
                     Row(modifier = Modifier.fillMaxSize()) {
@@ -862,6 +863,12 @@ fun DxCarRootScreen(
                         if (showHomeDockNow) dockComposable()
                     }
                 }
+                ResolvedDockPlacement.TOP -> {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        if (showHomeDockNow) dockComposable()
+                        stageContent(Modifier.weight(1f).fillMaxWidth())
+                    }
+                }
                 ResolvedDockPlacement.BOTTOM -> {
                     Column(modifier = Modifier.fillMaxSize()) {
                         stageContent(Modifier.weight(1f).fillMaxWidth())
@@ -870,7 +877,6 @@ fun DxCarRootScreen(
                 }
             }
 
-            // When Home Dock is hidden by user (e.g. using stock AI Box left dock), keep a sleek corner 9-dot menu button
             if (!showHomeDockNow && destination == LauncherDestination.DASHBOARD_SPLIT) {
                 Surface(
                     color = colors.glassOverlay,
@@ -886,17 +892,12 @@ fun DxCarRootScreen(
                         }
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Rounded.Apps,
-                            contentDescription = "展開 App 選單",
-                            tint = colors.primaryText,
-                            modifier = Modifier.size(26.dp)
-                        )
+                        Icon(Icons.Rounded.Apps, contentDescription = "展開 App 選單", tint = colors.primaryText, modifier = Modifier.size(26.dp))
                     }
                 }
             }
 
-            // AUTO-UPDATE DOWNLOADING / READY BANNER (Bottom Center)
+            // AUTO-UPDATE BANNER
             AnimatedVisibility(
                 visible = (updateState.downloading || updateState.downloadedReady) && destination == LauncherDestination.DASHBOARD_SPLIT,
                 enter = fadeIn(),
@@ -924,7 +925,7 @@ fun DxCarRootScreen(
                             Spacer(Modifier.width(8.dp))
                             Text(
                                 text = if (updateState.downloadedReady) {
-                                    "新版本 v${updateState.latestVersion} 已自動下載完成 · 點擊立即安裝"
+                                    "新版本 v${updateState.latestVersion} 已下載完成 · 點擊立即安裝"
                                 } else {
                                     updateState.statusMessage.ifBlank { "正在下載更新…" }
                                 },
@@ -935,23 +936,17 @@ fun DxCarRootScreen(
                         }
                         if (updateState.downloading) {
                             if (updateState.totalBytes > 0L) {
-                                androidx.compose.material3.LinearProgressIndicator(
+                                LinearProgressIndicator(
                                     progress = { updateState.progress },
                                     color = colors.onAccent,
                                     trackColor = colors.onAccent.copy(alpha = 0.28f),
-                                    modifier = Modifier
-                                        .width(240.dp)
-                                        .height(5.dp)
-                                        .clip(RoundedCornerShape(3.dp))
+                                    modifier = Modifier.width(240.dp).height(5.dp).clip(RoundedCornerShape(3.dp))
                                 )
                             } else {
-                                androidx.compose.material3.LinearProgressIndicator(
+                                LinearProgressIndicator(
                                     color = colors.onAccent,
                                     trackColor = colors.onAccent.copy(alpha = 0.28f),
-                                    modifier = Modifier
-                                        .width(240.dp)
-                                        .height(5.dp)
-                                        .clip(RoundedCornerShape(3.dp))
+                                    modifier = Modifier.width(240.dp).height(5.dp).clip(RoundedCornerShape(3.dp))
                                 )
                             }
                         }
@@ -959,13 +954,13 @@ fun DxCarRootScreen(
                 }
             }
 
-            // FLOATING AA INCOMING CALL & MESSAGE BANNERS (Top Center)
+            // INCOMING CALL & MESSAGE BANNERS
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 14.dp, start = 20.dp, end = 20.dp)
+                    .padding(top = if (layoutSpec.dockPlacement == ResolvedDockPlacement.TOP) 82.dp else 14.dp, start = 20.dp, end = 20.dp)
             ) {
                 IncomingCallBanner(
                     callState = activeCall,
@@ -989,17 +984,17 @@ fun DxCarRootScreen(
                 )
             }
 
-            // MULTI-FINGER GESTURE FEEDBACK PILL
+            // HUD TOAST PILL
             GestureFeedbackPill(
                 text = gestureHudText,
                 modifier = Modifier.align(Alignment.Center)
             )
 
-            // QUICK CONTROL CENTER OVERLAY (Clock tap)
+            // DROPDOWN QUICK TOGGLES SHADE (Opened by tapping Top-Left Wi-Fi icon OR Clock!)
             AnimatedVisibility(
                 visible = showQuickControlCenter,
-                enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.92f, animationSpec = spring(stiffness = Spring.StiffnessMedium)),
-                exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.94f, animationSpec = tween(140))
+                enter = slideInVertically(initialOffsetY = { -it / 2 }, animationSpec = tween(190)) + fadeIn(tween(160)),
+                exit = slideOutVertically(targetOffsetY = { -it / 2 }, animationSpec = tween(140)) + fadeOut(tween(130))
             ) {
                 QuickControlCenterOverlay(
                     systemStatus = sysStatus,
@@ -1010,6 +1005,13 @@ fun DxCarRootScreen(
                     onSwapSplit = { isMapPrimary = !isMapPrimary },
                     onOpenWifiSettings = { SystemStatusMonitor.openWifiSettings(context) },
                     onOpenBluetoothSettings = { SystemStatusMonitor.openBluetoothSettings(context) },
+                    onOpenSystemQuickShade = {
+                        val ok = DxCarAccessibilityService.instance?.openQuickSettings() == true
+                        if (!ok) {
+                            gestureHudText = "開啟無障礙服務即可拉下系統原生通知欄"
+                        }
+                    },
+                    onToggle3DCursor = ::toggle3DPointerGlobal,
                     onOpenSettings = {
                         permissionHealth = PermissionHelper.check(context)
                         app.installedAppsRepository.refreshHomeLaunchers()
@@ -1019,7 +1021,7 @@ fun DxCarRootScreen(
                 )
             }
 
-            // NOTIFICATION CENTER OVERLAY (Bell tap)
+            // NOTIFICATION CENTER OVERLAY
             AnimatedVisibility(
                 visible = showNotificationCenter,
                 enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.92f, animationSpec = spring(stiffness = Spring.StiffnessMedium)),
@@ -1039,7 +1041,7 @@ fun DxCarRootScreen(
                 )
             }
 
-            // APP PICKER DIALOG FOR THE 6 CUSTOM SHORTCUT SLOTS (Shows Real App Icons + Split Shortcuts!)
+            // 6 CUSTOM SHORTCUT SLOTS PICKER
             AnimatedVisibility(
                 visible = pickingShortcutSlotIndex != null,
                 enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.90f, animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMedium)),
@@ -1059,7 +1061,7 @@ fun DxCarRootScreen(
                 )
             }
 
-            // SPLIT-SCREEN SHORTCUT CREATOR ("分屏設定" -> 3:7..7:3 -> Save as Dual-Icon Shortcut!)
+            // SPLIT-SCREEN SHORTCUT CREATOR
             AnimatedVisibility(
                 visible = showSplitCreator,
                 enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.92f, animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMedium)),
@@ -1072,32 +1074,28 @@ fun DxCarRootScreen(
                         showSplitCreator = false
                         gestureHudText = "✓ 創建分屏捷徑成功：${shortcut.label} (${shortcut.ratio.label})"
                     },
-                    onTestLaunchShortcut = { shortcut ->
-                        val dockPx = if (config.showHomeDock) (layoutSpec.dockThicknessDp * dm.density).toInt() else 0
-                        app.installedAppsRepository.launchSplitShortcut(
-                            shortcut = shortcut,
-                            screenWidthPx = dm.widthPixels,
-                            screenHeightPx = dm.heightPixels,
-                            dockOffsetLeftPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0,
-                            dockOffsetRightPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
-                            dockOffsetBottomPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0
-                        )
-                        gestureHudText = "⊞ 正在測試開啟分屏：${shortcut.label} (${shortcut.ratio.label})"
-                    },
+                    onTestLaunchShortcut = ::dispatchSplitShortcutWithDockOffsets,
                     onDismiss = { showSplitCreator = false }
                 )
+            }
+
+            // Fallback in-app 3D Cursor & Remote Mouse Cursor when SYSTEM_ALERT_WINDOW isn't enabled yet
+            if (!Settings.canDrawOverlays(context)) {
+                if (cursor3DActive) {
+                    Interactive3DCursorOverlay(
+                        showTutorial = cursor3DTutorial,
+                        onOpenTutorial = { Cursor3DStateHolder.openTutorial() },
+                        onCloseTutorial = { Cursor3DStateHolder.closeTutorial() },
+                        onExit3DMode = { Cursor3DStateHolder.setActive(false) },
+                        onSetWindowPassThrough = {}
+                    )
+                }
+                RemoteCarMousePointerOverlay(cursorState = remoteCursor)
             }
         }
     }
 }
 
-/**
- * Android Auto Coolwalk Split Dashboard:
- * - Animated Primary (default 63%) vs Secondary (default 37%) proportion!
- * - Supports Left-Hand Drive (default: Primary on Left, Secondary + 6 Custom Slots on Right)
- *   AND Right-Hand Drive (mirrors cleanly: Primary on Right near driver, Secondary + 6 Custom Slots on Left)!
- * - Clicking the secondary card smoothly SWAPS sides (just like AA Coolwalk!).
- */
 @Composable
 private fun CoolwalkSplitDashboard(
     isHorizontalSplit: Boolean,
@@ -1108,8 +1106,12 @@ private fun CoolwalkSplitDashboard(
     experimentMode: HomeExperimentMode,
     location: com.dxcar.launcher.map.VehicleLocationState,
     activeNav: com.dxcar.launcher.comms.ActiveNavBanner?,
-    builtInNavState: BuiltInNavState,
     media: com.dxcar.launcher.media.ActiveMediaState,
+    weather: LocalWeatherState,
+    offlineState: OfflineMapUiState,
+    offlinePresets: List<OfflineRegionPreset>,
+    downloadedRegions: List<OfflineRegionRecord>,
+    offlineUpdatePolicy: OfflineUpdatePolicy,
     isNight: Boolean,
     mapEngineStyle: MapEngineStyle,
     trafficEnabled: Boolean,
@@ -1127,9 +1129,11 @@ private fun CoolwalkSplitDashboard(
     onSelectMapStyle: (MapEngineStyle) -> Unit,
     onToggleTraffic: () -> Unit,
     onToggleMapStyle: () -> Unit,
-    onSearchBuiltInPlaces: (String) -> Unit,
-    onStartBuiltInNav: (NavSearchResult) -> Unit,
-    onStopBuiltInNav: () -> Unit,
+    onSelectOfflinePolicy: (OfflineUpdatePolicy) -> Unit,
+    onDownloadOfflineRegion: (String) -> Unit,
+    onCancelOfflineDownload: () -> Unit,
+    onDeleteOfflineRegion: (String) -> Unit,
+    onDismissOfflineSuggestion: () -> Unit,
     onSelectPlanCNavPkg: (String) -> Unit,
     onLaunchPlanCFreeform: (String) -> Unit,
     onLaunchPlanCSplit: (String) -> Unit,
@@ -1138,6 +1142,7 @@ private fun CoolwalkSplitDashboard(
     onOpenFullscreenMap: () -> Unit,
     onLaunchRealGoogleMaps: (String?) -> Unit,
     onLaunchRealMapsSplit: () -> Unit,
+    onWeatherClick: () -> Unit,
     onMediaPlayPause: () -> Unit,
     onMediaNext: () -> Unit,
     onMediaPrev: () -> Unit,
@@ -1186,23 +1191,13 @@ private fun CoolwalkSplitDashboard(
                     )
                 }
                 homeMapDisplayMode == HomeMapDisplayMode.REAL_GMAPS_FREEFORM_EMBED -> {
-                    Surface(
-                        color = colors.cardSurface,
-                        modifier = Modifier.fillMaxSize()
-                    ) {
+                    Surface(color = colors.cardSurface, modifier = Modifier.fillMaxSize()) {
                         Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(20.dp),
+                            modifier = Modifier.fillMaxSize().padding(20.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Map,
-                                contentDescription = null,
-                                tint = colors.accent,
-                                modifier = Modifier.size(54.dp)
-                            )
+                            Icon(Icons.Rounded.Map, contentDescription = null, tint = colors.accent, modifier = Modifier.size(54.dp))
                             Spacer(Modifier.height(10.dp))
                             Text(
                                 text = "真實 Google 地圖本體貼合模式（${(primaryRatio * 100).toInt()}% 比例）",
@@ -1212,7 +1207,7 @@ private fun CoolwalkSplitDashboard(
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                text = "點擊下方按鈕即以 Freeform 精準貼合此卡片範圍啟動 Google 地圖本體",
+                                text = "點擊下方按鈕即以 Freeform 貼合開啟，或使用 AOSP 原生可拖動分割模式",
                                 color = colors.secondaryText,
                                 fontSize = 12.sp
                             )
@@ -1220,24 +1215,15 @@ private fun CoolwalkSplitDashboard(
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Button(
                                     onClick = onPinRealMapsHere,
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = colors.accent,
-                                        contentColor = colors.onAccent
-                                    ),
+                                    colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
                                     shape = RoundedCornerShape(16.dp)
                                 ) {
                                     Text("貼合開啟真實 Google 地圖")
                                 }
-                                OutlinedButton(
-                                    onClick = onLaunchRealMapsSplit,
-                                    shape = RoundedCornerShape(16.dp)
-                                ) {
-                                    Text("原生分割模式")
+                                OutlinedButton(onClick = onLaunchRealMapsSplit, shape = RoundedCornerShape(16.dp)) {
+                                    Text("AOSP 原生分割模式")
                                 }
-                                OutlinedButton(
-                                    onClick = onSwitchToBuiltinMap,
-                                    shape = RoundedCornerShape(16.dp)
-                                ) {
+                                OutlinedButton(onClick = onSwitchToBuiltinMap, shape = RoundedCornerShape(16.dp)) {
                                     Text("切回內建即時地圖")
                                 }
                             }
@@ -1251,8 +1237,10 @@ private fun CoolwalkSplitDashboard(
                         isNight = isNight,
                         mapEngineStyle = mapEngineStyle,
                         trafficEnabled = trafficEnabled,
-                        experimentMode = experimentMode,
-                        builtInNavState = builtInNavState,
+                        offlineState = offlineState,
+                        offlinePresets = offlinePresets,
+                        downloadedRegions = downloadedRegions,
+                        offlineUpdatePolicy = offlineUpdatePolicy,
                         isPrimary = primary,
                         isFullscreen = false,
                         homeAddress = homeAddress,
@@ -1260,9 +1248,11 @@ private fun CoolwalkSplitDashboard(
                         onSelectMapStyle = onSelectMapStyle,
                         onToggleTraffic = onToggleTraffic,
                         onToggleStyle = onToggleMapStyle,
-                        onSearchBuiltInPlaces = onSearchBuiltInPlaces,
-                        onStartBuiltInNav = onStartBuiltInNav,
-                        onStopBuiltInNav = onStopBuiltInNav,
+                        onSelectOfflinePolicy = onSelectOfflinePolicy,
+                        onDownloadOfflineRegion = onDownloadOfflineRegion,
+                        onCancelOfflineDownload = onCancelOfflineDownload,
+                        onDeleteOfflineRegion = onDeleteOfflineRegion,
+                        onDismissOfflineSuggestion = onDismissOfflineSuggestion,
                         onSwapRequested = onSwapPanes,
                         onToggleFullscreen = onOpenFullscreenMap,
                         onLaunchGoogleMapsApp = onLaunchRealGoogleMaps,
@@ -1281,6 +1271,7 @@ private fun CoolwalkSplitDashboard(
         ) {
             MediaControlCard(
                 media = media,
+                weather = weather,
                 isPrimary = primary,
                 pureMusicMode = isPlanC,
                 showSwapButton = !isPlanC,
@@ -1288,6 +1279,7 @@ private fun CoolwalkSplitDashboard(
                 customShortcutSlots = customShortcutSlots,
                 installedApps = installedApps,
                 splitShortcuts = splitShortcuts,
+                onWeatherClick = onWeatherClick,
                 onPlayPause = onMediaPlayPause,
                 onNext = onMediaNext,
                 onPrevious = onMediaPrev,
@@ -1320,22 +1312,14 @@ private fun CoolwalkSplitDashboard(
             targetState = showMapPrimary,
             transitionSpec = {
                 val dir = if (targetState) 1 else -1
-                val enter = androidx.compose.animation.slideInHorizontally(
+                val enter = slideInHorizontally(
                     animationSpec = spring(dampingRatio = 0.84f, stiffness = Spring.StiffnessMediumLow),
                     initialOffsetX = { fullWidth -> dir * (fullWidth / 5) }
-                ) + fadeIn(animationSpec = androidx.compose.animation.core.tween(240)) +
-                    androidx.compose.animation.scaleIn(
-                        initialScale = 0.96f,
-                        animationSpec = androidx.compose.animation.core.tween(240)
-                    )
-                val exit = androidx.compose.animation.slideOutHorizontally(
-                    animationSpec = androidx.compose.animation.core.tween(200),
+                ) + fadeIn(tween(240)) + scaleIn(initialScale = 0.96f, animationSpec = tween(240))
+                val exit = slideOutHorizontally(
+                    animationSpec = tween(200),
                     targetOffsetX = { fullWidth -> -dir * (fullWidth / 6) }
-                ) + fadeOut(animationSpec = androidx.compose.animation.core.tween(180)) +
-                    androidx.compose.animation.scaleOut(
-                        targetScale = 0.96f,
-                        animationSpec = androidx.compose.animation.core.tween(180)
-                    )
+                ) + fadeOut(tween(180)) + scaleOut(targetScale = 0.96f, animationSpec = tween(180))
                 enter togetherWith exit
             },
             label = "coolwalkHorizontalSwap"
@@ -1344,10 +1328,7 @@ private fun CoolwalkSplitDashboard(
                 if (mapOnPrimary) mapCardComposable(true, mod) else mediaCardComposable(true, false, mod)
             }
             val secondaryColumn: @Composable (Modifier) -> Unit = { mod ->
-                Column(
-                    modifier = mod,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                Column(modifier = mod, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (mapOnPrimary) {
                         mediaCardComposable(false, supportsThirdSubCard, Modifier.weight(1f).fillMaxWidth())
                     } else {
@@ -1360,9 +1341,7 @@ private fun CoolwalkSplitDashboard(
             }
 
             Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(12.dp),
+                modifier = Modifier.fillMaxSize().padding(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 if (rightHandDrive) {
@@ -1379,22 +1358,20 @@ private fun CoolwalkSplitDashboard(
             targetState = isMapPrimary || isPlanC,
             transitionSpec = {
                 val dir = if (targetState) 1 else -1
-                val enter = androidx.compose.animation.slideInVertically(
+                val enter = slideInVertically(
                     animationSpec = spring(dampingRatio = 0.84f, stiffness = Spring.StiffnessMediumLow),
                     initialOffsetY = { fullHeight -> dir * (fullHeight / 5) }
-                ) + fadeIn(animationSpec = androidx.compose.animation.core.tween(240))
-                val exit = androidx.compose.animation.slideOutVertically(
-                    animationSpec = androidx.compose.animation.core.tween(200),
+                ) + fadeIn(tween(240))
+                val exit = slideOutVertically(
+                    animationSpec = tween(200),
                     targetOffsetY = { fullHeight -> -dir * (fullHeight / 6) }
-                ) + fadeOut(animationSpec = androidx.compose.animation.core.tween(180))
+                ) + fadeOut(tween(180))
                 enter togetherWith exit
             },
             label = "coolwalkVerticalSwap"
         ) { mapOnTop ->
             Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(12.dp),
+                modifier = Modifier.fillMaxSize().padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 if (mapOnTop) {

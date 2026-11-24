@@ -3,21 +3,29 @@ package com.dxcar.launcher.accessibility
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
+import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import com.dxcar.launcher.DxCarApp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Lightweight AccessibilityService powering:
- * - Accurate tracking of foreground third-party apps (YouTube, Google Maps, Spotify, etc.)
- *   so the Persistent AA Dock highlights the active app and hides/shows cleanly.
- * - Global car-safe actions (Home, Back, Recents, Split-Screen toggle) from the Persistent Dock.
+ * AccessibilityService powering:
+ * - Foreground app tracking (for Persistent AA Dock & AOSP Split-Screen focus verification)
+ * - Global actions: Home, Back, Recents, System Quick Settings Shade, and AOSP Split-Screen
+ * - AOSP Recents Split-Screen node automation fallback (for Android 12L/13/14 WMShell StageCoordinator)
+ * - Single-touch / Long-press / Drag / Scroll injection (for Phone Remote Touchpad & 3D Cursor)
+ * - 2-finger parallel tilt (3D buildings) & 2-finger pinch zoom injection (for 3D Cursor Controller)
  */
 class DxCarAccessibilityService : AccessibilityService() {
+
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -49,21 +57,210 @@ class DxCarAccessibilityService : AccessibilityService() {
 
     fun openRecents(): Boolean = performGlobalAction(GLOBAL_ACTION_RECENTS)
 
+    fun openQuickSettings(): Boolean = performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)
+
+    fun openNotificationsShade(): Boolean = performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
+
     fun toggleSplitScreen(): Boolean = performGlobalAction(GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN)
 
     /**
-     * Simulates a true 2-finger parallel vertical swipe in the center of the screen
-     * so single-touch AI Box screens can tilt Google Maps into 3D buildings view (or back to 2D).
+     * Inspects interactive system windows to verify whether AOSP draggable Split-Screen is genuinely active.
      */
-    fun dispatchTwoFingerTilt(tiltUpTo3D: Boolean, onDone: ((Boolean) -> Unit)? = null): Boolean {
+    fun isSystemInSplitScreenNow(): Boolean {
+        val winList = runCatching { windows }.getOrNull().orEmpty()
+        if (winList.any { it.type == AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER }) {
+            return true
+        }
+        val dm = resources.displayMetrics
+        val fullW = dm.widthPixels
+        val fullH = dm.heightPixels
+        val appWindows = winList.filter { win ->
+            if (win.type != AccessibilityWindowInfo.TYPE_APPLICATION) return@filter false
+            val r = Rect()
+            win.getBoundsInScreen(r)
+            r.width() in 120 until (fullW - 80) || r.height() in 120 until (fullH - 80)
+        }
+        return appWindows.isNotEmpty()
+    }
+
+    /**
+     * Multi-stage AOSP Split-Screen trigger for the currently focused foreground app:
+     * 1) Try standard GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN and verify window split state.
+     * 2) Fallback for Android 12L/13/14 WMShell Launcher3/QuickStep: open Recents Overview,
+     *    locate "分割畫面 / 分屏 / Split" action (directly or via Task Header App Icon menu) and click it!
+     */
+    suspend fun enterAospSplitScreenFromCurrentApp(): Boolean {
+        if (isSystemInSplitScreenNow()) return true
+
+        val directOk = toggleSplitScreen()
+        if (directOk) {
+            delay(420L)
+            if (isSystemInSplitScreenNow()) return true
+        }
+
+        // Stage B: AOSP Recents Overview Split-Screen button click
+        if (!openRecents()) return directOk
+        delay(520L)
+
+        if (findAndClickSplitNode()) {
+            delay(450L)
+            return true
+        }
+
+        // In AOSP Launcher3 QuickStep, tapping the task's top app icon opens the popup menu containing "分割畫面 / Split top"
+        if (findAndClickRecentsTaskHeaderIcon()) {
+            delay(360L)
+            if (findAndClickSplitNode()) {
+                delay(450L)
+                return true
+            }
+        }
+        return isSystemInSplitScreenNow()
+    }
+
+    private fun findAndClickSplitNode(): Boolean {
+        val roots = buildList {
+            rootInActiveWindow?.let { add(it) }
+            runCatching { windows }.getOrNull()?.forEach { w -> w.root?.let { add(it) } }
+        }
+        val splitKeywords = listOf(
+            "分割畫面", "分割螢幕", "分屏", "左右分屏", "開啟分屏",
+            "split screen", "split top", "split left", "enter split"
+        )
+        for (root in roots) {
+            val found = searchNodeRecursive(root) { node ->
+                val text = node.text?.toString()?.lowercase().orEmpty()
+                val desc = node.contentDescription?.toString()?.lowercase().orEmpty()
+                val id = node.viewIdResourceName?.lowercase().orEmpty()
+                splitKeywords.any { kw -> text.contains(kw) || desc.contains(kw) } ||
+                    id.contains("split")
+            }
+            if (found != null && performClickUpHierarchy(found)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun findAndClickRecentsTaskHeaderIcon(): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val iconNode = searchNodeRecursive(root) { node ->
+            val id = node.viewIdResourceName?.lowercase().orEmpty()
+            (id.contains("icon") || id.contains("task_icon") || id.contains("app_icon")) &&
+                node.isClickable
+        }
+        return if (iconNode != null) performClickUpHierarchy(iconNode) else false
+    }
+
+    private fun searchNodeRecursive(
+        node: AccessibilityNodeInfo?,
+        predicate: (AccessibilityNodeInfo) -> Boolean
+    ): AccessibilityNodeInfo? {
+        if (node == null) return null
+        if (predicate(node)) return node
+        for (i in 0 until node.childCount) {
+            val child = runCatching { node.getChild(i) }.getOrNull() ?: continue
+            val match = searchNodeRecursive(child, predicate)
+            if (match != null) return match
+        }
+        return null
+    }
+
+    private fun performClickUpHierarchy(node: AccessibilityNodeInfo): Boolean {
+        var cur: AccessibilityNodeInfo? = node
+        var depth = 0
+        while (cur != null && depth < 5) {
+            if (cur.isClickable && cur.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                return true
+            }
+            cur = cur.parent
+            depth++
+        }
+        val r = Rect()
+        node.getBoundsInScreen(r)
+        if (!r.isEmpty) {
+            return dispatchSingleTap(r.exactCenterX(), r.exactCenterY())
+        }
+        return false
+    }
+
+    // ==================== SINGLE-TOUCH / REMOTE MOUSE / 3D GESTURE INJECTION ====================
+
+    fun dispatchSingleTap(x: Float, y: Float, onDone: ((Boolean) -> Unit)? = null): Boolean {
+        val dm = resources.displayMetrics
+        val sx = x.coerceIn(2f, (dm.widthPixels - 2).coerceAtLeast(10).toFloat())
+        val sy = y.coerceIn(2f, (dm.heightPixels - 2).coerceAtLeast(10).toFloat())
+        val path = Path().apply { moveTo(sx, sy) }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0L, 55L))
+            .build()
+        return dispatchWithCallback(gesture, onDone)
+    }
+
+    fun dispatchLongPress(x: Float, y: Float, onDone: ((Boolean) -> Unit)? = null): Boolean {
+        val dm = resources.displayMetrics
+        val sx = x.coerceIn(2f, (dm.widthPixels - 2).coerceAtLeast(10).toFloat())
+        val sy = y.coerceIn(2f, (dm.heightPixels - 2).coerceAtLeast(10).toFloat())
+        val path = Path().apply { moveTo(sx, sy) }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0L, 620L))
+            .build()
+        return dispatchWithCallback(gesture, onDone)
+    }
+
+    fun dispatchSinglePathGesture(
+        path: Path,
+        durationMs: Long,
+        onDone: ((Boolean) -> Unit)? = null
+    ): Boolean {
+        val safeDur = durationMs.coerceIn(45L, 900L)
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0L, safeDur))
+            .build()
+        return dispatchWithCallback(gesture, onDone)
+    }
+
+    fun dispatchScrollSwipe(x: Float, y: Float, scrollUp: Boolean, onDone: ((Boolean) -> Unit)? = null): Boolean {
+        val dm = resources.displayMetrics
+        val w = dm.widthPixels.toFloat().coerceAtLeast(320f)
+        val h = dm.heightPixels.toFloat().coerceAtLeast(240f)
+        val sx = x.coerceIn(20f, w - 20f)
+        val startY = y.coerceIn(h * 0.22f, h * 0.78f)
+        val delta = (h * 0.26f).coerceIn(90f, 260f)
+        val endY = (if (scrollUp) startY + delta else startY - delta).coerceIn(16f, h - 16f)
+        val path = Path().apply {
+            moveTo(sx, startY)
+            lineTo(sx, endY)
+        }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0L, 220L))
+            .build()
+        return dispatchWithCallback(gesture, onDone)
+    }
+
+    /**
+     * Simulates a 2-finger parallel vertical swipe centered around [anchorX, anchorY] (or screen center)
+     * so single-touch AI Box screens can smoothly tilt Google Maps into 3D buildings view or back to 2D.
+     */
+    fun dispatchTwoFingerTilt(
+        tiltUpTo3D: Boolean,
+        anchorX: Float? = null,
+        anchorY: Float? = null,
+        onDone: ((Boolean) -> Unit)? = null
+    ): Boolean {
         val dm = resources.displayMetrics
         val w = dm.widthPixels.toFloat().coerceAtLeast(400f)
         val h = dm.heightPixels.toFloat().coerceAtLeast(300f)
 
-        val x1 = w * 0.44f
-        val x2 = w * 0.56f
-        val startY = if (tiltUpTo3D) h * 0.62f else h * 0.34f
-        val endY = if (tiltUpTo3D) h * 0.30f else h * 0.64f
+        val cx = (anchorX ?: (w * 0.50f)).coerceIn(w * 0.20f, w * 0.80f)
+        val cy = (anchorY ?: (h * 0.50f)).coerceIn(h * 0.28f, h * 0.72f)
+        val halfSpan = (w * 0.055f).coerceIn(32f, 85f)
+        val travel = (h * 0.26f).coerceIn(100f, 240f)
+
+        val x1 = (cx - halfSpan).coerceAtLeast(16f)
+        val x2 = (cx + halfSpan).coerceAtMost(w - 16f)
+        val startY = if (tiltUpTo3D) (cy + travel * 0.5f).coerceAtMost(h - 20f) else (cy - travel * 0.5f).coerceAtLeast(20f)
+        val endY = if (tiltUpTo3D) (cy - travel * 0.5f).coerceAtLeast(20f) else (cy + travel * 0.5f).coerceAtMost(h - 20f)
 
         val p1 = Path().apply {
             moveTo(x1, startY)
@@ -75,38 +272,35 @@ class DxCarAccessibilityService : AccessibilityService() {
         }
 
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(p1, 0L, 420L))
-            .addStroke(GestureDescription.StrokeDescription(p2, 0L, 420L))
+            .addStroke(GestureDescription.StrokeDescription(p1, 0L, 340L))
+            .addStroke(GestureDescription.StrokeDescription(p2, 0L, 340L))
             .build()
 
-        return dispatchGesture(
-            gesture,
-            object : GestureResultCallback() {
-                override fun onCompleted(gestureDescription: GestureDescription?) {
-                    onDone?.invoke(true)
-                }
-
-                override fun onCancelled(gestureDescription: GestureDescription?) {
-                    onDone?.invoke(false)
-                }
-            },
-            Handler(Looper.getMainLooper())
-        )
+        return dispatchWithCallback(gesture, onDone)
     }
 
     /**
-     * Simulates a 2-finger pinch zoom gesture in the center of the screen.
+     * Simulates a 2-finger pinch-in (zoom out) or spread-out (zoom in) centered around [anchorX, anchorY].
      */
-    fun dispatchTwoFingerPinch(zoomIn: Boolean, onDone: ((Boolean) -> Unit)? = null): Boolean {
+    fun dispatchTwoFingerPinch(
+        zoomIn: Boolean,
+        anchorX: Float? = null,
+        anchorY: Float? = null,
+        onDone: ((Boolean) -> Unit)? = null
+    ): Boolean {
         val dm = resources.displayMetrics
         val w = dm.widthPixels.toFloat().coerceAtLeast(400f)
         val h = dm.heightPixels.toFloat().coerceAtLeast(300f)
-        val cy = h * 0.50f
 
-        val leftStart = if (zoomIn) w * 0.44f else w * 0.28f
-        val leftEnd = if (zoomIn) w * 0.28f else w * 0.44f
-        val rightStart = if (zoomIn) w * 0.56f else w * 0.72f
-        val rightEnd = if (zoomIn) w * 0.72f else w * 0.56f
+        val cx = (anchorX ?: (w * 0.50f)).coerceIn(w * 0.24f, w * 0.76f)
+        val cy = (anchorY ?: (h * 0.50f)).coerceIn(h * 0.20f, h * 0.80f)
+        val innerOffset = (w * 0.045f).coerceIn(28f, 70f)
+        val outerOffset = (w * 0.16f).coerceIn(95f, 220f)
+
+        val leftStart = (cx - if (zoomIn) innerOffset else outerOffset).coerceAtLeast(14f)
+        val leftEnd = (cx - if (zoomIn) outerOffset else innerOffset).coerceAtLeast(14f)
+        val rightStart = (cx + if (zoomIn) innerOffset else outerOffset).coerceAtMost(w - 14f)
+        val rightEnd = (cx + if (zoomIn) outerOffset else innerOffset).coerceAtMost(w - 14f)
 
         val p1 = Path().apply {
             moveTo(leftStart, cy)
@@ -118,23 +312,32 @@ class DxCarAccessibilityService : AccessibilityService() {
         }
 
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(p1, 0L, 380L))
-            .addStroke(GestureDescription.StrokeDescription(p2, 0L, 380L))
+            .addStroke(GestureDescription.StrokeDescription(p1, 0L, 300L))
+            .addStroke(GestureDescription.StrokeDescription(p2, 0L, 300L))
             .build()
 
-        return dispatchGesture(
-            gesture,
-            object : GestureResultCallback() {
-                override fun onCompleted(gestureDescription: GestureDescription?) {
-                    onDone?.invoke(true)
-                }
+        return dispatchWithCallback(gesture, onDone)
+    }
 
-                override fun onCancelled(gestureDescription: GestureDescription?) {
-                    onDone?.invoke(false)
-                }
-            },
-            Handler(Looper.getMainLooper())
-        )
+    private fun dispatchWithCallback(
+        gesture: GestureDescription,
+        onDone: ((Boolean) -> Unit)?
+    ): Boolean {
+        return runCatching {
+            dispatchGesture(
+                gesture,
+                object : GestureResultCallback() {
+                    override fun onCompleted(gestureDescription: GestureDescription?) {
+                        onDone?.invoke(true)
+                    }
+
+                    override fun onCancelled(gestureDescription: GestureDescription?) {
+                        onDone?.invoke(false)
+                    }
+                },
+                mainHandler
+            )
+        }.getOrDefault(false)
     }
 
     companion object {

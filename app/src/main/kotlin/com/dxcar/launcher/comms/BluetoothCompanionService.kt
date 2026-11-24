@@ -7,6 +7,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
@@ -14,6 +15,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.net.ConnectivityManager
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.telecom.TelecomManager
@@ -28,6 +33,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -55,11 +62,15 @@ import java.util.Collections
 import java.util.UUID
 
 /**
- * Dual-Transport Companion Bridge between Paired Phone <-> AI Box:
- * 1. Classic Bluetooth RFCOMM SPP (tries BOTH Secure & Insecure RFCOMM for maximum compatibility)
- * 2. Wi-Fi Hotspot / LAN TCP Direct Bridge (Port 47681 + UDP Discovery 47682 + /proc/net/arp scan)
- *    so even if an AI Box firmware hijacks Bluetooth SPP for CarPlay/SpeedPlay, notifications & calls
- *    stream effortlessly whenever the AI Box shares the phone's hotspot or sits on the same Wi-Fi!
+ * Ultra-Reliable Dual-Transport Companion Bridge between Paired Phone <-> AI Box:
+ * 1. All socket writes execute strictly on a dedicated Dispatchers.IO outbound queue
+ *    (eliminates Android NetworkOnMainThreadException disconnects when UI or NotificationListener posts!).
+ * 2. Classic Bluetooth RFCOMM SPP: tries target device + ANY currently connected bonded car BT device
+ *    (Secure + Insecure RFCOMM), plus detects HFP/A2DP audio links so dual-BT AI Boxes stay awake.
+ * 3. Bi-Directional Wi-Fi Hotspot / LAN TCP Bridge:
+ *    - Phone discovers AI Box (:47681) via UDP broadcast (:47682) + /proc/net/arp + active subnet
+ *    - AI Box ALSO discovers Phone (:47683) directly via its Wi-Fi DHCP Gateway IP (100% deterministic on Hotspots!)
+ * 4. Queues notifications briefly while waking up so early messages are never lost.
  */
 class BluetoothCompanionService : Service() {
 
@@ -72,6 +83,7 @@ class BluetoothCompanionService : Service() {
     private var btJob: Job? = null
     private var lanJob: Job? = null
     private var heartbeatJob: Job? = null
+    private var writerJob: Job? = null
 
     private var secureServerSocket: BluetoothServerSocket? = null
     private var insecureServerSocket: BluetoothServerSocket? = null
@@ -91,6 +103,13 @@ class BluetoothCompanionService : Service() {
     private val lanWriteLock = Any()
     private val seenPacketIds = Collections.synchronizedSet(LinkedHashSet<String>())
 
+    // Non-blocking IO writer channel so UI & NotificationListener NEVER touch sockets on Main thread!
+    private val outboundChannel = Channel<BridgePacket>(
+        capacity = 256,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    private val pendingImportantPackets = Collections.synchronizedList(mutableListOf<BridgePacket>())
+
     @Volatile
     private var forceOneShotUntilMs: Long = 0L
 
@@ -100,7 +119,8 @@ class BluetoothCompanionService : Service() {
         super.onCreate()
         activeService = this
         ensureChannel()
-        startForegroundSafe("雙通道通知橋接準備中…")
+        startForegroundSafe("雙通道通知與觸控橋接準備中…")
+        startOutboundWriterLoop()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -114,10 +134,10 @@ class BluetoothCompanionService : Service() {
                 val app = DxCarApp.instance
                 val role = app?.preferences?.config?.value?.deviceRole ?: DeviceRole.AI_BOX_LAUNCHER
                 if (role == DeviceRole.PHONE_COMPANION &&
-                    lanSocket?.isConnected != true &&
+                    !hasOpenTransport() &&
                     !shouldPhoneBridgeRunNow(this)
                 ) {
-                    appendLog("車機藍牙已斷開，進入待機省電模式（下次連線自動喚醒）")
+                    appendLog("車機連線已斷開，進入待機省電模式（下次上車自動喚醒）")
                     markStandby(this)
                     stopSelf()
                     return START_NOT_STICKY
@@ -125,19 +145,24 @@ class BluetoothCompanionService : Service() {
                 updateConnectionSnapshot()
             }
             ACTION_FORCE_SCAN -> {
-                forceOneShotUntilMs = System.currentTimeMillis() + 15_000L
-                startForegroundSafe("正在搜尋 AI Box（藍牙／Wi-Fi 熱點）…")
-                restartWorkers()
-            }
-            ACTION_RECONNECT -> {
-                startForegroundSafe("通知同步橋接運作中…")
-                restartWorkers()
-            }
-            else -> {
-                startForegroundSafe("通知同步橋接運作中…")
-                if (btJob?.isActive != true || lanJob?.isActive != true) {
+                forceOneShotUntilMs = System.currentTimeMillis() + 30_000L
+                startForegroundSafe("正在搜尋車機 AI Box（藍牙／Wi-Fi 熱點）…")
+                if (hasOpenTransport()) {
+                    // Already connected: verify link with PING instead of tearing down working socket!
+                    enqueueOutbound(BridgePacket(type = PacketType.PING, id = UUID.randomUUID().toString()))
+                    ensureWorkersRunning()
+                    updateConnectionSnapshot()
+                } else {
                     restartWorkers()
                 }
+            }
+            ACTION_RECONNECT -> {
+                startForegroundSafe("通知與觸控橋接運作中…")
+                ensureWorkersRunning()
+            }
+            else -> {
+                startForegroundSafe("通知與觸控橋接運作中…")
+                ensureWorkersRunning()
             }
         }
         return START_STICKY
@@ -151,42 +176,87 @@ class BluetoothCompanionService : Service() {
         updateConnectionSnapshot()
     }
 
-    private fun restartWorkers() {
-        btJob?.cancel()
-        lanJob?.cancel()
-        heartbeatJob?.cancel()
-        closeAllSockets()
+    private fun startOutboundWriterLoop() {
+        if (writerJob?.isActive == true) return
+        writerJob = scope.launch(Dispatchers.IO) {
+            for (pkt in outboundChannel) {
+                if (!isActive) break
+                val ok = writePacketOnIoThread(pkt)
+                if (!ok && (pkt.type == PacketType.MESSAGE || pkt.type == PacketType.CALL_STATE)) {
+                    bufferImportantPacket(pkt)
+                }
+            }
+        }
+    }
 
+    private fun bufferImportantPacket(pkt: BridgePacket) {
+        synchronized(pendingImportantPackets) {
+            if (pendingImportantPackets.none { it.id == pkt.id && pkt.id.isNotBlank() }) {
+                pendingImportantPackets.add(pkt)
+                while (pendingImportantPackets.size > 12) {
+                    pendingImportantPackets.removeAt(0)
+                }
+            }
+        }
+    }
+
+    private fun flushBufferedPackets() {
+        val copy = synchronized(pendingImportantPackets) {
+            if (pendingImportantPackets.isEmpty()) return
+            val now = System.currentTimeMillis()
+            val fresh = pendingImportantPackets.filter { (now - it.timestampMs) <= 45_000L }
+            pendingImportantPackets.clear()
+            fresh
+        }
+        copy.forEach { pkt -> outboundChannel.trySend(pkt) }
+    }
+
+    private fun ensureWorkersRunning() {
+        startOutboundWriterLoop()
         val app = DxCarApp.instance ?: return
         val role = app.preferences.config.value.deviceRole
 
         if (role == DeviceRole.AI_BOX_LAUNCHER) {
             bindAiBoxOutboundHooks(app)
-            btJob = scope.launch { runAiBoxBluetoothLoop() }
-            lanJob = scope.launch { runAiBoxLanLoop() }
+            if (btJob?.isActive != true) btJob = scope.launch { runAiBoxBluetoothLoop() }
+            if (lanJob?.isActive != true) lanJob = scope.launch { runAiBoxLanLoop() }
         } else {
-            btJob = scope.launch { runPhoneBluetoothLoop() }
-            lanJob = scope.launch { runPhoneLanLoop() }
+            if (btJob?.isActive != true) btJob = scope.launch { runPhoneBluetoothLoop() }
+            if (lanJob?.isActive != true) lanJob = scope.launch { runPhoneLanLoop() }
         }
 
-        heartbeatJob = scope.launch {
-            while (isActive) {
-                delay(14_000L)
-                if (btWriter != null || lanWriter != null) {
-                    sendPacketInternal(BridgePacket(type = PacketType.PING, id = UUID.randomUUID().toString()))
+        if (heartbeatJob?.isActive != true) {
+            heartbeatJob = scope.launch {
+                while (isActive) {
+                    delay(12_000L)
+                    if (hasOpenTransport()) {
+                        enqueueOutbound(BridgePacket(type = PacketType.PING, id = UUID.randomUUID().toString()))
+                    }
+                    RemoteTouchpadController.hideIfIdle()
+                    _bridgeState.value = _bridgeState.value.copy(
+                        isListenerBound = BoxNotificationListenerService.instance != null
+                    )
                 }
-                _bridgeState.value = _bridgeState.value.copy(
-                    isListenerBound = BoxNotificationListenerService.instance != null
-                )
             }
         }
         updateConnectionSnapshot()
     }
 
+    private fun restartWorkers() {
+        btJob?.cancel()
+        lanJob?.cancel()
+        heartbeatJob?.cancel()
+        closeAllSockets()
+        btJob = null
+        lanJob = null
+        heartbeatJob = null
+        ensureWorkersRunning()
+    }
+
     private fun bindAiBoxOutboundHooks(app: DxCarApp) {
         app.notificationCenter.onReplyDispatch = { item, replyText ->
             if (item.fromPhoneBridge) {
-                sendPacketInternal(
+                enqueueOutbound(
                     BridgePacket(
                         type = PacketType.REPLY_COMMAND,
                         id = UUID.randomUUID().toString(),
@@ -200,7 +270,7 @@ class BluetoothCompanionService : Service() {
         }
         app.notificationCenter.onMarkReadDispatch = { item ->
             if (item.fromPhoneBridge) {
-                sendPacketInternal(
+                enqueueOutbound(
                     BridgePacket(
                         type = PacketType.MARK_READ_COMMAND,
                         id = UUID.randomUUID().toString(),
@@ -214,7 +284,7 @@ class BluetoothCompanionService : Service() {
         app.notificationCenter.onCallActionDispatch = { cmd ->
             val call = app.notificationCenter.activeCall.value
             if (call.fromPhoneBridge) {
-                sendPacketInternal(
+                enqueueOutbound(
                     BridgePacket(
                         type = PacketType.CALL_COMMAND,
                         id = UUID.randomUUID().toString(),
@@ -242,9 +312,7 @@ class BluetoothCompanionService : Service() {
             }
 
             try {
-                appendLog("AI Box 藍牙 SPP 監聽啟動 (Secure + Insecure)")
                 updateConnectionSnapshot()
-
                 val sec = runCatching { adapter.listenUsingRfcommWithServiceRecord(SERVICE_NAME_SEC, BRIDGE_UUID) }.getOrNull()
                 val insec = runCatching { adapter.listenUsingInsecureRfcommWithServiceRecord(SERVICE_NAME, BRIDGE_UUID) }.getOrNull()
                 secureServerSocket = sec
@@ -255,12 +323,11 @@ class BluetoothCompanionService : Service() {
                     continue
                 }
 
-                // Race both Secure and Insecure server sockets cleanly
                 val acceptedJobSec = sec?.let { srv ->
                     scope.launch {
                         runCatching {
                             val client = srv.accept()
-                            if (btSocket == null) {
+                            if (btSocket?.isConnected != true) {
                                 runCatching { insec?.close() }
                                 val name = runCatching { client.remoteDevice?.name }.getOrNull()?.takeIf { it.isNotBlank() } ?: "手機"
                                 handleBtSocketSession(client, name, isAiBox = true)
@@ -274,7 +341,7 @@ class BluetoothCompanionService : Service() {
                     scope.launch {
                         runCatching {
                             val client = srv.accept()
-                            if (btSocket == null) {
+                            if (btSocket?.isConnected != true) {
                                 runCatching { sec?.close() }
                                 val name = runCatching { client.remoteDevice?.name }.getOrNull()?.takeIf { it.isNotBlank() } ?: "手機"
                                 handleBtSocketSession(client, name, isAiBox = true)
@@ -307,48 +374,81 @@ class BluetoothCompanionService : Service() {
             val cfg = app.preferences.config.value
             if (cfg.deviceRole != DeviceRole.PHONE_COMPANION) break
 
-            val targetAddress = cfg.companionTargetDeviceAddress
-            val btLinkAlive = targetAddress.isNotBlank() && isTargetBluetoothConnected(this, targetAddress)
+            if (btSocket?.isConnected == true && btWriter != null) {
+                delay(3_000L)
+                continue
+            }
+
             val manualScanActive = System.currentTimeMillis() < forceOneShotUntilMs
+            val shouldRun = shouldPhoneBridgeRunNow(this)
 
-            // Event-triggered power saving: do NOT spam RFCOMM connect() when car BT is not connected!
-            if (!btLinkAlive && !manualScanActive) {
-                if (lanSocket?.isConnected != true && !isWifiHotspotActive(this)) {
-                    appendLog("未連接車機藍牙或熱點，進入待機省電模式（連上藍牙自動啟動）")
-                    markStandby(this)
-                    stopSelf()
-                    return
-                }
+            // Never shut down service while LAN socket is already connected or car BT/hotspot is active!
+            if (!shouldRun && !manualScanActive && !hasOpenTransport()) {
+                appendLog("未偵測到車機藍牙或熱點連線，進入待機省電（上車自動啟動）")
+                markStandby(this)
+                stopSelf()
+                return
+            }
+
+            if (adapter == null || !adapter.isEnabled || !hasBluetoothConnectPermission()) {
                 updateConnectionSnapshot()
-                delay(10_000L)
+                delay(5_000L)
                 continue
             }
 
-            if (targetAddress.isBlank() || adapter == null || !adapter.isEnabled || !hasBluetoothConnectPermission()) {
-                updateConnectionSnapshot()
-                delay(4_000L)
+            // Build candidate BT devices: explicit target first, plus any currently connected bonded devices!
+            val candidates = LinkedHashMap<String, BluetoothDevice>()
+            if (cfg.companionTargetDeviceAddress.isNotBlank()) {
+                runCatching { adapter.getRemoteDevice(cfg.companionTargetDeviceAddress) }
+                    .getOrNull()
+                    ?.let { dev ->
+                        if (manualScanActive || isDeviceConnectedReflect(dev)) {
+                            candidates[dev.address] = dev
+                        }
+                    }
+            }
+            runCatching {
+                adapter.bondedDevices.orEmpty().forEach { dev ->
+                    if (isDeviceConnectedReflect(dev)) {
+                        candidates.putIfAbsent(dev.address, dev)
+                    }
+                }
+            }
+
+            if (candidates.isEmpty()) {
+                // If already connected over Wi-Fi Hotspot, just sleep quietly without spamming BT!
+                delay(if (lanSocket?.isConnected == true) 12_000L else 5_000L)
                 continue
             }
 
-            try {
-                val device = adapter.getRemoteDevice(targetAddress)
-                val targetName = cfg.companionTargetDeviceName.ifBlank {
-                    runCatching { device.name }.getOrNull() ?: targetAddress
+            var connectedBt = false
+            for ((addr, device) in candidates) {
+                if (!scope.isActive || lanSocket?.isConnected == true && !manualScanActive && addr != cfg.companionTargetDeviceAddress) {
+                    // When Wi-Fi LAN is already solid, only probe non-selected BT devices on manual scan
+                    continue
                 }
-                updateConnectionSnapshot()
-
-                // Try Secure RFCOMM first (much more reliable on Android 12-15 phones), fallback to Insecure
-                val socket = runCatching {
-                    device.createRfcommSocketToServiceRecord(BRIDGE_UUID).also { it.connect() }
-                }.getOrElse {
-                    device.createInsecureRfcommSocketToServiceRecord(BRIDGE_UUID).also { it.connect() }
+                val targetName = if (addr == cfg.companionTargetDeviceAddress && cfg.companionTargetDeviceName.isNotBlank()) {
+                    cfg.companionTargetDeviceName
+                } else {
+                    runCatching { device.name }.getOrNull()?.takeIf { it.isNotBlank() } ?: addr
                 }
+                try {
+                    val socket = runCatching {
+                        device.createRfcommSocketToServiceRecord(BRIDGE_UUID).also { it.connect() }
+                    }.getOrElse {
+                        device.createInsecureRfcommSocketToServiceRecord(BRIDGE_UUID).also { it.connect() }
+                    }
+                    connectedBt = true
+                    handleBtSocketSession(socket, targetName, isAiBox = false)
+                    break
+                } catch (_: Exception) {
+                    closeBtSocketsOnlyClient()
+                }
+            }
 
-                handleBtSocketSession(socket, targetName, isAiBox = false)
-            } catch (_: Exception) {
-                closeBtSockets()
+            if (!connectedBt) {
                 updateConnectionSnapshot()
-                delay(4_500L)
+                delay(if (lanSocket?.isConnected == true) 15_000L else 5_000L)
             }
         }
     }
@@ -358,16 +458,17 @@ class BluetoothCompanionService : Service() {
         btWriter = BufferedWriter(OutputStreamWriter(socket.outputStream, Charsets.UTF_8))
         val reader = BufferedReader(InputStreamReader(socket.inputStream, Charsets.UTF_8))
 
-        appendLog("藍牙通道已連線：$peerName")
+        appendLog("藍牙 SPP 已連線：$peerName")
         updateConnectionSnapshot(peerName)
 
-        sendPacketInternal(
+        enqueueOutbound(
             BridgePacket(
                 type = PacketType.DEVICE_INFO,
                 id = UUID.randomUUID().toString(),
                 deviceName = Build.MODEL
             )
         )
+        if (!isAiBox) flushBufferedPackets()
 
         try {
             while (scope.isActive && socket.isConnected) {
@@ -378,20 +479,24 @@ class BluetoothCompanionService : Service() {
             }
         } catch (_: Exception) {
         } finally {
-            closeBtSockets()
-            appendLog("藍牙通道已斷開")
+            closeBtSocketsOnlyClient()
+            appendLog("藍牙 SPP 通道已結束")
             updateConnectionSnapshot()
         }
     }
 
-    // ==================== CHANNEL B: WI-FI HOTSPOT / LAN AUTO-DISCOVERY TCP BRIDGE ====================
+    // ==================== CHANNEL B: BI-DIRECTIONAL WI-FI HOTSPOT / LAN TCP BRIDGE ====================
 
     private suspend fun runAiBoxLanLoop() {
-        // Responder for UDP discovery broadcasts from Phone
+        // 1. UDP Broadcast responder (:47682) for Phone discovery
         val discoveryJob = scope.launch {
             while (scope.isActive) {
                 try {
-                    val udp = DatagramSocket(LAN_UDP_PORT).apply { broadcast = true }
+                    val udp = DatagramSocket(null).apply {
+                        reuseAddress = true
+                        broadcast = true
+                        bind(InetSocketAddress(LAN_UDP_PORT))
+                    }
                     udpDiscoverySocket = udp
                     val buf = ByteArray(256)
                     while (scope.isActive) {
@@ -411,75 +516,167 @@ class BluetoothCompanionService : Service() {
             }
         }
 
+        // 2. Proactive AI Box -> Phone Hotspot Gateway Reverse Connector (:47683)
+        //    When AI Box connects to Phone's Wi-Fi Hotspot, AI Box's default gateway IS the Phone!
+        val gatewayConnectJob = scope.launch {
+            while (scope.isActive) {
+                if (lanSocket?.isConnected != true) {
+                    val gwIps = resolveWifiGatewayAndBroadcastPeers()
+                    for (ip in gwIps) {
+                        if (!scope.isActive || lanSocket?.isConnected == true) break
+                        val sock = runCatching {
+                            Socket().apply { connect(InetSocketAddress(ip, LAN_PHONE_TCP_PORT), 700) }
+                        }.getOrNull()
+                        if (sock != null) {
+                            scope.launch {
+                                handleLanSocketSession(sock, "手機 ($ip)", isAiBox = true)
+                            }
+                            break
+                        }
+                    }
+                }
+                delay(4_500L)
+            }
+        }
+
+        // 3. Multi-client resilient TCP Server (:47681) — handles each client in a child coroutine
         try {
             while (scope.isActive) {
                 try {
-                    val srv = ServerSocket(LAN_TCP_PORT).apply { reuseAddress = true }
+                    val srv = ServerSocket().apply {
+                        reuseAddress = true
+                        bind(InetSocketAddress(LAN_TCP_PORT))
+                    }
                     tcpServerSocket = srv
-                    appendLog("Wi-Fi 熱點通道監聽中 (:$LAN_TCP_PORT)")
+                    appendLog("Wi-Fi 通道監聽就緒 (:$LAN_TCP_PORT)")
                     while (scope.isActive) {
                         val client = srv.accept()
                         val ip = client.inetAddress?.hostAddress.orEmpty()
-                        handleLanSocketSession(client, "手機 ($ip)", isAiBox = true)
+                        scope.launch {
+                            handleLanSocketSession(client, "手機 ($ip)", isAiBox = true)
+                        }
                     }
                 } catch (_: Exception) {
-                    closeLanSockets()
+                    runCatching { tcpServerSocket?.close() }
+                    tcpServerSocket = null
                     delay(3_000L)
                 }
             }
         } finally {
             discoveryJob.cancel()
+            gatewayConnectJob.cancel()
         }
     }
 
     private suspend fun runPhoneLanLoop() {
-        while (scope.isActive) {
-            if (lanSocket?.isConnected == true) {
-                delay(2_500L)
-                continue
-            }
-
-            val shouldScanLan = shouldPhoneBridgeRunNow(this) || System.currentTimeMillis() < forceOneShotUntilMs
-            if (!shouldScanLan) {
-                delay(6_000L)
-                continue
-            }
-
-            val candidateIps = discoverAiBoxLanIps()
-            var connectedAny = false
-            for (ip in candidateIps) {
-                if (!scope.isActive) break
-                val sock = runCatching {
-                    Socket().apply {
-                        connect(InetSocketAddress(ip, LAN_TCP_PORT), 650)
+        // Also host Phone reverse-accept server (:47683) so AI Box can dial straight into Phone Hotspot IP!
+        val phoneAcceptJob = scope.launch {
+            while (scope.isActive) {
+                try {
+                    val srv = ServerSocket().apply {
+                        reuseAddress = true
+                        bind(InetSocketAddress(LAN_PHONE_TCP_PORT))
                     }
-                }.getOrNull()
-                if (sock != null) {
-                    connectedAny = true
-                    handleLanSocketSession(sock, "AI Box ($ip)", isAiBox = false)
-                    break
+                    tcpServerSocket = srv
+                    while (scope.isActive) {
+                        val client = srv.accept()
+                        val ip = client.inetAddress?.hostAddress.orEmpty()
+                        if (lanSocket?.isConnected != true) {
+                            scope.launch {
+                                handleLanSocketSession(client, "AI Box ($ip)", isAiBox = false)
+                            }
+                        } else {
+                            runCatching { client.close() }
+                        }
+                    }
+                } catch (_: Exception) {
+                    runCatching { tcpServerSocket?.close() }
+                    tcpServerSocket = null
+                    delay(4_000L)
                 }
             }
-            if (!connectedAny) {
-                delay(3_500L)
+        }
+
+        try {
+            while (scope.isActive) {
+                if (lanSocket?.isConnected == true && lanWriter != null) {
+                    delay(2_500L)
+                    continue
+                }
+
+                val shouldScanLan = shouldPhoneBridgeRunNow(this) || System.currentTimeMillis() < forceOneShotUntilMs
+                if (!shouldScanLan) {
+                    delay(5_000L)
+                    continue
+                }
+
+                val candidateIps = discoverAiBoxLanIps()
+                var connectedAny = false
+                for (ip in candidateIps) {
+                    if (!scope.isActive || lanSocket?.isConnected == true) break
+                    val sock = runCatching {
+                        Socket().apply {
+                            connect(InetSocketAddress(ip, LAN_TCP_PORT), 750)
+                        }
+                    }.getOrNull()
+                    if (sock != null) {
+                        connectedAny = true
+                        handleLanSocketSession(sock, "AI Box ($ip)", isAiBox = false)
+                        break
+                    }
+                }
+                if (!connectedAny) {
+                    delay(3_000L)
+                }
+            }
+        } finally {
+            phoneAcceptJob.cancel()
+        }
+    }
+
+    private fun resolveWifiGatewayAndBroadcastPeers(): List<String> {
+        val ips = LinkedHashSet<String>()
+        runCatching {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val linkProps = cm?.getLinkProperties(cm.activeNetwork)
+            linkProps?.routes?.forEach { route ->
+                val gw = route.gateway?.hostAddress
+                if (!gw.isNullOrBlank() && gw.contains(".") && gw != "0.0.0.0") {
+                    ips.add(gw)
+                }
             }
         }
+        @Suppress("DEPRECATION")
+        runCatching {
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            val gwInt = wm?.dhcpInfo?.gateway ?: 0
+            if (gwInt != 0) {
+                val gwStr = "%d.%d.%d.%d".format(
+                    gwInt and 0xff,
+                    (gwInt shr 8) and 0xff,
+                    (gwInt shr 16) and 0xff,
+                    (gwInt shr 24) and 0xff
+                )
+                if (gwStr != "0.0.0.0") ips.add(gwStr)
+            }
+        }
+        return ips.toList()
     }
 
     private fun discoverAiBoxLanIps(): List<String> {
         val found = LinkedHashSet<String>()
 
-        // 1. UDP Broadcast discovery on all local interfaces (covers Hotspot & shared Wi-Fi)
+        // 1. UDP Broadcast discovery on all active interfaces (Hotspot ap0/wlan1/swlan0 + Wi-Fi)
         runCatching {
             DatagramSocket().use { sock ->
                 sock.broadcast = true
-                sock.soTimeout = 700
+                sock.soTimeout = 750
                 val reqBytes = DISCOVER_QUERY.toByteArray(Charsets.UTF_8)
                 val targets = LinkedHashSet<InetAddress>()
                 targets.add(InetAddress.getByName("255.255.255.255"))
 
                 val ifaces = NetworkInterface.getNetworkInterfaces()
-                while (ifaces.hasMoreElements()) {
+                while (ifaces != null && ifaces.hasMoreElements()) {
                     val ni = ifaces.nextElement()
                     if (!ni.isUp || ni.isLoopback) continue
                     ni.interfaceAddresses.forEach { ia ->
@@ -503,7 +700,7 @@ class BluetoothCompanionService : Service() {
                 }
 
                 val buf = ByteArray(256)
-                val deadline = System.currentTimeMillis() + 700L
+                val deadline = System.currentTimeMillis() + 750L
                 while (System.currentTimeMillis() < deadline) {
                     val resp = DatagramPacket(buf, buf.size)
                     sock.receive(resp)
@@ -515,7 +712,10 @@ class BluetoothCompanionService : Service() {
             }
         }
 
-        // 2. Scan /proc/net/arp directly for any client connected to the Phone's Wi-Fi Hotspot!
+        // 2. Also check Wi-Fi Gateway (in case Phone & AI Box share an external router/hotspot)
+        found.addAll(resolveWifiGatewayAndBroadcastPeers())
+
+        // 3. Scan /proc/net/arp where readable
         runCatching {
             val arp = File("/proc/net/arp")
             if (arp.exists() && arp.canRead()) {
@@ -536,21 +736,33 @@ class BluetoothCompanionService : Service() {
     }
 
     private fun handleLanSocketSession(socket: Socket, peerName: String, isAiBox: Boolean) {
-        runCatching { socket.tcpNoDelay = true }
-        lanSocket = socket
-        lanWriter = BufferedWriter(OutputStreamWriter(socket.getOutputStream(), Charsets.UTF_8))
-        val reader = BufferedReader(InputStreamReader(socket.inputStream, Charsets.UTF_8))
+        // Close any stale previous client socket cleanly before promoting the fresh one
+        val oldSock = lanSocket
+        if (oldSock != null && oldSock !== socket) {
+            runCatching { lanWriter?.close() }
+            runCatching { oldSock.close() }
+        }
 
-        appendLog("Wi-Fi 熱點通道已連線：$peerName")
+        runCatching {
+            socket.tcpNoDelay = true
+            socket.keepAlive = true
+        }
+        val writer = BufferedWriter(OutputStreamWriter(socket.getOutputStream(), Charsets.UTF_8))
+        val reader = BufferedReader(InputStreamReader(socket.inputStream, Charsets.UTF_8))
+        lanSocket = socket
+        lanWriter = writer
+
+        appendLog("Wi-Fi 通道已穩定連線：$peerName")
         updateConnectionSnapshot(peerName)
 
-        sendPacketInternal(
+        enqueueOutbound(
             BridgePacket(
                 type = PacketType.DEVICE_INFO,
                 id = UUID.randomUUID().toString(),
                 deviceName = Build.MODEL
             )
         )
+        if (!isAiBox) flushBufferedPackets()
 
         try {
             while (scope.isActive && socket.isConnected && !socket.isClosed) {
@@ -561,13 +773,17 @@ class BluetoothCompanionService : Service() {
             }
         } catch (_: Exception) {
         } finally {
-            closeLanSocketsOnlyClient()
-            appendLog("Wi-Fi 熱點通道已斷開")
-            updateConnectionSnapshot()
+            if (lanSocket === socket) {
+                closeLanSocketsOnlyClient()
+                appendLog("Wi-Fi 通道已斷開")
+                updateConnectionSnapshot()
+            } else {
+                runCatching { socket.close() }
+            }
         }
     }
 
-    // ==================== PACKET DISPATCH & DEDUPLICATION ====================
+    // ==================== PACKET DISPATCH & IO-SAFE SENDING ====================
 
     private fun dispatchIncomingPacket(packet: BridgePacket, isAiBox: Boolean) {
         val app = DxCarApp.instance ?: return
@@ -575,7 +791,8 @@ class BluetoothCompanionService : Service() {
         if (packet.id.isNotBlank() &&
             packet.type != PacketType.PING &&
             packet.type != PacketType.PONG &&
-            packet.type != PacketType.DEVICE_INFO
+            packet.type != PacketType.DEVICE_INFO &&
+            packet.type != PacketType.TOUCHPAD_EVENT
         ) {
             if (!seenPacketIds.add(packet.id)) return
             if (seenPacketIds.size > 120) {
@@ -586,15 +803,23 @@ class BluetoothCompanionService : Service() {
 
         when (packet.type) {
             PacketType.PING -> {
-                sendPacketInternal(BridgePacket(type = PacketType.PONG, id = packet.id))
+                enqueueOutbound(BridgePacket(type = PacketType.PONG, id = packet.id))
             }
-            PacketType.PONG -> Unit
+            PacketType.PONG -> {
+                _bridgeState.value = _bridgeState.value.copy(lastSyncedMs = System.currentTimeMillis())
+            }
             PacketType.DEVICE_INFO -> {
                 if (packet.deviceName.isNotBlank()) {
                     _bridgeState.value = _bridgeState.value.copy(
                         peerName = packet.deviceName,
                         lastSyncedMs = System.currentTimeMillis()
                     )
+                    updateConnectionSnapshot(packet.deviceName)
+                }
+            }
+            PacketType.TOUCHPAD_EVENT -> {
+                if (isAiBox) {
+                    RemoteTouchpadController.onTouchpadPacket(this, packet)
                 }
             }
             PacketType.MESSAGE -> {
@@ -677,11 +902,34 @@ class BluetoothCompanionService : Service() {
         }
     }
 
-    private fun sendPacketInternal(packet: BridgePacket): Boolean {
+    private fun hasOpenTransport(): Boolean {
+        val lanOk = lanSocket?.let { it.isConnected && !it.isClosed } == true && lanWriter != null
+        val btOk = btSocket?.isConnected == true && btWriter != null
+        return lanOk || btOk
+    }
+
+    /**
+     * Thread-safe, non-blocking enqueue callable from ANY thread (Main UI, NotificationListener, BroadcastReceiver).
+     * Never throws NetworkOnMainThreadException!
+     */
+    private fun enqueueOutbound(packet: BridgePacket): Boolean {
+        startOutboundWriterLoop()
+        if (hasOpenTransport()) {
+            outboundChannel.trySend(packet)
+            return true
+        }
+        if (packet.type == PacketType.MESSAGE || packet.type == PacketType.CALL_STATE) {
+            bufferImportantPacket(packet)
+            ensureWorkersRunning()
+        }
+        return false
+    }
+
+    /** Executes strictly inside Dispatchers.IO writer coroutine. */
+    private fun writePacketOnIoThread(packet: BridgePacket): Boolean {
         val encoded = json.encodeToString(packet)
         var sent = false
 
-        // Prefer Wi-Fi LAN TCP if open, also try BT if LAN failed
         lanWriter?.let { w ->
             val ok = runCatching {
                 synchronized(lanWriteLock) {
@@ -691,7 +939,12 @@ class BluetoothCompanionService : Service() {
                 }
                 true
             }.getOrDefault(false)
-            if (ok) sent = true else closeLanSocketsOnlyClient()
+            if (ok) {
+                sent = true
+            } else {
+                closeLanSocketsOnlyClient()
+                updateConnectionSnapshot()
+            }
         }
 
         if (!sent) {
@@ -704,7 +957,12 @@ class BluetoothCompanionService : Service() {
                     }
                     true
                 }.getOrDefault(false)
-                if (ok) sent = true else closeBtSocketsOnlyClient()
+                if (ok) {
+                    sent = true
+                } else {
+                    closeBtSocketsOnlyClient()
+                    updateConnectionSnapshot()
+                }
             }
         }
 
@@ -759,7 +1017,7 @@ class BluetoothCompanionService : Service() {
 
     private fun updateConnectionSnapshot(overridePeer: String = "") {
         val btConnected = btSocket?.isConnected == true && btWriter != null
-        val lanConnected = lanSocket?.isConnected == true && lanWriter != null
+        val lanConnected = lanSocket?.let { it.isConnected && !it.isClosed } == true && lanWriter != null
         val app = DxCarApp.instance
         val role = app?.preferences?.config?.value?.deviceRole ?: DeviceRole.AI_BOX_LAUNCHER
 
@@ -787,7 +1045,7 @@ class BluetoothCompanionService : Service() {
         val notifMsg = when (status) {
             BridgeConnectionStatus.CONNECTED -> "已透過 $transport 連線：$currentPeer"
             BridgeConnectionStatus.LISTENING -> "等待手機藍牙／熱點連線…"
-            BridgeConnectionStatus.STANDBY -> "待機省電中（藍牙連上車機自動啟動）"
+            BridgeConnectionStatus.STANDBY -> "待機省電中（上車連藍牙或熱點自動啟動）"
             else -> "正在連線 AI Box（藍牙／Wi-Fi 熱點）…"
         }
         updateNotification(notifMsg)
@@ -806,7 +1064,7 @@ class BluetoothCompanionService : Service() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "DX-Car Launcher 通知與來電同步橋接",
+            "DX-Car Launcher 通知與觸控同步橋接",
             NotificationManager.IMPORTANCE_LOW
         )
         nm.createNotificationChannel(channel)
@@ -821,7 +1079,7 @@ class BluetoothCompanionService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("DX-Car Launcher 通知同步橋接")
+            .setContentTitle("DX-Car Launcher 雙端橋接")
             .setContentText(text)
             .setContentIntent(pi)
             .setOngoing(true)
@@ -856,6 +1114,7 @@ class BluetoothCompanionService : Service() {
         private const val NOTIF_ID = 2002
         private const val LAN_TCP_PORT = 47681
         private const val LAN_UDP_PORT = 47682
+        private const val LAN_PHONE_TCP_PORT = 47683
         private const val DISCOVER_QUERY = "DXCAR_DISCOVER_V1"
         private const val DISCOVER_REPLY = "DXCAR_BOX_V1"
 
@@ -880,7 +1139,6 @@ class BluetoothCompanionService : Service() {
             }
         }
 
-        /** Manual trigger from Phone UI "立即搜尋重連" button (runs a 15s scan then returns to standby if idle). */
         fun forceReconnect(context: Context) {
             val intent = Intent(context, BluetoothCompanionService::class.java).apply {
                 action = ACTION_FORCE_SCAN
@@ -902,6 +1160,7 @@ class BluetoothCompanionService : Service() {
         }
 
         fun markStandby(context: Context) {
+            if (activeService?.hasOpenTransport() == true) return
             _bridgeState.value = _bridgeState.value.copy(
                 status = BridgeConnectionStatus.STANDBY,
                 transportLabel = "",
@@ -909,9 +1168,25 @@ class BluetoothCompanionService : Service() {
             )
         }
 
+        private fun isDeviceConnectedReflect(device: BluetoothDevice): Boolean {
+            return runCatching {
+                val method = device.javaClass.getMethod("isConnected")
+                (method.invoke(device) as? Boolean) == true
+            }.getOrDefault(false)
+        }
+
         @SuppressLint("MissingPermission")
-        fun isTargetBluetoothConnected(context: Context, targetAddress: String): Boolean {
-            if (targetAddress.isBlank()) return false
+        fun hasAnyCarBluetoothConnection(context: Context, targetAddress: String): Boolean {
+            // 1. Check AudioManager active Bluetooth HFP / A2DP audio route (works even before BT permission or on dual-BT boxes!)
+            runCatching {
+                val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                val btAudio = am?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)?.any { dev ->
+                    dev.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                        dev.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                } == true
+                if (btAudio) return true
+            }
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
                 ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) !=
                 PackageManager.PERMISSION_GRANTED
@@ -922,30 +1197,58 @@ class BluetoothCompanionService : Service() {
             val adapter = btManager.adapter ?: return false
             if (!adapter.isEnabled) return false
 
+            if (targetAddress.isNotBlank()) {
+                val ok = runCatching { isDeviceConnectedReflect(adapter.getRemoteDevice(targetAddress)) }.getOrDefault(false)
+                if (ok) return true
+            }
+
             return runCatching {
-                val device = adapter.getRemoteDevice(targetAddress)
-                val method = device.javaClass.getMethod("isConnected")
-                (method.invoke(device) as? Boolean) == true
+                adapter.bondedDevices.orEmpty().any { isDeviceConnectedReflect(it) }
             }.getOrDefault(false)
         }
 
-        fun isWifiHotspotActive(context: Context): Boolean {
-            val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
-                ?: return false
-            return runCatching {
-                val m = wm.javaClass.getDeclaredMethod("isWifiApEnabled")
-                m.isAccessible = true
-                (m.invoke(wm) as? Boolean) == true
+        /**
+         * Detects Phone Wi-Fi Hotspot OR shared Wi-Fi LAN on Android 9-16 (vivo/Samsung/Pixel/Xiaomi),
+         * bypassing hidden API blocks by inspecting active tethering/Wi-Fi network interfaces!
+         */
+        fun isWifiHotspotOrLanActive(context: Context): Boolean {
+            val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            val apReflect = runCatching {
+                val m = wm?.javaClass?.getDeclaredMethod("isWifiApEnabled")
+                m?.isAccessible = true
+                (m?.invoke(wm) as? Boolean) == true
             }.getOrDefault(false)
+            if (apReflect) return true
+
+            // Inspect live network interfaces for Android Hotspot / Wi-Fi Direct / LAN (ap0, wlan1, swlan0, softap, rndis, wlan0)
+            runCatching {
+                val ifaces = NetworkInterface.getNetworkInterfaces()
+                while (ifaces != null && ifaces.hasMoreElements()) {
+                    val ni = ifaces.nextElement()
+                    if (!ni.isUp || ni.isLoopback) continue
+                    val name = ni.name.lowercase()
+                    val isHotspotOrWifiIface = name.startsWith("ap") ||
+                        name.startsWith("swlan") ||
+                        name.startsWith("softap") ||
+                        name.startsWith("wlan") ||
+                        name.startsWith("rndis") ||
+                        name.contains("p2p")
+                    if (isHotspotOrWifiIface) {
+                        val hasIpv4 = ni.interfaceAddresses.any { it.address is Inet4Address }
+                        if (hasIpv4) return true
+                    }
+                }
+            }
+            return false
         }
 
-        /** Returns true on Phone only when target car BT is connected OR Wi-Fi Hotspot is active (saves battery!). */
         fun shouldPhoneBridgeRunNow(context: Context): Boolean {
             val app = DxCarApp.instance ?: return false
             val cfg = app.preferences.config.value
             if (cfg.deviceRole == DeviceRole.AI_BOX_LAUNCHER) return true
-            return isTargetBluetoothConnected(context, cfg.companionTargetDeviceAddress) ||
-                isWifiHotspotActive(context)
+            if (activeService?.hasOpenTransport() == true) return true
+            return hasAnyCarBluetoothConnection(context, cfg.companionTargetDeviceAddress) ||
+                isWifiHotspotOrLanActive(context)
         }
 
         fun stop(context: Context) {
@@ -967,8 +1270,12 @@ class BluetoothCompanionService : Service() {
         }
 
         fun sendPacketFromPhone(packet: BridgePacket): Boolean {
-            val svc = activeService ?: return false
-            return svc.sendPacketInternal(packet)
+            val svc = activeService
+            if (svc == null) {
+                DxCarApp.instance?.let { startOrReconnect(it) }
+                return false
+            }
+            return svc.enqueueOutbound(packet)
         }
     }
 }

@@ -2,6 +2,7 @@ package com.dxcar.launcher.media
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
@@ -14,7 +15,9 @@ import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.SystemClock
 import android.view.KeyEvent
+import com.dxcar.launcher.DxCarApp
 import com.dxcar.launcher.comms.BoxNotificationListenerService
+import com.dxcar.launcher.data.LauncherPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -35,11 +38,12 @@ data class MediaSessionSummary(
 
 data class ActiveMediaState(
     val hasSession: Boolean = false,
+    val isRememberedLastApp: Boolean = false,
     val packageName: String = "",
     val appName: String = "媒體播放器",
     val appIcon: Bitmap? = null,
     val title: String = "目前沒有播放中的媒體",
-    val artist: String = "開啟 YouTube、KKBOX、Apple Music、網易雲、Spotify 或 VLC 後自動顯示",
+    val artist: String = "開啟音樂 App 後自動記憶，下次可直接點擊 ▶ 繼續播放",
     val album: String = "",
     val albumArt: Bitmap? = null,
     val isPlaying: Boolean = false,
@@ -50,7 +54,10 @@ data class ActiveMediaState(
     val availableSessions: List<MediaSessionSummary> = emptyList()
 )
 
-class MediaControlBridge(private val context: Context) {
+class MediaControlBridge(
+    private val context: Context,
+    private val preferences: LauncherPreferences
+) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -78,6 +85,7 @@ class MediaControlBridge(private val context: Context) {
         }
 
     fun start() {
+        publishSelectedState()
         refreshSessions()
         scope.launch {
             while (isActive) {
@@ -116,12 +124,10 @@ class MediaControlBridge(private val context: Context) {
         selectedController?.unregisterCallback(controllerCallback)
         activeControllers = controllers
 
-        val picked = when {
-            preferredPackage != null ->
-                controllers.firstOrNull { it.packageName == preferredPackage }
-                    ?: pickBestController(controllers)
-            else -> pickBestController(controllers)
-        }
+        val rememberedPkg = preferredPackage ?: preferences.config.value.lastMediaPackage.takeIf { it.isNotBlank() }
+        val picked = controllers.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
+            ?: rememberedPkg?.let { target -> controllers.firstOrNull { it.packageName == target } }
+            ?: pickBestController(controllers)
 
         selectedController = picked
         picked?.registerCallback(controllerCallback)
@@ -147,7 +153,36 @@ class MediaControlBridge(private val context: Context) {
         }.distinctBy { it.packageName }
 
         if (controller == null) {
-            _mediaState.value = ActiveMediaState(availableSessions = summaries)
+            val cfg = preferences.config.value
+            val fallbackPkg = cfg.lastMediaPackage.takeIf { it.isNotBlank() && isPackageInstalled(it) }
+                ?: findBestInstalledMusicApp()
+            if (fallbackPkg != null) {
+                val label = cfg.lastMediaAppName.takeIf { it.isNotBlank() && fallbackPkg == cfg.lastMediaPackage }
+                    ?: resolveAppLabel(fallbackPkg)
+                val icon = resolveAppIcon(fallbackPkg)
+                val savedTitle = if (fallbackPkg == cfg.lastMediaPackage && cfg.lastMediaTitle.isNotBlank()) {
+                    cfg.lastMediaTitle
+                } else {
+                    "點擊 ▶ 繼續播放 $label"
+                }
+                val savedArtist = if (fallbackPkg == cfg.lastMediaPackage && cfg.lastMediaArtist.isNotBlank()) {
+                    "${cfg.lastMediaArtist} · 上次使用 $label"
+                } else {
+                    "上次使用的音樂 App：$label（點 ▶ 直接喚醒續播）"
+                }
+                _mediaState.value = ActiveMediaState(
+                    hasSession = false,
+                    isRememberedLastApp = true,
+                    packageName = fallbackPkg,
+                    appName = label,
+                    appIcon = icon,
+                    title = savedTitle,
+                    artist = savedArtist,
+                    availableSessions = summaries
+                )
+            } else {
+                _mediaState.value = ActiveMediaState(availableSessions = summaries)
+            }
             return
         }
 
@@ -174,8 +209,17 @@ class MediaControlBridge(private val context: Context) {
             pb?.state == PlaybackState.STATE_BUFFERING
         val (canFav, isFav) = detectFavoriteCapability(controller, pkg, meta, pb)
 
+        // Persist the latest active music app & track so cold-boot resume works seamlessly!
+        preferences.recordLastMediaSession(
+            packageName = pkg,
+            appName = appLabel,
+            title = if (title == appLabel) "" else title,
+            artist = if (artist == appLabel) "" else artist
+        )
+
         _mediaState.value = ActiveMediaState(
             hasSession = true,
+            isRememberedLastApp = false,
             packageName = pkg,
             appName = appLabel,
             appIcon = appIcon,
@@ -190,6 +234,25 @@ class MediaControlBridge(private val context: Context) {
             durationMs = duration,
             availableSessions = summaries
         )
+    }
+
+    private fun findBestInstalledMusicApp(): String? {
+        val candidates = listOf(
+            "com.netease.cloudmusic",
+            "com.spotify.music",
+            "com.google.android.apps.youtube.music",
+            "com.skysoft.kkbox.android",
+            "com.apple.android.music",
+            "org.videolan.vlc",
+            "com.google.android.youtube"
+        )
+        return candidates.firstOrNull { isPackageInstalled(it) }
+    }
+
+    private fun isPackageInstalled(pkg: String): Boolean {
+        return runCatching {
+            context.packageManager.getLaunchIntentForPackage(pkg) != null
+        }.getOrDefault(false)
     }
 
     private fun findFavoriteCustomAction(pb: PlaybackState?): PlaybackState.CustomAction? {
@@ -236,20 +299,13 @@ class MediaControlBridge(private val context: Context) {
         return false to false
     }
 
-    /**
-     * Triggers Like / Heart / Favorite on the active music player:
-     * 1. MediaSession CustomAction (Spotify, YT Music, KKBOX, Apple Music, supported NetEase)
-     * 2. Notification Action Button (NetEase Cloud Music & players exposing heart in notification)
-     * 3. Standard MediaSession Rating API (VLC, YouTube, etc.)
-     */
     fun toggleFavoriteOrLike(): Pair<Boolean, String> {
-        val controller = selectedController ?: return false to "目前沒有播放中的媒體"
+        val controller = selectedController ?: return false to "請先點擊 ▶ 開始播放音樂後再收藏"
         val pkg = controller.packageName
         val appLabel = resolveAppLabel(pkg)
         val pb = controller.playbackState
         val meta = controller.metadata
 
-        // 1. CustomAction inside MediaSession
         val customAct = findFavoriteCustomAction(pb)
         if (customAct != null) {
             val ok = runCatching {
@@ -263,7 +319,6 @@ class MediaControlBridge(private val context: Context) {
             }
         }
 
-        // 2. Notification Action (essential for NetEase Cloud Music / QQ Music etc.)
         val listener = BoxNotificationListenerService.instance
         if (listener != null && listener.executeFavoriteNotificationAction(pkg)) {
             val curFav = _mediaState.value.isFavorited
@@ -271,7 +326,6 @@ class MediaControlBridge(private val context: Context) {
             return true to "♥ 已觸發 $appLabel 紅心／喜歡"
         }
 
-        // 3. Standard Rating API
         val ratingType = controller.ratingType
         if (ratingType == Rating.RATING_HEART || ratingType == Rating.RATING_THUMB_UP_DOWN) {
             val userRating = meta?.getRating(MediaMetadata.METADATA_KEY_USER_RATING)
@@ -303,6 +357,9 @@ class MediaControlBridge(private val context: Context) {
         updateControllers(activeControllers)
     }
 
+    /**
+     * Plays/Pauses active media OR wakes up the last used music app automatically when no session is running!
+     */
     fun togglePlayPause() {
         val controller = selectedController
         if (controller != null) {
@@ -312,8 +369,63 @@ class MediaControlBridge(private val context: Context) {
             } else {
                 controller.transportControls.play()
             }
+            return
+        }
+
+        val targetPkg = _mediaState.value.packageName.takeIf { it.isNotBlank() }
+            ?: preferences.config.value.lastMediaPackage.takeIf { it.isNotBlank() }
+            ?: findBestInstalledMusicApp()
+
+        if (targetPkg != null) {
+            wakeAndPlayRememberedApp(targetPkg)
         } else {
             sendMediaKeyFallback(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+        }
+    }
+
+    private fun wakeAndPlayRememberedApp(targetPkg: String) {
+        scope.launch {
+            // 1. Dispatch targeted MediaButton PLAY broadcast directly to the remembered music app
+            dispatchTargetedMediaButton(targetPkg, KeyEvent.KEYCODE_MEDIA_PLAY)
+            sendMediaKeyFallback(KeyEvent.KEYCODE_MEDIA_PLAY)
+
+            delay(650L)
+            refreshSessions()
+            val wokenController = selectedController
+            if (wokenController != null) {
+                if (wokenController.playbackState?.state != PlaybackState.STATE_PLAYING) {
+                    wokenController.transportControls.play()
+                }
+                return@launch
+            }
+
+            // 2. Cold-start the remembered music app & trigger play once its session binds!
+            DxCarApp.instance?.installedAppsRepository?.launchAppFullscreen(targetPkg)
+            delay(1_300L)
+            refreshSessions()
+            val afterLaunch = selectedController
+            if (afterLaunch != null) {
+                afterLaunch.transportControls.play()
+            } else {
+                dispatchTargetedMediaButton(targetPkg, KeyEvent.KEYCODE_MEDIA_PLAY)
+                sendMediaKeyFallback(KeyEvent.KEYCODE_MEDIA_PLAY)
+            }
+        }
+    }
+
+    private fun dispatchTargetedMediaButton(pkg: String, keyCode: Int) {
+        runCatching {
+            val now = SystemClock.uptimeMillis()
+            val down = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+                setPackage(pkg)
+                putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0))
+            }
+            val up = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+                setPackage(pkg)
+                putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(now, now, KeyEvent.ACTION_UP, keyCode, 0))
+            }
+            context.sendBroadcast(down)
+            context.sendBroadcast(up)
         }
     }
 

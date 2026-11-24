@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -14,7 +15,9 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import android.view.Display
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.dxcar.launcher.accessibility.DxCarAccessibilityService
 import com.dxcar.launcher.data.SplitLaunchEngine
@@ -44,7 +47,8 @@ data class InstalledAppInfo(
     val activityName: String = "",
     val label: String,
     val icon: Bitmap,
-    val category: AppCategory
+    val category: AppCategory,
+    val isSystemApp: Boolean = false
 )
 
 data class HomeLauncherInfo(
@@ -108,12 +112,16 @@ class InstalledAppsRepository(private val context: Context) {
                 val label = info.loadLabel(pm).toString().takeIf { it.isNotBlank() } ?: pkg
                 val drawable = runCatching { info.loadIcon(pm) }.getOrNull()
                 val bitmap = drawableToBitmap(drawable, 128)
+                val appFlags = ai.applicationInfo?.flags ?: 0
+                val sys = (appFlags and ApplicationInfo.FLAG_SYSTEM) != 0 &&
+                    (appFlags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0
                 InstalledAppInfo(
                     packageName = pkg,
                     activityName = act,
                     label = label,
                     icon = bitmap,
-                    category = classifyCategory(pkg, label)
+                    category = classifyCategory(pkg, label),
+                    isSystemApp = sys
                 )
             }.sortedBy { it.label.lowercase() }
 
@@ -145,7 +153,6 @@ class InstalledAppsRepository(private val context: Context) {
             val ai = info.activityInfo ?: return@mapNotNull null
             val pkg = ai.packageName ?: return@mapNotNull null
             val act = ai.name ?: return@mapNotNull null
-            // Filter out Android's internal FallbackHome / ResolverActivity placeholders
             if (pkg == "android" || act.contains("ResolverActivity") || act.contains("FallbackHome")) {
                 return@mapNotNull null
             }
@@ -220,22 +227,20 @@ class InstalledAppsRepository(private val context: Context) {
         com.dxcar.launcher.DxCarApp.instance?.preferences?.recordRecentDockPackage(packageName)
     }
 
-    /**
-     * Launches an app full-screen on the primary car display (Display.DEFAULT_DISPLAY = 0).
-     * Explicitly forces Display 0 & Fullscreen windowing mode so apps previously trapped inside
-     * an AI Box stock launcher's VirtualDisplay / ActivityView (like Google Maps!) are cleanly
-     * pulled back onto the main car display instead of silently resuming on a hidden display.
-     */
-    fun launchAppFullscreen(packageName: String): Boolean {
+    private fun buildLauncherIntent(packageName: String): Intent? {
         val knownActivity = findApp(packageName)?.activityName.orEmpty()
-        val intent = if (knownActivity.isNotBlank()) {
+        return if (knownActivity.isNotBlank()) {
             Intent(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_LAUNCHER)
                 component = ComponentName(packageName, knownActivity)
             }
         } else {
             pm.getLaunchIntentForPackage(packageName)
-        } ?: return false
+        }
+    }
+
+    fun launchAppFullscreen(packageName: String, forceFullscreenWindowMode: Boolean = true): Boolean {
+        val intent = buildLauncherIntent(packageName) ?: return false
 
         intent.addFlags(
             Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -243,19 +248,20 @@ class InstalledAppsRepository(private val context: Context) {
                 Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
         )
 
-        // Special rescue for Google Maps if trapped inside AI Box stock launcher's hidden VirtualDisplay
         if (packageName == "com.google.android.apps.maps") {
             intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
 
         val options = ActivityOptions.makeBasic().apply {
             launchDisplayId = Display.DEFAULT_DISPLAY
-            runCatching {
-                val method = ActivityOptions::class.java.getMethod(
-                    "setLaunchWindowingMode",
-                    Int::class.javaPrimitiveType
-                )
-                method.invoke(this, 1) // WINDOWING_MODE_FULLSCREEN
+            if (forceFullscreenWindowMode) {
+                runCatching {
+                    val method = ActivityOptions::class.java.getMethod(
+                        "setLaunchWindowingMode",
+                        Int::class.javaPrimitiveType
+                    )
+                    method.invoke(this, 1) // WINDOWING_MODE_FULLSCREEN
+                }
             }
         }
 
@@ -277,11 +283,6 @@ class InstalledAppsRepository(private val context: Context) {
         return ok
     }
 
-    /**
-     * Option 2 (Optional Freeform Avoid-Dock Launch) vs Standard Fullscreen Launch:
-     * When [avoidDockFreeform] is enabled, computes the exact screen bounds avoiding the Dock
-     * area and launches the target app into those Freeform bounds.
-     */
     fun launchAppSmart(
         packageName: String,
         avoidDockFreeform: Boolean,
@@ -300,35 +301,11 @@ class InstalledAppsRepository(private val context: Context) {
         return when (spec.dockPlacement) {
             ResolvedDockPlacement.LEFT -> Rect(dockPx, 0, metrics.widthPx, metrics.heightPx)
             ResolvedDockPlacement.RIGHT -> Rect(0, 0, (metrics.widthPx - dockPx).coerceAtLeast(240), metrics.heightPx)
+            ResolvedDockPlacement.TOP -> Rect(0, dockPx, metrics.widthPx, metrics.heightPx)
             ResolvedDockPlacement.BOTTOM -> Rect(0, 0, metrics.widthPx, (metrics.heightPx - dockPx).coerceAtLeast(240))
         }
     }
 
-    /**
-     * Attempts to launch an app into Freeform window bounds (supported on many AI Box ROMs
-     * when freeform multi-window is enabled) with seamless fallback to full-screen launch.
-     */
-    fun launchAppInBoundsOrFullscreen(packageName: String, bounds: Rect?): Boolean {
-        val intent = pm.getLaunchIntentForPackage(packageName) ?: return false
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return runCatching {
-            if (bounds != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                val options = ActivityOptions.makeBasic()
-                options.launchBounds = bounds
-                context.startActivity(intent, options.toBundle())
-            } else {
-                context.startActivity(intent)
-            }
-            recordRecent(packageName)
-            true
-        }.getOrElse {
-            launchAppFullscreen(packageName)
-        }
-    }
-
-    /**
-     * Launches real Google Maps directly into turn-by-turn navigation or search.
-     */
     fun launchGoogleMapsNavigation(destinationQuery: String? = null): Boolean {
         val uri = if (destinationQuery.isNullOrBlank()) {
             Uri.parse("geo:0,0?q=")
@@ -358,48 +335,9 @@ class InstalledAppsRepository(private val context: Context) {
         return if (ok) true else launchAppFullscreen("com.google.android.apps.maps")
     }
 
-    /**
-     * Launches real Google Maps into the adjacent native Android Split-Screen pane.
-     */
-    fun launchGoogleMapsAdjacent(): Boolean {
-        val pkg = findBestGoogleMapsPackage() ?: "com.google.android.apps.maps"
-        val intent = pm.getLaunchIntentForPackage(pkg)?.apply {
-            addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT or
-                    Intent.FLAG_ACTIVITY_MULTIPLE_TASK
-            )
-        } ?: return false
-        return runCatching {
-            context.startActivity(intent)
-            recordRecent(pkg)
-            true
-        }.getOrDefault(false)
-    }
-
-    /**
-     * Attempts to launch real Google Maps in a Freeform window pinned directly inside
-     * the exact pixel bounds of the left Map card (works on Freeform-enabled AI Box ROMs).
-     */
     fun launchGoogleMapsFreeform(bounds: Rect): Boolean {
         val pkg = findBestGoogleMapsPackage() ?: "com.google.android.apps.maps"
-        val intent = pm.getLaunchIntentForPackage(pkg)?.apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
-        } ?: return false
-        return runCatching {
-            val options = ActivityOptions.makeBasic()
-            options.launchBounds = bounds
-            // Try hidden WindowConfiguration.WINDOWING_MODE_FREEFORM (5) supported on many AI Boxes
-            runCatching {
-                val method = ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
-                method.invoke(options, 5)
-            }
-            context.startActivity(intent, options.toBundle())
-            recordRecent(pkg)
-            true
-        }.getOrElse {
-            launchAppFullscreen(pkg)
-        }
+        return launchPackageFreeform(pkg, bounds)
     }
 
     fun launchDialer(): Boolean {
@@ -413,8 +351,14 @@ class InstalledAppsRepository(private val context: Context) {
     }
 
     /**
-     * Launches a saved Dual-App Split-Screen Shortcut using either Native Split-Screen
-     * (via Accessibility + FLAG_ACTIVITY_LAUNCH_ADJACENT) or Freeform Exact-Ratio bounds (3:7..7:3).
+     * Multi-Stage Self-Verifying AOSP Draggable Split-Screen Launcher:
+     * - Stage 1: Attempts direct AOSP WINDOWING_MODE_SPLIT_SCREEN_PRIMARY (3) + SECONDARY (4)
+     *   (instant draggable divider on AI Box ROMs that allow unprivileged split-stage launch).
+     * - Stage 2: Launches leftPackage with unlocked windowing mode (UNDEFINED = 0), waits until
+     *   Accessibility confirms leftPackage owns foreground window focus (not CATEGORY_HOME!),
+     *   then triggers GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN (with automatic AOSP Recents Split-Screen
+     *   menu click fallback for Android 12L/13/14 WMShell), and finally launches rightPackage into
+     *   the adjacent secondary stage!
      */
     fun launchSplitShortcut(
         shortcut: SplitScreenShortcut,
@@ -422,37 +366,118 @@ class InstalledAppsRepository(private val context: Context) {
         screenHeightPx: Int,
         dockOffsetLeftPx: Int = 0,
         dockOffsetRightPx: Int = 0,
+        dockOffsetTopPx: Int = 0,
         dockOffsetBottomPx: Int = 0
     ) {
         scope.launch(Dispatchers.Main) {
             if (shortcut.engine == SplitLaunchEngine.FREEFORM_EXACT_RATIO) {
                 val availW = (screenWidthPx - dockOffsetLeftPx - dockOffsetRightPx).coerceAtLeast(400)
-                val availH = (screenHeightPx - dockOffsetBottomPx).coerceAtLeast(300)
+                val availH = (screenHeightPx - dockOffsetTopPx - dockOffsetBottomPx).coerceAtLeast(300)
                 val splitW = (availW * shortcut.ratio.leftWeight).toInt()
                     .coerceIn(200, (availW - 200).coerceAtLeast(200))
                 val leftX = dockOffsetLeftPx
                 val rightX = leftX + splitW
-                val leftRect = Rect(leftX, 0, rightX, availH)
-                val rightRect = Rect(rightX, 0, leftX + availW, availH)
+                val leftRect = Rect(leftX, dockOffsetTopPx, rightX, dockOffsetTopPx + availH)
+                val rightRect = Rect(rightX, dockOffsetTopPx, leftX + availW, dockOffsetTopPx + availH)
                 launchPackageFreeform(shortcut.leftPackage, leftRect)
-                delay(320L)
+                delay(360L)
                 launchPackageFreeform(shortcut.rightPackage, rightRect)
-            } else {
-                launchAppFullscreen(shortcut.leftPackage)
-                delay(380L)
-                val acc = DxCarAccessibilityService.instance
-                if (acc != null) {
-                    acc.toggleSplitScreen()
-                    delay(480L)
-                }
-                launchPackageAdjacent(shortcut.rightPackage)
+                recordRecent(shortcut.leftPackage)
+                return@launch
             }
-            recordRecent(shortcut.leftPackage)
+
+            launchAospDraggableSplitPair(shortcut.leftPackage, shortcut.rightPackage)
         }
     }
 
+    suspend fun launchAospDraggableSplitPair(leftPackage: String, rightPackage: String) {
+        val acc = DxCarAccessibilityService.instance
+
+        // Stage 1: Try direct AOSP WINDOWING_MODE_SPLIT_SCREEN_PRIMARY (3)
+        val stage1PrimaryStarted = tryLaunchInAospSplitStage(leftPackage, primaryStage = true)
+        if (stage1PrimaryStarted) {
+            delay(480L)
+            if (acc?.isSystemInSplitScreenNow() == true) {
+                tryLaunchInAospSplitStage(rightPackage, primaryStage = false)
+                recordRecent(leftPackage)
+                recordRecent(rightPackage)
+                return
+            }
+        }
+
+        // Stage 2: Standard unlocked launch (no WINDOWING_MODE_FULLSCREEN pin!) + Accessibility Split
+        if (acc == null) {
+            Toast.makeText(
+                context,
+                "請先點設定最上方「權限設定」開啟【無障礙服務】，即可啟用 AOSP 原生可拖動分割視窗！",
+                Toast.LENGTH_LONG
+            ).show()
+            launchAppFullscreen(leftPackage, forceFullscreenWindowMode = false)
+            delay(450L)
+            launchPackageAdjacent(rightPackage)
+            return
+        }
+
+        if (DxCarAccessibilityService.foregroundPackage.value != leftPackage) {
+            launchAppFullscreen(leftPackage, forceFullscreenWindowMode = false)
+        }
+
+        // Wait until leftPackage genuinely becomes the foreground window (never split CATEGORY_HOME!)
+        val deadline = System.currentTimeMillis() + 2_000L
+        while (System.currentTimeMillis() < deadline) {
+            if (DxCarAccessibilityService.foregroundPackage.value == leftPackage) break
+            delay(80L)
+        }
+        delay(280L)
+
+        // Trigger AOSP Split-Screen (GlobalAction first, then AOSP Recents Split-Screen button fallback)
+        acc.enterAospSplitScreenFromCurrentApp()
+        delay(380L)
+
+        // Fill secondary stage with rightPackage
+        val rightLaunched = tryLaunchInAospSplitStage(rightPackage, primaryStage = false) ||
+            launchPackageAdjacent(rightPackage)
+        if (!rightLaunched) {
+            launchAppFullscreen(rightPackage, forceFullscreenWindowMode = false)
+        }
+        recordRecent(leftPackage)
+        recordRecent(rightPackage)
+    }
+
+    private fun tryLaunchInAospSplitStage(packageName: String, primaryStage: Boolean): Boolean {
+        val intent = buildLauncherIntent(packageName)?.apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+            if (!primaryStage) {
+                addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
+            }
+        } ?: return false
+
+        return runCatching {
+            val options = ActivityOptions.makeBasic().apply {
+                launchDisplayId = Display.DEFAULT_DISPLAY
+                val setWinMode = ActivityOptions::class.java.getMethod(
+                    "setLaunchWindowingMode",
+                    Int::class.javaPrimitiveType
+                )
+                // AOSP WindowConfiguration: 3 = SPLIT_SCREEN_PRIMARY, 4 = SPLIT_SCREEN_SECONDARY
+                setWinMode.invoke(this, if (primaryStage) 3 else 4)
+                if (primaryStage) {
+                    runCatching {
+                        val setCreateMode = ActivityOptions::class.java.getMethod(
+                            "setSplitScreenCreateMode",
+                            Int::class.javaPrimitiveType
+                        )
+                        setCreateMode.invoke(this, 0) // SPLIT_SCREEN_CREATE_MODE_TOP_OR_LEFT
+                    }
+                }
+            }
+            context.startActivity(intent, options.toBundle())
+            true
+        }.getOrDefault(false)
+    }
+
     fun launchPackageAdjacent(packageName: String): Boolean {
-        val intent = pm.getLaunchIntentForPackage(packageName)?.apply {
+        val intent = buildLauncherIntent(packageName)?.apply {
             addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or
                     Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT or
@@ -476,15 +501,7 @@ class InstalledAppsRepository(private val context: Context) {
     }
 
     fun launchPackageFreeform(packageName: String, bounds: Rect): Boolean {
-        val knownActivity = findApp(packageName)?.activityName.orEmpty()
-        val intent = if (knownActivity.isNotBlank()) {
-            Intent(Intent.ACTION_MAIN).apply {
-                addCategory(Intent.CATEGORY_LAUNCHER)
-                component = ComponentName(packageName, knownActivity)
-            }
-        } else {
-            pm.getLaunchIntentForPackage(packageName)
-        } ?: return false
+        val intent = buildLauncherIntent(packageName) ?: return false
         intent.addFlags(
             Intent.FLAG_ACTIVITY_NEW_TASK or
                 Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
@@ -495,7 +512,10 @@ class InstalledAppsRepository(private val context: Context) {
                 launchDisplayId = Display.DEFAULT_DISPLAY
                 launchBounds = bounds
                 runCatching {
-                    val method = ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
+                    val method = ActivityOptions::class.java.getMethod(
+                        "setLaunchWindowingMode",
+                        Int::class.javaPrimitiveType
+                    )
                     method.invoke(this, 5) // WINDOWING_MODE_FREEFORM
                 }
             }
@@ -507,14 +527,37 @@ class InstalledAppsRepository(private val context: Context) {
         }
     }
 
+    /**
+     * Triggers Android system PackageInstaller uninstall prompt (supported on API 28+ via REQUEST_DELETE_PACKAGES).
+     */
+    @Suppress("DEPRECATION")
     fun requestUninstallApp(packageName: String): Boolean {
-        val intent = Intent(Intent.ACTION_DELETE, Uri.parse("package:$packageName")).apply {
+        val pkgUri = Uri.parse("package:$packageName")
+        val uninstallIntent = Intent(Intent.ACTION_UNINSTALL_PACKAGE, pkgUri).apply {
+            putExtra(Intent.EXTRA_RETURN_RESULT, false)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val startedPrimary = runCatching {
+            context.startActivity(uninstallIntent)
+            true
+        }.getOrDefault(false)
+        if (startedPrimary) return true
+
+        val deleteIntent = Intent(Intent.ACTION_DELETE, pkgUri).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         return runCatching {
-            context.startActivity(intent)
+            context.startActivity(deleteIntent)
             true
         }.getOrDefault(false)
+    }
+
+    fun openPackageDetails(packageName: String) {
+        val intent = Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:$packageName")
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(intent) }
     }
 
     private fun classifyCategory(pkg: String, label: String): AppCategory {
@@ -523,7 +566,7 @@ class InstalledAppsRepository(private val context: Context) {
             listOf("maps", "waze", "navi", "gps", "papago", "polstar", "gaode", "autonavi", "tomtom")
                 .any { lower.contains(it) } -> AppCategory.NAVIGATION
 
-            listOf("youtube", "spotify", "music", "kkbox", "netflix", "disney", "video", "player", "podcast", "radio", "mixerbox", "bilibili", "twitch", "aayt")
+            listOf("youtube", "spotify", "music", "kkbox", "netflix", "disney", "video", "player", "podcast", "radio", "mixerbox", "bilibili", "twitch", "aayt", "netease", "cloudmusic", "vlc")
                 .any { lower.contains(it) } -> AppCategory.MEDIA
 
             listOf("line", "whatsapp", "telegram", "messenger", "orca", "dialer", "phone", "contacts", "messaging", "wechat", "discord")

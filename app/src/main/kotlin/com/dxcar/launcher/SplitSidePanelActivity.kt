@@ -93,16 +93,34 @@ class SplitSidePanelActivity : ComponentActivity() {
 
             var splitTriggered by remember { mutableStateOf(false) }
 
-            // Automatically enter Android Native Split-Screen & open selected Navigation App adjacent!
+            // Automatically enter AOSP Draggable Split-Screen (Nav on Left, Media Side-Panel on Right!)
             LaunchedEffect(autoSplit, accConnected, targetNavPkg) {
                 if (autoSplit && !splitTriggered && !isInMultiWindowMode) {
                     splitTriggered = true
+                    delay(320L)
                     val acc = DxCarAccessibilityService.instance
                     if (acc != null) {
+                        // Put Navigation on Left Primary Stage and SplitSidePanelActivity on Right Secondary Stage!
+                        app.installedAppsRepository.launchAppFullscreen(targetNavPkg, forceFullscreenWindowMode = false)
+                        val deadline = System.currentTimeMillis() + 1_800L
+                        while (System.currentTimeMillis() < deadline) {
+                            if (DxCarAccessibilityService.foregroundPackage.value == targetNavPkg) break
+                            delay(80L)
+                        }
                         delay(260L)
-                        acc.toggleSplitScreen()
-                        delay(520L)
-                        app.installedAppsRepository.launchPackageAdjacent(targetNavPkg)
+                        acc.enterAospSplitScreenFromCurrentApp()
+                        delay(380L)
+                        startActivity(
+                            Intent(this@SplitSidePanelActivity, SplitSidePanelActivity::class.java).apply {
+                                putExtra(EXTRA_AUTO_LAUNCH_MAPS, false)
+                                putExtra(EXTRA_NAV_PACKAGE, targetNavPkg)
+                                addFlags(
+                                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                                        Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT or
+                                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                                )
+                            }
+                        )
                     }
                 }
             }

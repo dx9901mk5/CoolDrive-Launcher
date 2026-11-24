@@ -110,6 +110,7 @@ class MainActivity : ComponentActivity() {
         app.mediaControlBridge.refreshSessions()
         app.installedAppsRepository.refreshHomeLaunchers()
         PermissionHelper.requestNotificationListenerRebind(this)
+        applyPreferredRefreshRate(app.preferences.config.value.prefer60FpsEnabled)
         if (app.preferences.config.value.companionAutoConnect) {
             if (BluetoothCompanionService.shouldPhoneBridgeRunNow(this)) {
                 BluetoothCompanionService.startOrReconnect(this)
@@ -174,6 +175,26 @@ class MainActivity : ComponentActivity() {
             putExtra(RecognizerIntent.EXTRA_PROMPT, "請說出要回覆給 ${target.sender} 的內容…")
         }
         runCatching { voiceReplyLauncher.launch(intent) }
+    }
+
+    private fun applyPreferredRefreshRate(prefer60Fps: Boolean) {
+        runCatching {
+            val lp = window.attributes
+            if (prefer60Fps) {
+                @Suppress("DEPRECATION")
+                val modes = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display else windowManager.defaultDisplay)
+                    ?.supportedModes.orEmpty()
+                val best60Plus = modes.filter { it.refreshRate >= 59.5f }.maxByOrNull { it.refreshRate }
+                if (best60Plus != null) {
+                    lp.preferredDisplayModeId = best60Plus.modeId
+                }
+                lp.preferredRefreshRate = 60f
+            } else {
+                lp.preferredDisplayModeId = 0
+                lp.preferredRefreshRate = 0f
+            }
+            window.attributes = lp
+        }
     }
 
     private fun hideSystemBarsForCar() {

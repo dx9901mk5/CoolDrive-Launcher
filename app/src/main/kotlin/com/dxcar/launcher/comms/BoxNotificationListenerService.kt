@@ -39,6 +39,17 @@ class BoxNotificationListenerService : NotificationListenerService() {
         instance = this
         BluetoothCompanionService.syncListenerBoundState(true)
         DxCarApp.instance?.mediaControlBridge?.refreshSessions()
+        runCatching {
+            activeNotifications?.forEach { sbn ->
+                val pkg = sbn.packageName ?: return@forEach
+                val ex = sbn.notification?.extras ?: Bundle.EMPTY
+                val t = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+                val tx = ex.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+                    ?: ex.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+                val sub = ex.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty()
+                DxCarApp.instance?.weatherRepository?.tryIngestNotification(pkg, t, tx, sub)
+            }
+        }
     }
 
     override fun onListenerDisconnected() {
@@ -76,6 +87,10 @@ class BoxNotificationListenerService : NotificationListenerService() {
         val text = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
             ?: ""
+        val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty()
+
+        // Feed Google App / System Weather notifications to the Media-Top Weather Widget!
+        app.weatherRepository.tryIngestNotification(pkg, title, text, subText)
 
         if (title.isBlank() && text.isBlank()) return
 
@@ -162,8 +177,13 @@ class BoxNotificationListenerService : NotificationListenerService() {
         }
 
         if (!cfg.companionSyncAllApps && !cfg.companionAllowedPackages.contains(pkg)) return
-        // Skip noisy OS background status shells when syncing all apps
-        if (cfg.companionSyncAllApps && (pkg == "android" || pkg == "com.android.systemui")) return
+        // Skip noisy OS & Android Auto background status shells when syncing all apps
+        if (cfg.companionSyncAllApps && (
+                pkg == "android" ||
+                    pkg == "com.android.systemui" ||
+                    pkg == "com.google.android.projection.gearhead"
+                )
+        ) return
 
         val ok = BluetoothCompanionService.sendPacketFromPhone(
             BridgePacket(

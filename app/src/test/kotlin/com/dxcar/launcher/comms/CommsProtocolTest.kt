@@ -45,4 +45,26 @@ class CommsProtocolTest {
         assertEquals(PacketType.CALL_COMMAND, decoded.type)
         assertEquals(CallActionCommand.ANSWER, decoded.callCommand)
     }
+
+    @Test
+    fun `touchpad move and pointer speed settings packets round trip cleanly`() {
+        val movePkt = BridgePacket(
+            type = PacketType.TOUCHPAD_EVENT,
+            touchAction = TouchpadAction.MOVE,
+            touchDx = 18.5f,
+            touchDy = -9.25f
+        )
+        val decodedMove = json.decodeFromString<BridgePacket>(json.encodeToString(movePkt))
+        assertEquals(PacketType.TOUCHPAD_EVENT, decodedMove.type)
+        assertEquals(TouchpadAction.MOVE, decodedMove.touchAction)
+        assertEquals(18.5f, decodedMove.touchDx, 0.001f)
+        assertEquals(-9.25f, decodedMove.touchDy, 0.001f)
+
+        val settingsPkt = BridgePacket(
+            type = PacketType.TOUCHPAD_EVENT,
+            touchAction = TouchpadAction.OPEN_POINTER_SPEED_SETTINGS
+        )
+        val decodedSettings = json.decodeFromString<BridgePacket>(json.encodeToString(settingsPkt))
+        assertEquals(TouchpadAction.OPEN_POINTER_SPEED_SETTINGS, decodedSettings.touchAction)
+    }
 }

@@ -148,7 +148,7 @@ fun SplitShortcutCreatorDialog(
     val freeformSupported = remember { PermissionHelper.isFreeformSupported(context) }
 
     var selectedRatio by remember { mutableStateOf(SplitRatioPreset.R_7_3) }
-    var selectedEngine by remember { mutableStateOf(SplitLaunchEngine.FREEFORM_EXACT_RATIO) }
+    var selectedEngine by remember { mutableStateOf(SplitLaunchEngine.NATIVE_SPLIT_SCREEN) }
     var leftApp by remember { mutableStateOf<InstalledAppInfo?>(null) }
     var rightApp by remember { mutableStateOf<InstalledAppInfo?>(null) }
     var pickingSide by remember { mutableStateOf<String?>(null) }

@@ -457,6 +457,94 @@ class SystemStatusMonitor(private val context: Context) {
             launchFirstWorking(context, intents)
         }
 
+        /**
+         * Opens the AI Box / Android System Pointer Speed & Mouse Sensitivity settings page
+         * (triggered remotely from the Smartphone Touchpad button so it pops up on the Car screen!).
+         */
+        fun openPointerSpeedSettings(context: Context) {
+            val intents = listOf(
+                Intent().setClassName(
+                    "com.android.settings",
+                    "com.android.settings.Settings\$InputMethodAndLanguageSettingsActivity"
+                ),
+                Intent("android.settings.HARD_KEYBOARD_SETTINGS"),
+                Intent(Settings.ACTION_INPUT_METHOD_SETTINGS),
+                Intent(Settings.ACTION_SETTINGS)
+            )
+            launchFirstWorking(context, intents)
+        }
+
+        /**
+         * Opens the AI Box vendor / factory settings page (for 60fps high-frame-rate switch
+         * OR disabling the stock AI Box floating assistive ball / dock), with graceful fallback
+         * to Android Display Settings / System Settings.
+         */
+        fun openAiBoxVendorSettings(context: Context, preferDisplayFor60Fps: Boolean = false): Boolean {
+            val pm = context.packageManager
+            val vendorCandidates = listOf(
+                "com.carletter.car",
+                "com.autochips.settings",
+                "com.ts.MainUI",
+                "com.szchoiceway.settings",
+                "com.ottocast.settings",
+                "com.suding.speedplay.settings",
+                "com.zjinnova.zlink",
+                "com.baony.avm",
+                "com.anker.car"
+            )
+            for (pkg in vendorCandidates) {
+                val launch = runCatching { pm.getLaunchIntentForPackage(pkg) }.getOrNull()
+                if (launch != null) {
+                    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    if (runCatching { context.startActivity(launch); true }.getOrDefault(false)) {
+                        return true
+                    }
+                }
+            }
+
+            // Scan launcher activities for vendor CarBox / Factory / Float / Assistive settings apps
+            val mainIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            val keywords = if (preferDisplayFor60Fps) {
+                listOf("車機設定", "工廠", "盒子設定", "顯示", "boxsetting", "carsetting", "factory")
+            } else {
+                listOf("懸浮", "輔助觸控", "小白點", "車機設定", "盒子設定", "assistive", "floatball", "touch", "carsetting", "boxsetting")
+            }
+            val matched = runCatching {
+                pm.queryIntentActivities(mainIntent, 0).firstOrNull { info ->
+                    val pkg = info.activityInfo?.packageName.orEmpty().lowercase()
+                    val label = info.loadLabel(pm)?.toString().orEmpty().lowercase()
+                    pkg != context.packageName && pkg != "com.android.settings" &&
+                        keywords.any { kw -> pkg.contains(kw) || label.contains(kw) }
+                }
+            }.getOrNull()
+
+            if (matched?.activityInfo != null) {
+                val intent = Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_LAUNCHER)
+                    setClassName(matched.activityInfo.packageName, matched.activityInfo.name)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                if (runCatching { context.startActivity(intent); true }.getOrDefault(false)) {
+                    return true
+                }
+            }
+
+            val fallbacks = if (preferDisplayFor60Fps) {
+                listOf(
+                    Intent(Settings.ACTION_DISPLAY_SETTINGS),
+                    Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS),
+                    Intent(Settings.ACTION_SETTINGS)
+                )
+            } else {
+                listOf(
+                    Intent(Settings.ACTION_HOME_SETTINGS),
+                    Intent(Settings.ACTION_SETTINGS)
+                )
+            }
+            launchFirstWorking(context, fallbacks)
+            return false
+        }
+
         private fun launchFirstWorking(context: Context, intents: List<Intent>) {
             for (intent in intents) {
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

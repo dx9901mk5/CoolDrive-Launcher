@@ -9,9 +9,22 @@ enum class PacketType {
     REPLY_COMMAND,
     MARK_READ_COMMAND,
     CALL_COMMAND,
+    TOUCHPAD_EVENT,
     DEVICE_INFO,
     PING,
     PONG
+}
+
+@Serializable
+enum class TouchpadAction {
+    MOVE,
+    CLICK,
+    LONG_CLICK,
+    SCROLL_UP,
+    SCROLL_DOWN,
+    BACK,
+    HOME,
+    OPEN_POINTER_SPEED_SETTINGS
 }
 
 @Serializable
@@ -39,6 +52,9 @@ data class BridgePacket(
     val phoneNumber: String = "",
     val callStatus: CallStatus = CallStatus.IDLE,
     val callCommand: CallActionCommand? = null,
+    val touchAction: TouchpadAction? = null,
+    val touchDx: Float = 0f,
+    val touchDy: Float = 0f,
     val canReply: Boolean = false,
     val timestampMs: Long = System.currentTimeMillis(),
     val deviceName: String = ""
@@ -76,9 +92,9 @@ data class ActiveNavBanner(
 
 enum class BridgeConnectionStatus(val labelZh: String) {
     DISABLED("未啟用"),
-    STANDBY("待機省電中（藍牙連上車機自動啟動）"),
+    STANDBY("待機省電中（連上車機藍牙或熱點自動啟動）"),
     LISTENING("等待手機藍牙／Wi-Fi 熱點連線…"),
-    CONNECTING("正在連線 AI Box…"),
+    CONNECTING("正在連線車機 AI Box…"),
     CONNECTED("已連線同步中"),
     ERROR("通道未就緒")
 }

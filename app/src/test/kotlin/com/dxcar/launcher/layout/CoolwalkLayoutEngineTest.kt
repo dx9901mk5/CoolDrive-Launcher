@@ -71,6 +71,18 @@ class CoolwalkLayoutEngineTest {
             ResolvedDockPlacement.RIGHT,
             CoolwalkLayoutEngine.compute(wideMetrics, DockPositionMode.FORCE_RIGHT, false).dockPlacement
         )
+        assertEquals(
+            ResolvedDockPlacement.TOP,
+            CoolwalkLayoutEngine.compute(wideMetrics, DockPositionMode.FORCE_TOP, false).dockPlacement
+        )
+        assertEquals(
+            ResolvedDockPlacement.LEFT,
+            CoolwalkLayoutEngine.compute(wideMetrics, DockPositionMode.DRIVER_SIDE, rightHandDrive = false).dockPlacement
+        )
+        assertEquals(
+            ResolvedDockPlacement.RIGHT,
+            CoolwalkLayoutEngine.compute(wideMetrics, DockPositionMode.DRIVER_SIDE, rightHandDrive = true).dockPlacement
+        )
     }
 
     @Test

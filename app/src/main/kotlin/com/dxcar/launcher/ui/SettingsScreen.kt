@@ -29,10 +29,11 @@ import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.DisplaySettings
-import androidx.compose.material.icons.rounded.Gesture
+import androidx.compose.material.icons.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.NotificationsActive
@@ -43,7 +44,8 @@ import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Security
-import androidx.compose.material.icons.rounded.Splitscreen
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.Button
@@ -82,16 +84,21 @@ import com.dxcar.launcher.data.HomeMapDisplayMode
 import com.dxcar.launcher.data.LauncherConfig
 import com.dxcar.launcher.data.LauncherStylePreset
 import com.dxcar.launcher.data.MapEngineStyle
+import com.dxcar.launcher.data.OfflineUpdatePolicy
 import com.dxcar.launcher.data.ThemeMode
 import com.dxcar.launcher.layout.CoolwalkLayoutSpec
+import com.dxcar.launcher.map.OfflineMapUiState
+import com.dxcar.launcher.map.OfflineRegionPreset
+import com.dxcar.launcher.overlay.ExtraLargeTutorialModal
+import com.dxcar.launcher.overlay.TUTORIAL_3D_CURSOR_STEPS
 import com.dxcar.launcher.system.AppCategory
 import com.dxcar.launcher.system.HomeLauncherInfo
 import com.dxcar.launcher.system.InstalledAppInfo
 import com.dxcar.launcher.system.PermissionHealth
 import com.dxcar.launcher.system.PermissionHelper
 import com.dxcar.launcher.system.SystemStatusMonitor
-import com.dxcar.launcher.theme.DxCarAccents
 import com.dxcar.launcher.theme.DayNightEngine
+import com.dxcar.launcher.theme.DxCarAccents
 import com.dxcar.launcher.theme.LocalDxCarColors
 import com.dxcar.launcher.update.UpdateManager
 import com.dxcar.launcher.update.UpdateUiState
@@ -100,14 +107,18 @@ import java.time.ZoneId
 import java.util.Locale
 import kotlin.math.roundToInt
 
+private enum class CarSettingsTutorialTopic {
+    CURSOR_3D,
+    PHONE_PAIRING,
+    STOCK_DOCK_CONFLICT
+}
+
 /**
- * Full DX-Car Launcher Settings Screen (accessible right from the App Drawer):
- * 1. 風格與外觀（Coolwalk 風格預設、白天/夜晚依時間/日出日落自動切換、強調色、地圖引擎、分割比例）
- * 2. 車機 DPI 與常駐 Dock（Google Coolwalk 自動模式、DPI 診斷資訊、常駐懸浮開關）
- * 3. 多指手勢操作設定與手勢一覽
- * 4. 來電與訊息同步（藍牙橋接狀態、TTS 語音播報、模擬測試按鈕、切換手機同步端）
- * 5. AI Box 權限一鍵健檢
- * 6. 自動檢測與自動下載 App 更新 + GitHub 開源儲存庫連結
+ * Categorized 2-Column Adaptive Car / Tablet Settings Screen:
+ * - Top bar houses a compact "🛡️ 權限設定 (X/7)" pill button -> opens the dedicated Permissions + 60fps sheet!
+ * - Multi-finger gestures page removed; Plan B removed; Plan A Offline Map settings integrated.
+ * - Dock supports Left (LHD) / Right (RHD) / Top / Bottom + Floating on Other Launchers + Stock Dock conflict reminder & jump button.
+ * - All tutorials open via explicit "教學" buttons with extra-large 26sp/22sp typography.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -119,6 +130,9 @@ fun SettingsScreen(
     permissionHealth: PermissionHealth,
     bridgeStatus: BridgeStatusState,
     updateState: UpdateUiState,
+    offlineState: OfflineMapUiState = OfflineMapUiState(),
+    offlinePresets: List<OfflineRegionPreset> = emptyList(),
+    onDownloadOfflineRegion: (String) -> Unit = {},
     onUpdateConfig: ((LauncherConfig) -> LauncherConfig) -> Unit,
     onRequestSetDefaultHome: () -> Unit,
     onSwitchToLauncher: (HomeLauncherInfo) -> Unit,
@@ -140,6 +154,12 @@ fun SettingsScreen(
     val colors = LocalDxCarColors.current
     val context = LocalContext.current
     var confirmResetPending by remember { mutableStateOf(false) }
+    var showPermissionsSheet by remember { mutableStateOf(false) }
+    var activeTutorial by remember { mutableStateOf<CarSettingsTutorialTopic?>(null) }
+
+    val (grantedPerms, totalPerms) = remember(permissionHealth) { permissionHealth.summaryForCar() }
+    val allPermsOk = grantedPerms == totalPerms
+    val isWideTwoColumn = layoutSpec.metrics.widthDp >= 600f
 
     val solarPreview = remember(config.lastKnownLat, config.lastKnownLon) {
         val zone = ZoneId.systemDefault()
@@ -152,1077 +172,892 @@ fun SettingsScreen(
         )
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(colors.canvasBackground)
-            .padding(horizontal = 20.dp, vertical = 14.dp)
-    ) {
-        // TOP BAR (weight(1f) keeps Switch button always visible even on narrow phone screens!)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f).padding(end = 8.dp)
-            ) {
-                IconButton(onClick = onClose) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "返回",
-                        tint = colors.primaryText
-                    )
-                }
-                Spacer(Modifier.width(4.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "DX-Car Launcher 設定",
-                        color = colors.primaryText,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "實驗切換 · 啟動器管理 · 風格日夜 · Dock 與更新",
-                        color = colors.secondaryText,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
-            OutlinedButton(
-                onClick = onSwitchToPhoneCompanion,
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Icon(Icons.Rounded.PhoneAndroid, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("切換手機同步端", maxLines = 1)
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
+    Box(modifier = modifier.fillMaxSize().background(colors.canvasBackground)) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .springBounceOverscroll(maxOverscrollPx = 150f)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 20.dp, vertical = 12.dp)
         ) {
-            // TOP SECTION: 首頁實驗方案切換開關（方案 A / B / C / D 保留）
-            SettingsSectionCard(
-                icon = Icons.Rounded.Science,
-                title = "首頁方案實驗切換（方案 A / B / C / D）"
+            // TOP HEADER BAR + COMPACT PERMISSIONS BUTTON ("集中在設定最上方的一個小按鈕提示")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = "可一鍵切換並實車比較不同首頁架構，預設分割比例為 70% / 30%。",
-                    color = colors.secondaryText,
-                    fontSize = 12.sp
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    HomeExperimentMode.entries.forEach { mode ->
-                        val selected = config.homeExperimentMode == mode
-                        Surface(
-                            color = when {
-                                !mode.isAvailable -> colors.cardSurfaceElevated.copy(alpha = 0.5f)
-                                selected -> colors.accent.copy(alpha = 0.18f)
-                                else -> colors.cardSurfaceElevated
-                            },
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .border(
-                                    width = if (selected) 1.5.dp else 1.dp,
-                                    color = if (selected) colors.accent else colors.cardBorder,
-                                    shape = RoundedCornerShape(16.dp)
-                                )
-                                .clickable(enabled = mode.isAvailable) {
-                                    onUpdateConfig { it.copy(homeExperimentMode = mode) }
-                                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                ) {
+                    IconButton(onClick = onClose) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = "返回",
+                            tint = colors.primaryText
+                        )
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "DX-Car 車機啟動器設定",
+                            color = colors.primaryText,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "已依功能分類排列 · 點右上「權限需求」檢查授權與 60fps 開關",
+                            color = colors.secondaryText,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Compact Top Permissions Pill Button (Car & Tablet!)
+                    Surface(
+                        color = if (allPermsOk) colors.statusConnected.copy(alpha = 0.16f) else Color(0xFFF59E0B).copy(alpha = 0.20f),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .border(
+                                1.2.dp,
+                                if (allPermsOk) colors.statusConnected else Color(0xFFF59E0B),
+                                RoundedCornerShape(16.dp)
+                            )
+                            .bouncyClickable {
+                                onRefreshPermissions()
+                                showPermissionsSheet = true
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
+                            Icon(
+                                imageVector = if (allPermsOk) Icons.Rounded.CheckCircle else Icons.Rounded.Security,
+                                contentDescription = null,
+                                tint = if (allPermsOk) colors.statusConnected else Color(0xFFF59E0B),
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = if (allPermsOk) "權限已就緒 ($grantedPerms/$totalPerms)" else "權限需求 ($grantedPerms/$totalPerms)",
+                                color = colors.primaryText,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = onSwitchToPhoneCompanion,
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Icon(Icons.Rounded.PhoneAndroid, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("手機同步模式", fontSize = 13.sp, maxLines = 1)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // MAIN SCROLLABLE CATEGORIZED SETTINGS (2-Column on Wide Car/Tablet >= 600dp, 1-Column on Compact)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .springBounceOverscroll(maxOverscrollPx = 150f)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // ==================== CATEGORY 1: 首頁方案、離線地圖與視覺風格 ====================
+                CategoryHeaderBanner(
+                    categoryTitle = "分類一 · 首頁方案、離線地圖與視覺風格",
+                    hint = "選擇方案 A（含離線地圖下載與自動更新判斷）或方案 C（指定導航＋純音樂），並自訂日夜主題與分割比例"
+                )
+
+                val cardPlanAndOffline: @Composable (Modifier) -> Unit = { mod ->
+                    SettingsSectionCard(
+                        icon = Icons.Rounded.Science,
+                        title = "首頁方案與離線地圖管理",
+                        modifier = mod
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            HomeExperimentMode.visibleEntries.forEach { mode ->
+                                val selected = config.homeExperimentMode == mode
+                                Surface(
+                                    color = when {
+                                        !mode.isAvailable -> colors.cardSurfaceElevated.copy(alpha = 0.5f)
+                                        selected -> colors.accent.copy(alpha = 0.18f)
+                                        else -> colors.cardSurfaceElevated
+                                    },
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .border(
+                                            width = if (selected) 1.5.dp else 1.dp,
+                                            color = if (selected) colors.accent else colors.cardBorder,
+                                            shape = RoundedCornerShape(16.dp)
+                                        )
+                                        .clickable(enabled = mode.isAvailable) {
+                                            onUpdateConfig { it.copy(homeExperimentMode = mode) }
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Text(
+                                                    text = mode.titleZh,
+                                                    color = if (mode.isAvailable) colors.primaryText else colors.secondaryText,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                if (!mode.isAvailable) {
+                                                    Surface(
+                                                        color = colors.cardBorder.copy(alpha = 0.6f),
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    ) {
+                                                        Row(
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            Icon(Icons.Rounded.Lock, contentDescription = null, tint = colors.secondaryText, modifier = Modifier.size(11.dp))
+                                                            Spacer(Modifier.width(3.dp))
+                                                            Text("待 Root", color = colors.secondaryText, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Text(mode.descZh, color = colors.secondaryText, fontSize = 11.sp)
+                                        }
+                                        if (mode.isAvailable) {
+                                            Spacer(Modifier.width(8.dp))
+                                            Switch(
+                                                checked = selected,
+                                                onCheckedChange = { onUpdateConfig { it.copy(homeExperimentMode = mode) } },
+                                                colors = SwitchDefaults.colors(checkedThumbColor = colors.onAccent, checkedTrackColor = colors.accent)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (config.homeExperimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA) {
+                            Text("方案 C 左側預設導航 App", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            val orderedNavApps = remember(installedApps) {
+                                val navFirst = installedApps.filter { it.category == AppCategory.NAVIGATION }
+                                val others = installedApps.filterNot { it.category == AppCategory.NAVIGATION }
+                                navFirst + others.take(10)
+                            }
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                orderedNavApps.forEach { appInfo ->
+                                    val isSelected = config.planCNavPackage == appInfo.packageName
+                                    val bmp = remember(appInfo.icon) { appInfo.icon.asImageBitmap() }
+                                    Surface(
+                                        color = if (isSelected) colors.accent else colors.cardSurfaceElevated,
+                                        shape = RoundedCornerShape(14.dp),
+                                        modifier = Modifier
+                                            .border(1.dp, if (isSelected) colors.accent else colors.cardBorder, RoundedCornerShape(14.dp))
+                                            .clickable { onUpdateConfig { it.copy(planCNavPackage = appInfo.packageName) } }
+                                    ) {
+                                        Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Image(bitmap = bmp, contentDescription = appInfo.label, modifier = Modifier.size(22.dp).clip(RoundedCornerShape(6.dp)))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(appInfo.label, color = if (isSelected) colors.onAccent else colors.primaryText, fontSize = 12.sp, maxLines = 1)
+                                        }
+                                    }
+                                }
+                            }
+                            SettingsToggleRow(
+                                title = "開啟左側導航時於右側 30% 顯示懸浮音樂控盤",
+                                subtitle = "包含上方當地天氣、大專輯封面與紅心收藏",
+                                checked = config.planCOverlayMusicPanelEnabled,
+                                onCheckedChange = { checked -> onUpdateConfig { it.copy(planCOverlayMusicPanelEnabled = checked) } }
+                            )
+                        }
+
+                        // Plan A Offline Map Download & Update Cycle Quick Controls
+                        Surface(
+                            color = colors.cardSurfaceElevated,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text = "方案 A 離線地圖 · 更新提醒週期與快速下載（已快取 ${config.offlineRegions.size} 區）",
+                                    color = colors.primaryText,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    OfflineUpdatePolicy.entries.forEach { pol ->
+                                        SelectablePill(
+                                            text = pol.labelZh,
+                                            selected = config.offlineUpdatePolicy == pol,
+                                            onClick = { onUpdateConfig { it.copy(offlineUpdatePolicy = pol) } }
+                                        )
+                                    }
+                                }
+                                if (offlineState.statusMessage.isNotBlank()) {
+                                    Text(offlineState.statusMessage, color = colors.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    offlinePresets.take(4).forEach { preset ->
+                                        val downloaded = config.offlineRegions.any { it.regionId == preset.id }
+                                        OutlinedButton(
+                                            onClick = { onDownloadOfflineRegion(preset.id) },
+                                            enabled = offlineState.downloadingRegionId == null,
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Text(
+                                                text = if (downloaded) "↻ 更新 ${preset.titleZh}" else "⬇ 下載 ${preset.titleZh}",
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        SettingsToggleRow(
+                            title = "媒體控制器下方整合顯示 6 格快捷 App",
+                            subtitle = "關閉則將右側空間全數留給上方當地天氣與超大專輯封面",
+                            checked = config.showSixShortcutsInMediaPanel,
+                            onCheckedChange = { checked -> onUpdateConfig { it.copy(showSixShortcutsInMediaPanel = checked) } }
+                        )
+                    }
+                }
+
+                val cardStyleAndMap: @Composable (Modifier) -> Unit = { mod ->
+                    SettingsSectionCard(
+                        icon = Icons.Rounded.Palette,
+                        title = "介面風格、日夜排程與分割比例",
+                        modifier = mod
+                    ) {
+                        Text("介面風格預設", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            LauncherStylePreset.entries.forEach { preset ->
+                                SelectablePill(
+                                    text = preset.labelZh,
+                                    selected = config.stylePreset == preset,
+                                    onClick = { onUpdateConfig { it.copy(stylePreset = preset) } }
+                                )
+                            }
+                        }
+
+                        Text("強調色主題", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            DxCarAccents.forEachIndexed { idx, accent ->
+                                val selected = config.accentColorIndex == idx
+                                val swatch = if (colors.isNight) accent.nightColor else accent.dayColor
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.clickable { onUpdateConfig { it.copy(accentColorIndex = idx) } }
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .clip(CircleShape)
+                                            .background(swatch)
+                                            .border(if (selected) 3.dp else 1.dp, if (selected) colors.primaryText else colors.cardBorder, CircleShape)
+                                    )
+                                    Text(accent.nameZh, color = if (selected) colors.primaryText else colors.secondaryText, fontSize = 10.sp)
+                                }
+                            }
+                        }
+
+                        Text("白天／夜晚切換模式", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(
+                                ThemeMode.AUTO_TIME to "依時間自動",
+                                ThemeMode.AUTO_SUNRISE_SUNSET to "GPS 日出日落",
+                                ThemeMode.FOLLOW_SYSTEM to "跟隨車機",
+                                ThemeMode.FORCE_DAY to "固定白天",
+                                ThemeMode.FORCE_NIGHT to "固定夜晚"
+                            ).forEach { (mode, label) ->
+                                SelectablePill(
+                                    text = label,
+                                    selected = config.themeMode == mode,
+                                    onClick = { onUpdateConfig { it.copy(themeMode = mode) } }
+                                )
+                            }
+                        }
+
+                        if (config.themeMode == ThemeMode.AUTO_TIME) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                TimeStepperCard(
+                                    label = "白天開始",
+                                    hour = config.dayStartHour,
+                                    minute = config.dayStartMinute,
+                                    onDeltaMinutes = { delta ->
+                                        val total = ((config.dayStartHour * 60 + config.dayStartMinute + delta) % 1440 + 1440) % 1440
+                                        onUpdateConfig { it.copy(dayStartHour = total / 60, dayStartMinute = total % 60) }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TimeStepperCard(
+                                    label = "夜晚開始",
+                                    hour = config.nightStartHour,
+                                    minute = config.nightStartMinute,
+                                    onDeltaMinutes = { delta ->
+                                        val total = ((config.nightStartHour * 60 + config.nightStartMinute + delta) % 1440 + 1440) % 1440
+                                        onUpdateConfig { it.copy(nightStartHour = total / 60, nightStartMinute = total % 60) }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        } else if (config.themeMode == ThemeMode.AUTO_SUNRISE_SUNSET) {
+                            Text(
+                                text = "今日 GPS 日出 ${solarPreview.formatSunrise()} · 日落 ${solarPreview.formatSunset()}",
+                                color = colors.accent,
+                                fontSize = 12.sp
+                            )
+                        }
+
+                        Text("內建地圖圖層與路況", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            MapEngineStyle.entries.forEach { styleItem ->
+                                SelectablePill(
+                                    text = styleItem.labelZh,
+                                    selected = config.mapEngineStyle == styleItem,
+                                    onClick = { onUpdateConfig { it.copy(mapEngineStyle = styleItem) } }
+                                )
+                            }
+                        }
+                        SettingsToggleRow(
+                            title = "疊加 Google 即時路況圖層",
+                            subtitle = "顯示紅黃綠即時車流；可搭配「開啟分屏設定」測試 AOSP 原生可拖動分屏",
+                            checked = config.mapTrafficEnabled,
+                            onCheckedChange = { checked -> onUpdateConfig { it.copy(mapTrafficEnabled = checked) } }
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = onLaunchRealMapsSplitScreen, shape = RoundedCornerShape(12.dp)) {
+                                Text("測試 AOSP 分割G地圖", fontSize = 12.sp)
+                            }
+                            OutlinedButton(onClick = onOpenSplitShortcutCreator, shape = RoundedCornerShape(12.dp)) {
+                                Text("分屏捷徑製作器", fontSize = 12.sp)
+                            }
+                        }
+
+                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "首頁比例：${(config.primarySplitRatio * 100).roundToInt()}% / ${((1f - config.primarySplitRatio) * 100).roundToInt()}%",
+                                color = colors.primaryText,
+                                fontSize = 13.sp,
+                                modifier = Modifier.width(155.dp)
+                            )
+                            Slider(
+                                value = config.primarySplitRatio,
+                                onValueChange = { ratio -> onUpdateConfig { it.copy(primarySplitRatio = ratio) } },
+                                valueRange = 0.55f..0.75f,
+                                colors = SliderDefaults.colors(thumbColor = colors.accent, activeTrackColor = colors.accent),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+
+                AdaptiveTwoColumnRow(isWideTwoColumn, cardPlanAndOffline, cardStyleAndMap)
+
+                // ==================== CATEGORY 2: 常駐 Dock（支援上方／跨啟動器）與啟動器管理 ====================
+                CategoryHeaderBanner(
+                    categoryTitle = "分類二 · 常駐懸浮 Dock（左／右／上方／跨啟動器）與預設桌面",
+                    hint = "左駕預設左側、右駕預設右側，亦可改放「上方」；支援懸浮於其他啟動器上，並內建 3D 俯瞰類滑鼠指標"
+                )
+
+                val cardDockAnd3D: @Composable (Modifier) -> Unit = { mod ->
+                    SettingsSectionCard(
+                        icon = Icons.Rounded.DisplaySettings,
+                        title = "Dock 位置（左／右／上方）與跨啟動器常駐",
+                        headerTrailing = {
+                            TutorialPillButton(onClick = { activeTutorial = CarSettingsTutorialTopic.CURSOR_3D })
+                        },
+                        modifier = mod
+                    ) {
+                        // Default stock launcher Dock / Assistive Ball conflict reminder + direct jump to CarBox Settings!
+                        if (config.persistentOverlayDockEnabled) {
+                            Surface(
+                                color = Color(0xFFF59E0B).copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    .border(1.2.dp, Color(0xFFF59E0B), RoundedCornerShape(16.dp))
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Rounded.WarningAmber, contentDescription = null, tint = Color(0xFFF59E0B), modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = "永久懸浮提醒：請關閉原車啟動器自帶的 Dock 與懸浮按鈕",
+                                            color = colors.primaryText,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Text(
+                                        text = "當啟用本啟動器 Dock 永久懸浮（或懸浮在其他啟動器上方）時，建議先進入車機盒設定關閉原車自帶的側邊欄與懸浮小白點，避免雙重遮擋。",
+                                        color = colors.secondaryText,
+                                        fontSize = 12.sp
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = { SystemStatusMonitor.openAiBoxVendorSettings(context, preferDisplayFor60Fps = false) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Icon(Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(5.dp))
+                                            Text("前往車機盒設定頁面", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        TutorialPillButton(
+                                            label = "教學",
+                                            onClick = { activeTutorial = CarSettingsTutorialTopic.STOCK_DOCK_CONFLICT }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Text("駕駛座位置（左駕預設靠左 · 右駕預設靠右）", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SelectablePill(
+                                text = "左駕模式（預設左側）",
+                                selected = !config.rightHandDrive,
+                                onClick = { onUpdateConfig { it.copy(rightHandDrive = false) } }
+                            )
+                            SelectablePill(
+                                text = "右駕模式（預設右側）",
+                                selected = config.rightHandDrive,
+                                onClick = { onUpdateConfig { it.copy(rightHandDrive = true) } }
+                            )
+                        }
+
+                        Text("Dock 擺放位置選擇（支援放置於上方！）", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(
+                                DockPositionMode.DRIVER_SIDE to "預設跟隨左／右駕側邊",
+                                DockPositionMode.FORCE_TOP to "放置於上方（橫向）",
+                                DockPositionMode.FORCE_LEFT to "固定左側",
+                                DockPositionMode.FORCE_RIGHT to "固定右側",
+                                DockPositionMode.FORCE_BOTTOM to "放置於底部",
+                                DockPositionMode.AUTO_GOOGLE_DPI to "依 Google DPI 自動"
+                            ).forEach { (mode, label) ->
+                                SelectablePill(
+                                    text = label,
+                                    selected = config.dockPositionMode == mode,
+                                    onClick = { onUpdateConfig { it.copy(dockPositionMode = mode) } }
+                                )
+                            }
+                        }
+
+                        SettingsToggleRow(
+                            title = "常駐懸浮 Dock（全螢幕 App 上方常駐 · 手機端預設停用）",
+                            subtitle = "開啟後於 Google 地圖／YouTube 全螢幕時保留常駐列（含 3D 俯瞰類滑鼠指標與返回／多工鍵）",
+                            checked = config.persistentOverlayDockEnabled,
+                            onCheckedChange = { checked -> onUpdateConfig { it.copy(persistentOverlayDockEnabled = checked) } }
+                        )
+
+                        if (config.persistentOverlayDockEnabled) {
+                            SettingsToggleRow(
+                                title = "同時懸浮在「其他車機啟動器」桌面上",
+                                subtitle = "切換回原廠啟動器或其他桌面時，依然保留 DX-Car 常駐懸浮 Dock",
+                                checked = config.overlayDockOnOtherLaunchers,
+                                onCheckedChange = { checked -> onUpdateConfig { it.copy(overlayDockOnOtherLaunchers = checked) } }
+                            )
+
+                            SettingsToggleRow(
+                                title = "自動收合為透明邊緣拉條（關閉則永久展開懸浮）",
+                                subtitle = "開啟時縮成邊緣拉條，輕點或往內滑展開；關閉則保持完整 Dock 永久懸浮",
+                                checked = config.overlayAutoCollapseEnabled,
+                                onCheckedChange = { checked -> onUpdateConfig { it.copy(overlayAutoCollapseEnabled = checked) } }
+                            )
+
+                            if (config.overlayAutoCollapseEnabled) {
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf(3 to "3 秒收回", 4 to "4 秒收回", 7 to "7 秒收回", 0 to "手動收回").forEach { (sec, label) ->
+                                        SelectablePill(
+                                            text = label,
+                                            selected = config.overlayAutoRetractSeconds == sec,
+                                            onClick = { onUpdateConfig { it.copy(overlayAutoRetractSeconds = sec) } }
+                                        )
+                                    }
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("拉條厚度：${config.overlayHandleThicknessDp} dp", color = colors.primaryText, fontSize = 12.sp, modifier = Modifier.width(135.dp))
+                                    Slider(
+                                        value = config.overlayHandleThicknessDp.toFloat(),
+                                        onValueChange = { v -> onUpdateConfig { it.copy(overlayHandleThicknessDp = v.roundToInt().coerceIn(16, 48)) } },
+                                        valueRange = 16f..48f,
+                                        colors = SliderDefaults.colors(thumbColor = colors.accent, activeTrackColor = colors.accent),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+
+                        SettingsToggleRow(
+                            title = "首頁顯示本啟動器 Dock",
+                            subtitle = "目前判定：${layoutSpec.dockPlacement.labelZh}（${layoutSpec.metrics.widthPx}×${layoutSpec.metrics.heightPx} · ${layoutSpec.metrics.densityDpi}dpi）",
+                            checked = config.showHomeDock,
+                            onCheckedChange = { checked -> onUpdateConfig { it.copy(showHomeDock = checked) } }
+                        )
+
+                        SettingsToggleRow(
+                            title = "24 小時制時鐘",
+                            subtitle = "關閉時顯示單行 12 小時制（如 8:20 PM）；點擊左上 Wi-Fi 圖示可展開下拉快捷鍵",
+                            checked = config.is24HourClock,
+                            onCheckedChange = { checked -> onUpdateConfig { it.copy(is24HourClock = checked) } }
+                        )
+
+                        // Prominent 3D Cursor Tutorial Row
+                        Surface(
+                            color = colors.cardSurfaceElevated,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text("🧊 Dock「3D 俯瞰」類滑鼠指標操作說明", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text("單指移動＝一般觸控 · 長壓 2 秒不放＝左右縮放／上下 3D 俯瞰", color = colors.secondaryText, fontSize = 11.sp)
+                                }
+                                TutorialPillButton(
+                                    label = "教學",
+                                    onClick = { activeTutorial = CarSettingsTutorialTopic.CURSOR_3D }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                val cardHomeLaunchers: @Composable (Modifier) -> Unit = { mod ->
+                    SettingsSectionCard(
+                        icon = Icons.Rounded.Home,
+                        title = "啟動器切換與系統預設桌面",
+                        modifier = mod
+                    ) {
+                        val currentDefaultLauncher = homeLaunchers.firstOrNull { it.isDefault }
+                        Text(
+                            text = if (permissionHealth.isDefaultHome) {
+                                "✓ 目前預設啟動器：DX-Car Launcher"
+                            } else {
+                                "目前預設啟動器：${currentDefaultLauncher?.label ?: "其他啟動器"}"
+                            },
+                            color = if (permissionHealth.isDefaultHome) colors.statusConnected else colors.primaryText,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = onRequestSetDefaultHome,
+                                colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Icon(Icons.Rounded.Home, contentDescription = null, modifier = Modifier.size(17.dp))
+                                Spacer(Modifier.width(5.dp))
+                                Text(if (permissionHealth.isDefaultHome) "重選預設桌面" else "設為系統預設桌面", fontSize = 12.sp)
+                            }
+                            OutlinedButton(
+                                onClick = { SystemStatusMonitor.openHomeLauncherSettings(context) },
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Icon(Icons.Rounded.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("系統桌面設定", fontSize = 12.sp)
+                            }
+                            OutlinedButton(onClick = onRefreshHomeLaunchers, shape = RoundedCornerShape(14.dp)) {
+                                Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            }
+                        }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            homeLaunchers.forEach { launcher ->
+                                val iconBmp = remember(launcher.icon) { launcher.icon.asImageBitmap() }
+                                Surface(
+                                    color = colors.cardSurfaceElevated,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .border(1.dp, if (launcher.isDefault) colors.accent else colors.cardBorder, RoundedCornerShape(14.dp))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                            Image(bitmap = iconBmp, contentDescription = launcher.label, modifier = Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)))
+                                            Spacer(Modifier.width(10.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(launcher.label, color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                Text(
+                                                    text = if (launcher.isDefault) "系統預設桌面" else launcher.packageName,
+                                                    color = if (launcher.isDefault) colors.statusConnected else colors.secondaryText,
+                                                    fontSize = 11.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                        if (!launcher.isSelf) {
+                                            Button(
+                                                onClick = { onSwitchToLauncher(launcher) },
+                                                colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                                shape = RoundedCornerShape(12.dp)
+                                            ) {
+                                                Text("切換", fontSize = 12.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                AdaptiveTwoColumnRow(isWideTwoColumn, cardDockAnd3D, cardHomeLaunchers)
+
+                // ==================== CATEGORY 3: 手機連線同步與版本更新 ====================
+                CategoryHeaderBanner(
+                    categoryTitle = "分類三 · 手機雙通道配對同步、遠端滑鼠與系統更新",
+                    hint = "手機連上車機藍牙免持或開啟 Wi-Fi 熱點即可自動穩定同步通知與遠端滑鼠觸控板；點擊「教學」查看特大字步驟"
+                )
+
+                val cardPhoneBridge: @Composable (Modifier) -> Unit = { mod ->
+                    SettingsSectionCard(
+                        icon = Icons.Rounded.NotificationsActive,
+                        title = "手機來電／訊息同步與遠端觸控",
+                        headerTrailing = {
+                            TutorialPillButton(onClick = { activeTutorial = CarSettingsTutorialTopic.PHONE_PAIRING })
+                        },
+                        modifier = mod
+                    ) {
+                        Surface(
+                            color = colors.cardSurfaceElevated,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Text(
-                                            text = mode.titleZh,
-                                            color = if (mode.isAvailable) colors.primaryText else colors.secondaryText,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        if (!mode.isAvailable) {
-                                            Surface(
-                                                color = colors.cardBorder.copy(alpha = 0.6f),
-                                                shape = RoundedCornerShape(8.dp)
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Icon(Icons.Rounded.Lock, contentDescription = null, tint = colors.secondaryText, modifier = Modifier.size(11.dp))
-                                                    Spacer(Modifier.width(3.dp))
-                                                    Text("待 Root 保留", color = colors.secondaryText, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Spacer(Modifier.height(2.dp))
                                     Text(
-                                        text = mode.descZh,
+                                        text = if (bridgeStatus.transportLabel.isNotBlank()) {
+                                            "連線狀態：${bridgeStatus.status.labelZh} (${bridgeStatus.transportLabel})"
+                                        } else {
+                                            "連線狀態：${bridgeStatus.status.labelZh}"
+                                        },
+                                        color = colors.primaryText,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = if (bridgeStatus.peerName.isNotBlank()) {
+                                            "已連接手機：${bridgeStatus.peerName}"
+                                        } else {
+                                            "支援藍牙 SPP ＋ 手機熱點閘道雙向自動直連（無須手動輸入 IP）"
+                                        },
                                         color = colors.secondaryText,
-                                        fontSize = 11.sp
+                                        fontSize = 12.sp
                                     )
                                 }
-                                if (mode.isAvailable) {
-                                    Spacer(Modifier.width(10.dp))
-                                    Switch(
-                                        checked = selected,
-                                        onCheckedChange = { onUpdateConfig { it.copy(homeExperimentMode = mode) } },
-                                        colors = SwitchDefaults.colors(
-                                            checkedThumbColor = colors.onAccent,
-                                            checkedTrackColor = colors.accent
-                                        )
-                                    )
-                                }
+                                Icon(Icons.Rounded.Bluetooth, contentDescription = null, tint = colors.accent, modifier = Modifier.size(26.dp))
                             }
                         }
-                    }
-                }
 
-                // 方案 C 專屬：左側預設導航 App 選擇（顯示 App 圖示＋名稱）
-                if (config.homeExperimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "方案 C 左側預設導航 App（顯示圖示與名稱，點擊選定）",
-                        color = colors.primaryText,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    val orderedNavApps = remember(installedApps) {
-                        val navFirst = installedApps.filter { it.category == AppCategory.NAVIGATION }
-                        val others = installedApps.filterNot { it.category == AppCategory.NAVIGATION }
-                        navFirst + others.take(12)
-                    }
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        orderedNavApps.forEach { appInfo ->
-                            val isSelected = config.planCNavPackage == appInfo.packageName
-                            val bmp = remember(appInfo.icon) { appInfo.icon.asImageBitmap() }
-                            Surface(
-                                color = if (isSelected) colors.accent else colors.cardSurfaceElevated,
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (isSelected) colors.accent else colors.cardBorder,
-                                        shape = RoundedCornerShape(14.dp)
-                                    )
-                                    .clickable {
-                                        onUpdateConfig { it.copy(planCNavPackage = appInfo.packageName) }
-                                    }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Image(
-                                        bitmap = bmp,
-                                        contentDescription = appInfo.label,
-                                        modifier = Modifier
-                                            .size(24.dp)
-                                            .clip(RoundedCornerShape(6.dp))
-                                    )
-                                    Spacer(Modifier.width(7.dp))
-                                    Text(
-                                        text = appInfo.label,
-                                        color = if (isSelected) colors.onAccent else colors.primaryText,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
+                        SettingsToggleRow(
+                            title = "全螢幕導航／看影片時彈出頂部來電與訊息橫幅",
+                            subtitle = "支援接聽、掛斷、快速回覆與語音回覆",
+                            checked = config.globalCallMessageBannerEnabled,
+                            onCheckedChange = { checked -> onUpdateConfig { it.copy(globalCallMessageBannerEnabled = checked) } }
+                        )
+
+                        SettingsToggleRow(
+                            title = "收到新訊息時自動繁中語音朗讀 (TTS)",
+                            subtitle = "自動壓低音樂音量播報寄件人與內容",
+                            checked = config.autoReadMessagesTts,
+                            onCheckedChange = { checked -> onUpdateConfig { it.copy(autoReadMessagesTts = checked) } }
+                        )
+
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = onSimulateCall, shape = RoundedCornerShape(12.dp)) {
+                                Text("測試來電橫幅", fontSize = 12.sp)
                             }
-                        }
-                    }
-                }
-
-                if (config.homeExperimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA) {
-                    SettingsToggleRow(
-                        title = "方案 C 開啟左側導航時於右側 30% 顯示懸浮純音樂控盤",
-                        subtitle = "確保在未開放系統原生分割的車機上，也能一邊看真實導航 App 一邊操作大封面音樂控制（可隨時縮小或回首頁）",
-                        checked = config.planCOverlayMusicPanelEnabled,
-                        onCheckedChange = { checked -> onUpdateConfig { it.copy(planCOverlayMusicPanelEnabled = checked) } }
-                    )
-                }
-
-                SettingsToggleRow(
-                    title = "媒體控制器下方整合顯示 6 格快捷 App",
-                    subtitle = "開啟後於右側媒體控制器底部呈現 6 格自訂捷徑；關閉則將右側全部空間留給大專輯封面與純音樂操控",
-                    checked = config.showSixShortcutsInMediaPanel,
-                    onCheckedChange = { checked -> onUpdateConfig { it.copy(showSixShortcutsInMediaPanel = checked) } }
-                )
-            }
-
-            // SECTION 0: 啟動器切換與設為系統預設主畫面（支援切換原廠 AI Box 啟動器／其他啟動器＋選成預設值）
-            SettingsSectionCard(
-                icon = Icons.Rounded.Home,
-                title = "啟動器切換與預設主畫面設定"
-            ) {
-                val currentDefaultLauncher = homeLaunchers.firstOrNull { it.isDefault }
-                Surface(
-                    color = colors.cardSurfaceElevated,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(
-                                imageVector = if (permissionHealth.isDefaultHome) Icons.Rounded.CheckCircle else Icons.Rounded.WarningAmber,
-                                contentDescription = null,
-                                tint = if (permissionHealth.isDefaultHome) colors.statusConnected else Color(0xFFF59E0B),
-                                modifier = Modifier.size(22.dp)
+                            OutlinedButton(onClick = onSimulateMessage, shape = RoundedCornerShape(12.dp)) {
+                                Text("測試 LINE 訊息", fontSize = 12.sp)
+                            }
+                            TutorialPillButton(
+                                label = "教學",
+                                onClick = { activeTutorial = CarSettingsTutorialTopic.PHONE_PAIRING }
                             )
-                            Spacer(Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = if (permissionHealth.isDefaultHome) {
-                                        "目前預設啟動器：DX-Car Launcher（已設為預設）"
-                                    } else {
-                                        "目前預設啟動器：${currentDefaultLauncher?.label ?: "系統預設啟動器（非 DX-Car Launcher）"}"
-                                    },
-                                    color = colors.primaryText,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "可一鍵將 DX-Car Launcher 設為預設啟動器，或切換至車機原廠／其他已安裝的啟動器並變更系統預設值",
-                                    color = colors.secondaryText,
-                                    fontSize = 12.sp
-                                )
-                            }
                         }
                     }
                 }
 
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Button(
-                        onClick = onRequestSetDefaultHome,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = colors.accent,
-                            contentColor = colors.onAccent
-                        ),
-                        shape = RoundedCornerShape(14.dp)
+                val cardUpdatesAndGithub: @Composable (Modifier) -> Unit = { mod ->
+                    SettingsSectionCard(
+                        icon = Icons.Rounded.CloudDownload,
+                        title = "App 自動更新與恢復預設",
+                        modifier = mod
                     ) {
-                        Icon(Icons.Rounded.Home, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(if (permissionHealth.isDefaultHome) "重新選擇預設啟動器" else "設 DX-Car Launcher 為系統預設")
-                    }
+                        SettingsToggleRow(
+                            title = "啟動時自動檢測並下載新版 APK",
+                            subtitle = "目前版本：v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})",
+                            checked = config.autoCheckAndDownloadUpdate,
+                            onCheckedChange = { checked -> onUpdateConfig { it.copy(autoCheckAndDownloadUpdate = checked) } }
+                        )
 
-                    OutlinedButton(
-                        onClick = { SystemStatusMonitor.openHomeLauncherSettings(context) },
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Icon(Icons.Rounded.SwapHoriz, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("變更系統預設啟動器（選擇其他預設）")
-                    }
-
-                    OutlinedButton(
-                        onClick = onRefreshHomeLaunchers,
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("重新掃描")
-                    }
-                }
-
-                if (homeLaunchers.isNotEmpty()) {
-                    Text(
-                        text = "已安裝的車機／系統啟動器（點擊即可立即切換）",
-                        color = colors.primaryText,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        homeLaunchers.forEach { launcher ->
-                            val iconBmp = remember(launcher.icon) { launcher.icon.asImageBitmap() }
-                            Surface(
-                                color = colors.cardSurfaceElevated,
-                                shape = RoundedCornerShape(16.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .border(
-                                        width = if (launcher.isDefault) 1.5.dp else 1.dp,
-                                        color = if (launcher.isDefault) colors.accent else colors.cardBorder,
-                                        shape = RoundedCornerShape(16.dp)
-                                    )
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Image(
-                                            bitmap = iconBmp,
-                                            contentDescription = launcher.label,
-                                            modifier = Modifier
-                                                .size(40.dp)
-                                                .clip(RoundedCornerShape(10.dp))
-                                        )
-                                        Spacer(Modifier.width(12.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                            ) {
-                                                Text(
-                                                    text = launcher.label,
-                                                    color = colors.primaryText,
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                if (launcher.isDefault) {
-                                                    Surface(
-                                                        color = colors.statusConnected.copy(alpha = 0.2f),
-                                                        shape = RoundedCornerShape(8.dp)
-                                                    ) {
-                                                        Text(
-                                                            text = "系統預設",
-                                                            color = colors.statusConnected,
-                                                            fontSize = 10.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                        )
-                                                    }
-                                                }
-                                                if (launcher.isSelf) {
-                                                    Surface(
-                                                        color = colors.accent.copy(alpha = 0.2f),
-                                                        shape = RoundedCornerShape(8.dp)
-                                                    ) {
-                                                        Text(
-                                                            text = "目前使用",
-                                                            color = colors.accent,
-                                                            fontSize = 10.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                            Text(
-                                                text = launcher.packageName,
-                                                color = colors.secondaryText,
-                                                fontSize = 11.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                    }
-
-                                    Spacer(Modifier.width(8.dp))
-
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        if (!launcher.isSelf) {
-                                            Button(
-                                                onClick = { onSwitchToLauncher(launcher) },
-                                                colors = ButtonDefaults.buttonColors(
-                                                    containerColor = colors.accent,
-                                                    contentColor = colors.onAccent
-                                                ),
-                                                shape = RoundedCornerShape(12.dp)
-                                            ) {
-                                                Text("立即切換", fontSize = 12.sp)
-                                            }
-                                        }
-                                        if (!launcher.isDefault) {
-                                            OutlinedButton(
-                                                onClick = {
-                                                    if (launcher.isSelf) onRequestSetDefaultHome()
-                                                    else SystemStatusMonitor.openHomeLauncherSettings(context)
-                                                },
-                                                shape = RoundedCornerShape(12.dp)
-                                            ) {
-                                                Text("選成預設", fontSize = 12.sp)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // SECTION 1: 風格與日夜模式（Style Presets + Day/Night Schedule + Accent + Map + Split Ratio）
-            SettingsSectionCard(
-                icon = Icons.Rounded.Palette,
-                title = "介面風格、白天／夜晚與地圖外觀"
-            ) {
-                Text("介面風格預設", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    LauncherStylePreset.entries.forEach { preset ->
-                        val selected = config.stylePreset == preset
-                        Surface(
-                            color = if (selected) colors.accent else colors.cardSurfaceElevated,
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier
-                                .border(
-                                    1.2.dp,
-                                    if (selected) colors.accent else colors.cardBorder,
-                                    RoundedCornerShape(16.dp)
-                                )
-                                .clickable { onUpdateConfig { it.copy(stylePreset = preset) } }
-                        ) {
-                            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                                Text(
-                                    text = preset.labelZh,
-                                    color = if (selected) colors.onAccent else colors.primaryText,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = preset.descZh,
-                                    color = if (selected) colors.onAccent.copy(alpha = 0.85f) else colors.secondaryText,
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(6.dp))
-                Text("強調色主題", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    DxCarAccents.forEachIndexed { idx, accent ->
-                        val selected = config.accentColorIndex == idx
-                        val swatch = if (colors.isNight) accent.nightColor else accent.dayColor
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.clickable { onUpdateConfig { it.copy(accentColorIndex = idx) } }
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(swatch)
-                                    .border(
-                                        width = if (selected) 3.dp else 1.dp,
-                                        color = if (selected) colors.primaryText else colors.cardBorder,
-                                        shape = CircleShape
-                                    )
-                            )
-                            Spacer(Modifier.height(4.dp))
+                        if (updateState.statusMessage.isNotBlank()) {
                             Text(
-                                text = accent.nameZh,
-                                color = if (selected) colors.primaryText else colors.secondaryText,
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(6.dp))
-                Text("白天／夜晚切換模式", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    val modes = listOf(
-                        ThemeMode.AUTO_TIME to "依自訂時間自動",
-                        ThemeMode.AUTO_SUNRISE_SUNSET to "依 GPS 日出日落",
-                        ThemeMode.FOLLOW_SYSTEM to "跟隨車機系統",
-                        ThemeMode.FORCE_DAY to "固定白天",
-                        ThemeMode.FORCE_NIGHT to "固定夜晚"
-                    )
-                    modes.forEach { (mode, label) ->
-                        SelectablePill(
-                            text = label,
-                            selected = config.themeMode == mode,
-                            onClick = { onUpdateConfig { it.copy(themeMode = mode) } }
-                        )
-                    }
-                }
-
-                if (config.themeMode == ThemeMode.AUTO_TIME) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        TimeStepperCard(
-                            label = "白天開始時間",
-                            hour = config.dayStartHour,
-                            minute = config.dayStartMinute,
-                            onDeltaMinutes = { delta ->
-                                val total = ((config.dayStartHour * 60 + config.dayStartMinute + delta) % 1440 + 1440) % 1440
-                                onUpdateConfig { it.copy(dayStartHour = total / 60, dayStartMinute = total % 60) }
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                        TimeStepperCard(
-                            label = "夜晚開始時間",
-                            hour = config.nightStartHour,
-                            minute = config.nightStartMinute,
-                            onDeltaMinutes = { delta ->
-                                val total = ((config.nightStartHour * 60 + config.nightStartMinute + delta) % 1440 + 1440) % 1440
-                                onUpdateConfig { it.copy(nightStartHour = total / 60, nightStartMinute = total % 60) }
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                } else if (config.themeMode == ThemeMode.AUTO_SUNRISE_SUNSET) {
-                    Text(
-                        text = "依據車機 GPS 座標計算今日日出 ${solarPreview.formatSunrise()}、日落 ${solarPreview.formatSunset()}（離線天文計算，免 API Key）",
-                        color = colors.accent,
-                        fontSize = 12.sp
-                    )
-                }
-
-                Spacer(Modifier.height(6.dp))
-                Text("首頁地圖模式（預設 70% / 30% 分割比例）", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    HomeMapDisplayMode.entries.forEach { mode ->
-                        SelectablePill(
-                            text = mode.labelZh,
-                            selected = config.homeMapDisplayMode == mode,
-                            onClick = { onUpdateConfig { it.copy(homeMapDisplayMode = mode) } }
-                        )
-                    }
-                }
-                Text(
-                    text = config.homeMapDisplayMode.descZh,
-                    color = colors.secondaryText,
-                    fontSize = 11.sp
-                )
-
-                Text("內建免 Key 地圖圖層風格", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    MapEngineStyle.entries.forEach { styleItem ->
-                        SelectablePill(
-                            text = styleItem.labelZh,
-                            selected = config.mapEngineStyle == styleItem,
-                            onClick = { onUpdateConfig { it.copy(mapEngineStyle = styleItem) } }
-                        )
-                    }
-                }
-
-                SettingsToggleRow(
-                    title = "疊加 Google 即時路況圖層",
-                    subtitle = "於 Google 標準繁中與 Google 衛星混合底圖顯示即時紅黃綠車流",
-                    checked = config.mapTrafficEnabled,
-                    onCheckedChange = { checked -> onUpdateConfig { it.copy(mapTrafficEnabled = checked) } }
-                )
-
-                Surface(
-                    color = colors.cardSurfaceElevated,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = "真實 Google 地圖本體分割與多比例分屏捷徑",
-                            color = colors.primaryText,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "原廠 AI Box 系統內建啟動器因具系統簽章可直接呼叫私有 ActivityView；一般安裝版啟動器可透過「真實 G 地圖貼合（70%）」或「原生分割／分屏設定」直接使用真正的 Google 地圖本體！",
-                            color = colors.secondaryText,
-                            fontSize = 11.sp
-                        )
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = onLaunchRealMapsSplitScreen,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = colors.accent,
-                                    contentColor = colors.onAccent
-                                ),
-                                shape = RoundedCornerShape(14.dp)
-                            ) {
-                                Icon(Icons.Rounded.Splitscreen, contentDescription = null, modifier = Modifier.size(17.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("原生分割：真實 G 地圖 ＋ 媒體")
-                            }
-                            OutlinedButton(
-                                onClick = onLaunchRealMapsFreeform,
-                                shape = RoundedCornerShape(14.dp)
-                            ) {
-                                Text("立即以 Freeform 貼合 70%")
-                            }
-                            OutlinedButton(
-                                onClick = onOpenSplitShortcutCreator,
-                                shape = RoundedCornerShape(14.dp)
-                            ) {
-                                Text("開啟分屏設定 (3:7~7:3)")
-                            }
-                        }
-                    }
-                }
-
-                // Split Proportion Slider
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "主／副分割比例：${(config.primarySplitRatio * 100).roundToInt()}% / ${((1f - config.primarySplitRatio) * 100).roundToInt()}%",
-                        color = colors.primaryText,
-                        fontSize = 13.sp,
-                        modifier = Modifier.width(195.dp)
-                    )
-                    Slider(
-                        value = config.primarySplitRatio,
-                        onValueChange = { ratio -> onUpdateConfig { it.copy(primarySplitRatio = ratio) } },
-                        valueRange = 0.55f..0.75f,
-                        colors = SliderDefaults.colors(thumbColor = colors.accent, activeTrackColor = colors.accent),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-
-            // SECTION 2: 駕駛座左右駕、車機 DPI 與常駐 Dock（Google 模式）
-            SettingsSectionCard(
-                icon = Icons.Rounded.DisplaySettings,
-                title = "左右駕模式、車機 DPI 偵測與常駐 Dock"
-            ) {
-                Text("駕駛座位置（自動鏡像 Dock 靠駕駛側與首頁分割方向）", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SelectablePill(
-                        text = "左駕模式（預設 · 台灣／歐美）",
-                        selected = !config.rightHandDrive,
-                        onClick = { onUpdateConfig { it.copy(rightHandDrive = false) } }
-                    )
-                    SelectablePill(
-                        text = "右駕模式（日本／香港／英國）",
-                        selected = config.rightHandDrive,
-                        onClick = { onUpdateConfig { it.copy(rightHandDrive = true) } }
-                    )
-                }
-
-                Surface(
-                    color = colors.cardSurfaceElevated,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(
-                            text = "目前車機螢幕：${layoutSpec.metrics.widthPx} × ${layoutSpec.metrics.heightPx} px · ${layoutSpec.metrics.densityDpi} DPI",
-                            color = colors.primaryText,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "換算工作區：${layoutSpec.metrics.widthDp.roundToInt()} × ${layoutSpec.metrics.heightDp.roundToInt()} dp · ${layoutSpec.widthCategory.labelZh}",
-                            color = colors.secondaryText,
-                            fontSize = 12.sp
-                        )
-                        Text(
-                            text = "判定結果：${layoutSpec.dockPlacement.labelZh}（${layoutSpec.reasonZh}）",
-                            color = colors.accent,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    val dockModes = listOf(
-                        DockPositionMode.AUTO_GOOGLE_DPI to "依 DPI 自動（Google 模式）",
-                        DockPositionMode.FORCE_LEFT to "強制左側直立",
-                        DockPositionMode.FORCE_BOTTOM to "強制底部橫向",
-                        DockPositionMode.FORCE_RIGHT to "強制右側（右駕）"
-                    )
-                    dockModes.forEach { (mode, label) ->
-                        SelectablePill(
-                            text = label,
-                            selected = config.dockPositionMode == mode,
-                            onClick = { onUpdateConfig { it.copy(dockPositionMode = mode) } }
-                        )
-                    }
-                }
-
-                SettingsToggleRow(
-                    title = "常駐懸浮 Dock（在其他全螢幕 App 上方常駐）",
-                    subtitle = "開啟後在 YouTube／Google 地圖／導航王全螢幕時保留常駐列；若車機盒本身已有原廠左側列可關閉",
-                    checked = config.persistentOverlayDockEnabled,
-                    onCheckedChange = { checked -> onUpdateConfig { it.copy(persistentOverlayDockEnabled = checked) } }
-                )
-
-                if (config.persistentOverlayDockEnabled) {
-                    SettingsToggleRow(
-                        title = "全螢幕 App 自動收合為邊緣拉條（推薦）",
-                        subtitle = "進入 Google 地圖、YouTube 或導航王時自動縮成透明邊緣拉條，從邊緣一滑或輕點即展開，長按可沿邊緣拖曳挪動位置",
-                        checked = config.overlayAutoCollapseEnabled,
-                        onCheckedChange = { checked -> onUpdateConfig { it.copy(overlayAutoCollapseEnabled = checked) } }
-                    )
-
-                    if (config.overlayAutoCollapseEnabled) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text("展開後自動收回：", color = colors.secondaryText, fontSize = 12.sp)
-                            listOf(3 to "3 秒", 4 to "4 秒", 7 to "7 秒", 0 to "手動收回").forEach { (sec, label) ->
-                                SelectablePill(
-                                    text = label,
-                                    selected = config.overlayAutoRetractSeconds == sec,
-                                    onClick = { onUpdateConfig { it.copy(overlayAutoRetractSeconds = sec) } }
-                                )
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "收起拉條厚度：${config.overlayHandleThicknessDp} dp",
-                                color = colors.primaryText,
-                                fontSize = 13.sp,
-                                modifier = Modifier.width(175.dp)
-                            )
-                            Slider(
-                                value = config.overlayHandleThicknessDp.toFloat(),
-                                onValueChange = { v ->
-                                    onUpdateConfig { it.copy(overlayHandleThicknessDp = v.roundToInt().coerceIn(16, 48)) }
-                                },
-                                valueRange = 16f..48f,
-                                colors = SliderDefaults.colors(thumbColor = colors.accent, activeTrackColor = colors.accent),
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "拉條位置偏移：${(config.overlayHandlePositionPercent * 100).roundToInt()}%",
-                                color = colors.primaryText,
-                                fontSize = 13.sp,
-                                modifier = Modifier.width(175.dp)
-                            )
-                            Slider(
-                                value = config.overlayHandlePositionPercent,
-                                onValueChange = { v ->
-                                    onUpdateConfig { it.copy(overlayHandlePositionPercent = v.coerceIn(0.05f, 0.95f)) }
-                                },
-                                valueRange = 0.05f..0.95f,
-                                colors = SliderDefaults.colors(thumbColor = colors.accent, activeTrackColor = colors.accent),
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-                }
-
-                SettingsToggleRow(
-                    title = "實驗性選配：啟動 App 時以 Freeform 避讓 Dock 區域",
-                    subtitle = "嘗試讓開啟的 App 自動往右（或上方）避開 Dock 寬度；註：部分車機可能出現視窗標題列，或 YT／導航王全螢幕時會跳回滿版",
-                    checked = config.launchAppsAvoidDockFreeform,
-                    onCheckedChange = { checked -> onUpdateConfig { it.copy(launchAppsAvoidDockFreeform = checked) } }
-                )
-
-                SettingsToggleRow(
-                    title = "首頁顯示 DX-Car Launcher 側邊／底部 Dock",
-                    subtitle = "關閉後首頁將隱藏本啟動器 Dock（僅留左下角九宮格按鈕），適合已使用車機原廠左側列時搭配",
-                    checked = config.showHomeDock,
-                    onCheckedChange = { checked -> onUpdateConfig { it.copy(showHomeDock = checked) } }
-                )
-
-                SettingsToggleRow(
-                    title = "24 小時制時鐘",
-                    subtitle = "關閉則預設顯示 12 小時制時間（含 AM / PM，如 8:20 PM）",
-                    checked = config.is24HourClock,
-                    onCheckedChange = { checked -> onUpdateConfig { it.copy(is24HourClock = checked) } }
-                )
-
-                // 單指車機模擬雙指 3D 俯仰手勢使用教學
-                Surface(
-                    color = colors.accent.copy(alpha = 0.09f),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, colors.accent.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
-                ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Text(
-                            text = "🧊 單指車機如何切換 Google 地圖 3D 建築（模擬雙指俯仰教學）",
-                            color = colors.primaryText,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "1. 先至下方「AI Box 權限健檢」開啟【DX-Car Launcher 無障礙服務】，並確認上方「常駐懸浮 Dock」已開啟。",
-                            color = colors.secondaryText,
-                            fontSize = 12.sp
-                        )
-                        Text(
-                            text = "2. 開啟原版 Google 地圖後，從螢幕邊緣滑出（或輕點）常駐懸浮 Dock，找到立體方塊【3D 視角】小圖示。",
-                            color = colors.secondaryText,
-                            fontSize = 12.sp
-                        )
-                        Text(
-                            text = "3. 點一下【3D 視角】即自動收起 Dock 並對地圖中央注入「雙指同時往上滑」，立即傾斜顯示 Google 地圖 3D 建築；長按【3D 視角】則注入「雙指同時往下滑」切回 2D 平面。",
-                            color = colors.secondaryText,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-            }
-
-            // SECTION 3: 多指操作手勢
-            SettingsSectionCard(
-                icon = Icons.Rounded.Gesture,
-                title = "車載多指操作手勢"
-            ) {
-                SettingsToggleRow(
-                    title = "啟用多指操作手勢",
-                    subtitle = "支援首頁與選單全域多指快速操作，不影響單指地圖拖曳",
-                    checked = config.multiFingerGesturesEnabled,
-                    onCheckedChange = { checked -> onUpdateConfig { it.copy(multiFingerGesturesEnabled = checked) } }
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    GestureLegendRow("雙指左側上下滑", "即時調整車機螢幕亮度")
-                    GestureLegendRow("雙指右側上下滑", "即時調整媒體播放音量")
-                    GestureLegendRow("雙指左／右滑", "切換下一首／上一首歌曲或影片")
-                    GestureLegendRow("三指左／右滑", "首頁左右分割視窗立即互換")
-                    GestureLegendRow("三指向下滑", "一鍵返回 AA 分割首頁")
-                    GestureLegendRow("三指輕點", "立即切換白天／夜晚模式")
-                    GestureLegendRow("四指捏合／展開", "隱藏或顯示 Dock 進入純淨全螢幕")
-                }
-            }
-
-            // SECTION 4: 來電與訊息同步（藍牙 + 手機同步端）
-            SettingsSectionCard(
-                icon = Icons.Rounded.NotificationsActive,
-                title = "來電與訊息顯示（手機配對藍牙同步）"
-            ) {
-                Surface(
-                    color = colors.cardSurfaceElevated,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (bridgeStatus.transportLabel.isNotBlank()) {
-                                    "通知同步狀態：${bridgeStatus.status.labelZh} (${bridgeStatus.transportLabel})"
-                                } else {
-                                    "通知同步狀態：${bridgeStatus.status.labelZh}"
-                                },
-                                color = colors.primaryText,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = if (bridgeStatus.peerName.isNotBlank()) {
-                                    "目前連線手機：${bridgeStatus.peerName}"
-                                } else {
-                                    "支援藍牙 SPP ＋ 同 Wi-Fi 熱點自動直連；於手機安裝同一 APK 即同步 LINE／簡訊／來電"
-                                },
-                                color = colors.secondaryText,
+                                text = updateState.statusMessage,
+                                color = if (updateState.hasUpdate || updateState.downloadedReady) colors.accent else colors.secondaryText,
                                 fontSize = 12.sp
                             )
                         }
-                        Icon(
-                            imageVector = Icons.Rounded.Bluetooth,
-                            contentDescription = null,
-                            tint = colors.accent,
-                            modifier = Modifier.size(28.dp)
-                        )
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = onCheckUpdateNow,
+                                enabled = !updateState.checking && !updateState.downloading,
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Text(if (updateState.checking) "檢查中…" else "檢查更新")
+                            }
+                            if (updateState.hasUpdate || updateState.downloadedReady) {
+                                Button(
+                                    onClick = onDownloadOrInstallUpdate,
+                                    enabled = !updateState.downloading,
+                                    colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Text(
+                                        when {
+                                            updateState.downloadedReady -> "立即安裝 v${updateState.latestVersion}"
+                                            updateState.downloading -> "下載中 ${(updateState.progress * 100).toInt()}%"
+                                            else -> "下載更新"
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        if (updateState.downloading) {
+                            if (updateState.totalBytes > 0L) {
+                                LinearProgressIndicator(
+                                    progress = { updateState.progress },
+                                    color = colors.accent,
+                                    trackColor = colors.cardBorder,
+                                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp))
+                                )
+                            } else {
+                                LinearProgressIndicator(
+                                    color = colors.accent,
+                                    trackColor = colors.cardBorder,
+                                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp))
+                                )
+                            }
+                        }
+
+                        Surface(
+                            color = colors.cardSurfaceElevated,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, colors.accent.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+                                .clickable {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(UpdateManager.GITHUB_URL))
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    runCatching { context.startActivity(intent) }
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Rounded.Code, contentDescription = null, tint = colors.accent)
+                                    Spacer(Modifier.width(10.dp))
+                                    Column {
+                                        Text("GitHub 開源儲存庫", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                        Text(UpdateManager.GITHUB_URL, color = colors.accent, fontSize = 11.sp)
+                                    }
+                                }
+                                Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, tint = colors.accent)
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                if (confirmResetPending) {
+                                    onResetSettingsToDefaults()
+                                    confirmResetPending = false
+                                } else {
+                                    confirmResetPending = true
+                                }
+                            },
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Rounded.RestartAlt, contentDescription = null, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (confirmResetPending) "再次點擊確認重置所有設定" else "恢復啟動器設定為預設值", fontSize = 12.sp)
+                        }
                     }
                 }
 
-                SettingsToggleRow(
-                    title = "全螢幕看 YouTube／導航時顯示頂部來電與訊息懸浮卡片",
-                    subtitle = "仿 Android Auto 頂部懸浮橫幅，支援接聽、掛斷、快速回覆",
-                    checked = config.globalCallMessageBannerEnabled,
-                    onCheckedChange = { checked -> onUpdateConfig { it.copy(globalCallMessageBannerEnabled = checked) } }
-                )
+                AdaptiveTwoColumnRow(isWideTwoColumn, cardPhoneBridge, cardUpdatesAndGithub)
 
-                SettingsToggleRow(
-                    title = "收到新訊息時自動語音朗讀 (TTS)",
-                    subtitle = "自動壓低音樂音量並用繁體中文語音播報寄件人與內容",
-                    checked = config.autoReadMessagesTts,
-                    onCheckedChange = { checked -> onUpdateConfig { it.copy(autoReadMessagesTts = checked) } }
-                )
+                Spacer(Modifier.height(18.dp))
+            }
+        }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedButton(onClick = onSimulateCall, shape = RoundedCornerShape(14.dp)) {
-                        Text("測試模擬來電卡片")
-                    }
-                    OutlinedButton(onClick = onSimulateMessage, shape = RoundedCornerShape(14.dp)) {
-                        Text("測試模擬 LINE 訊息與朗讀")
-                    }
-                }
-
-                // 車機端配對與抓通知設定提醒卡片
+        // DEDICATED PERMISSIONS + 60FPS SHEET (Opened by clicking the Top Permissions Pill Button!)
+        if (showPermissionsSheet) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.74f))
+                    .clickable { showPermissionsSheet = false },
+                contentAlignment = Alignment.Center
+            ) {
                 Surface(
-                    color = colors.accent.copy(alpha = 0.09f),
-                    shape = RoundedCornerShape(16.dp),
+                    color = colors.cardSurface,
+                    shape = RoundedCornerShape(26.dp),
+                    shadowElevation = 24.dp,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, colors.accent.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                        .fillMaxWidth(0.84f)
+                        .padding(vertical = 20.dp)
+                        .border(1.5.dp, colors.accent, RoundedCornerShape(26.dp))
+                        .clickable(enabled = false) {}
                 ) {
                     Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Text(
-                            text = "📖 手機與車機「抓通知」快速設定提醒",
-                            color = colors.primaryText,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "1. 車機端：下方「AI Box 權限健檢」請開啟【顯示在其他應用程式上層】與【通知存取權】。",
-                            color = colors.secondaryText,
-                            fontSize = 12.sp
-                        )
-                        Text(
-                            text = "2. 手機端：安裝同一支 APK 開啟會自動進入手機同步端，請開啟【通知讀取權限】（若遇「受限制的設定」可點畫面提示到應用程式資訊右上角 ⋮ 解鎖）、【藍牙／通話權限】與【忽略電池最佳化】。",
-                            color = colors.secondaryText,
-                            fontSize = 12.sp
-                        )
-                        Text(
-                            text = "3. 省電連線機制：手機端平常待機不搜尋不耗電，會在「手機連上車機藍牙」時自動喚醒同步；亦可開手機 Wi-Fi 熱點給車機連網作為雙備援。",
-                            color = colors.secondaryText,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-            }
-
-            // SECTION 5: AI Box 權限健檢
-            SettingsSectionCard(
-                icon = Icons.Rounded.Security,
-                title = "AI Box 權限與系統設定健檢"
-            ) {
-                PermissionRow(
-                    title = "設為預設車機啟動器 (Home)",
-                    granted = permissionHealth.isDefaultHome,
-                    onAction = { SystemStatusMonitor.openHomeLauncherSettings(context) }
-                )
-                PermissionRow(
-                    title = "顯示在其他應用程式上層（常駐 Dock 與全螢幕來電訊息）",
-                    granted = permissionHealth.hasOverlay,
-                    onAction = { PermissionHelper.openOverlayPermission(context) }
-                )
-                PermissionRow(
-                    title = "通知存取權（媒體播放控制、Google 導航提示、訊息攔截）",
-                    granted = permissionHealth.hasNotificationListener,
-                    onAction = { PermissionHelper.openNotificationListenerSettings(context) }
-                )
-                PermissionRow(
-                    title = "無障礙輔助服務（追蹤全螢幕 YouTube 與全域返回首頁）",
-                    granted = permissionHealth.hasAccessibility,
-                    onAction = { PermissionHelper.openAccessibilitySettings(context) }
-                )
-                PermissionRow(
-                    title = "定位、藍牙、電話與通知執行期權限",
-                    granted = permissionHealth.hasLocation && permissionHealth.hasBluetooth && permissionHealth.hasPhoneState,
-                    onAction = onRequestRuntimePermissions
-                )
-                PermissionRow(
-                    title = "修改系統設定（雙指滑動調整亮度）",
-                    granted = permissionHealth.hasWriteSettings,
-                    onAction = { PermissionHelper.openWriteSettingsPermission(context) }
-                )
-                PermissionRow(
-                    title = "忽略電池最佳化（防止車機背景砍掉常駐 Dock 與藍牙橋接）",
-                    granted = permissionHealth.hasIgnoreBatteryOpt,
-                    onAction = { PermissionHelper.requestIgnoreBatteryOptimizations(context) }
-                )
-
-                OutlinedButton(
-                    onClick = onRefreshPermissions,
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("重新檢查權限狀態")
-                }
-            }
-
-            // SECTION 6: 自動檢測 App 更新、自動下載與 GitHub 連結
-            SettingsSectionCard(
-                icon = Icons.Rounded.CloudDownload,
-                title = "App 自動更新與 GitHub 開源專案"
-            ) {
-                SettingsToggleRow(
-                    title = "啟動時自動檢測並自動下載新版 APK",
-                    subtitle = "偵測到 GitHub Releases 有新版本時自動背景下載並提示一鍵安裝",
-                    checked = config.autoCheckAndDownloadUpdate,
-                    onCheckedChange = { checked -> onUpdateConfig { it.copy(autoCheckAndDownloadUpdate = checked) } }
-                )
-
-                Surface(
-                    color = colors.cardSurfaceElevated,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
+                        modifier = Modifier
+                            .padding(22.dp)
+                            .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Row(
@@ -1230,154 +1065,228 @@ fun SettingsScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
-                                Text(
-                                    text = "目前版本：v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})",
-                                    color = colors.primaryText,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = updateState.statusMessage.ifBlank { "對接 GitHub Releases 自動更新通道" },
-                                    color = if (updateState.hasUpdate || updateState.downloadedReady) colors.accent else colors.secondaryText,
-                                    fontSize = 12.sp
-                                )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.Security, contentDescription = null, tint = colors.accent, modifier = Modifier.size(26.dp))
+                                Spacer(Modifier.width(10.dp))
+                                Column {
+                                    Text("車機／平板權限列表與 60fps 高流暢設定", color = colors.primaryText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                                    Text("目前已授權 $grantedPerms / $totalPerms 項必要權限", color = colors.secondaryText, fontSize = 12.sp)
+                                }
                             }
-
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(
-                                    onClick = onCheckUpdateNow,
-                                    enabled = !updateState.checking && !updateState.downloading,
-                                    shape = RoundedCornerShape(14.dp)
-                                ) {
-                                    Text(if (updateState.checking) "檢查中…" else "檢查更新")
+                                OutlinedButton(onClick = onRefreshPermissions, shape = RoundedCornerShape(12.dp)) {
+                                    Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("重新檢查")
                                 }
-
-                                if (updateState.hasUpdate || updateState.downloadedReady) {
-                                    Button(
-                                        onClick = onDownloadOrInstallUpdate,
-                                        enabled = !updateState.downloading,
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = colors.accent,
-                                            contentColor = colors.onAccent
-                                        ),
-                                        shape = RoundedCornerShape(14.dp)
-                                    ) {
-                                        Text(
-                                            when {
-                                                updateState.downloadedReady -> "立即安裝 v${updateState.latestVersion}"
-                                                updateState.downloading -> "下載中 ${(updateState.progress * 100).toInt()}%"
-                                                else -> "下載更新"
-                                            }
-                                        )
-                                    }
+                                IconButton(onClick = { showPermissionsSheet = false }) {
+                                    Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.primaryText)
                                 }
                             }
                         }
 
-                        if (updateState.downloading) {
-                            Spacer(Modifier.height(4.dp))
-                            if (updateState.totalBytes > 0L) {
-                                LinearProgressIndicator(
-                                    progress = { updateState.progress },
-                                    color = colors.accent,
-                                    trackColor = colors.cardBorder,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(8.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                )
-                            } else {
-                                LinearProgressIndicator(
-                                    color = colors.accent,
-                                    trackColor = colors.cardBorder,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(8.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Direct GitHub Repository Link Card
-                Surface(
-                    color = colors.cardSurfaceElevated,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, colors.accent.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
-                        .clickable {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(UpdateManager.GITHUB_URL))
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            runCatching { context.startActivity(intent) }
-                        }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(colors.accent.copy(alpha = 0.16f))
+                        // 60FPS High Frame Rate Switch + Jump to Factory AI Box Settings!
+                        Surface(
+                            color = colors.accent.copy(alpha = 0.14f),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.2.dp, colors.accent, RoundedCornerShape(16.dp))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(Icons.Rounded.Code, contentDescription = null, tint = colors.accent)
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "GitHub 開源儲存庫",
-                                    color = colors.primaryText,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = UpdateManager.GITHUB_URL,
-                                    color = colors.accent,
-                                    fontSize = 12.sp
-                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                        Icon(Icons.Rounded.Speed, contentDescription = null, tint = colors.accent, modifier = Modifier.size(22.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Column {
+                                            Text("開啟 60fps 畫面高幀率模式", color = colors.primaryText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                            Text("啟用啟動器 60Hz 高更新率渲染；若車機原廠設定有提供 60fps 開關，可點下方按鈕進入開啟", color = colors.secondaryText, fontSize = 12.sp)
+                                        }
+                                    }
+                                    Switch(
+                                        checked = config.prefer60FpsEnabled,
+                                        onCheckedChange = { checked ->
+                                            onUpdateConfig { it.copy(prefer60FpsEnabled = checked) }
+                                            if (checked) {
+                                                SystemStatusMonitor.openAiBoxVendorSettings(context, preferDisplayFor60Fps = true)
+                                            }
+                                        },
+                                        colors = SwitchDefaults.colors(checkedThumbColor = colors.onAccent, checkedTrackColor = colors.accent)
+                                    )
+                                }
+                                Button(
+                                    onClick = { SystemStatusMonitor.openAiBoxVendorSettings(context, preferDisplayFor60Fps = true) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("進入原廠車機設定開啟 60fps（若有此選項即可開啟）", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
-                            contentDescription = "開啟 GitHub",
-                            tint = colors.accent
+
+                        PermissionRow(
+                            title = "設為預設車機啟動器 (Home)",
+                            granted = permissionHealth.isDefaultHome,
+                            onAction = onRequestSetDefaultHome
                         )
-                    }
-                }
-                // Reset all DX-Car Launcher settings to factory defaults
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            if (confirmResetPending) {
-                                onResetSettingsToDefaults()
-                                confirmResetPending = false
-                            } else {
-                                confirmResetPending = true
-                            }
-                        },
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Icon(Icons.Rounded.RestartAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            if (confirmResetPending) "再次點擊確認恢復所有設定為預設值"
-                            else "恢復啟動器設定為預設值"
+                        PermissionRow(
+                            title = "顯示在其他應用程式上層（常駐 Dock、3D 指標、遠端滑鼠與來電橫幅）",
+                            granted = permissionHealth.hasOverlay,
+                            onAction = { PermissionHelper.openOverlayPermission(context) }
+                        )
+                        PermissionRow(
+                            title = "通知存取權（音樂封面／紅心控制、Google 天氣讀取、導航與訊息）",
+                            granted = permissionHealth.hasNotificationListener,
+                            onAction = { PermissionHelper.openNotificationListenerSettings(context) }
+                        )
+                        PermissionRow(
+                            title = "無障礙輔助服務（AOSP 可拖動分屏、3D 類滑鼠指標與手機遠端滑鼠點擊）",
+                            granted = permissionHealth.hasAccessibility,
+                            onAction = { PermissionHelper.openAccessibilitySettings(context) }
+                        )
+                        PermissionRow(
+                            title = "定位、藍牙、電話與通知執行期權限",
+                            granted = permissionHealth.hasLocation && permissionHealth.hasBluetooth && permissionHealth.hasPhoneState,
+                            onAction = onRequestRuntimePermissions
+                        )
+                        PermissionRow(
+                            title = "修改系統設定（快捷面板螢幕亮度控制）",
+                            granted = permissionHealth.hasWriteSettings,
+                            onAction = { PermissionHelper.openWriteSettingsPermission(context) }
+                        )
+                        PermissionRow(
+                            title = "忽略電池最佳化（防止背景關閉常駐 Dock 與雙通道連線）",
+                            granted = permissionHealth.hasIgnoreBatteryOpt,
+                            onAction = { PermissionHelper.requestIgnoreBatteryOptimizations(context) }
                         )
                     }
                 }
             }
+        }
 
-            Spacer(Modifier.height(16.dp))
+        // EXTRA-LARGE FONT TUTORIAL MODALS (Triggered by clicking any "教學" button!)
+        when (activeTutorial) {
+            CarSettingsTutorialTopic.CURSOR_3D -> {
+                ExtraLargeTutorialModal(
+                    title = "🧊 Dock「3D 俯瞰」類滑鼠指標 · 操作教學",
+                    steps = TUTORIAL_3D_CURSOR_STEPS,
+                    highlightNote = "💡 提醒：請先點設定最上方「權限設定」確認【顯示在其他應用程式上層】與【無障礙輔助服務】皆已開啟。",
+                    onClose = { activeTutorial = null }
+                )
+            }
+
+            CarSettingsTutorialTopic.PHONE_PAIRING -> {
+                ExtraLargeTutorialModal(
+                    title = "📱 車機與手機配對同步 · 完整教學",
+                    steps = listOf(
+                        "【車機端】點設定最上方「權限設定」，開啟【顯示在其他應用程式上層】、【通知存取權】與【無障礙輔助服務】（啟用遠端滑鼠點擊）。",
+                        "【手機端】安裝同一支 APK 開啟會自動進入手機介面：點最上方「權限設定」開啟【通知讀取權限】（Android 13+ 若顯示受限制設定，先去應用程式資訊右上角 ⋮ 點「允許受限制的設定」）。",
+                        "【自動連線方式】只要「手機連上車機盒藍牙（可接電話狀態）」或「開啟手機 Wi-Fi 熱點給車機連網」，雙端會自動透過藍牙 SPP 或熱點閘道穩定連線，不需手動輸入 IP！",
+                        "【遠端滑鼠觸控板】連線後手機畫面可直接當作車機滑鼠觸控板使用；點手機上的「車機滑鼠靈敏度設定」，車機畫面就會自動跳出系統指標速度設定頁！"
+                    ),
+                    highlightNote = "✓ 已修復 Wi-Fi 熱點頻繁斷開問題：現在通知推播與「推播測試通知」皆走背景高速通道，連線持續穩定不中斷！",
+                    onClose = { activeTutorial = null }
+                )
+            }
+
+            CarSettingsTutorialTopic.STOCK_DOCK_CONFLICT -> {
+                ExtraLargeTutorialModal(
+                    title = "⚙️ 關閉原車啟動器 Dock 與懸浮球 · 教學",
+                    steps = listOf(
+                        "當您開啟 DX-Car Launcher 的「常駐懸浮 Dock（永久懸浮或跨啟動器懸浮）」時，若車機盒原本自帶左側欄或白色懸浮球，兩個懸浮層可能會重疊。",
+                        "請點擊下方「前往車機盒設定頁面」按鈕（或開啟車機盒內建的「車機設定／輔助觸控／懸浮球」App）。",
+                        "將原車系統的「懸浮按鈕（Assistive Touch／小白點）」與「原廠導航側邊欄」關閉，即可享受乾淨無遮擋的 AA Coolwalk 常駐 Dock！"
+                    ),
+                    actionButtonLabel = "立即前往車機盒設定頁面",
+                    onActionClick = {
+                        SystemStatusMonitor.openAiBoxVendorSettings(context, preferDisplayFor60Fps = false)
+                        activeTutorial = null
+                    },
+                    onClose = { activeTutorial = null }
+                )
+            }
+
+            null -> Unit
+        }
+    }
+}
+
+@Composable
+private fun AdaptiveTwoColumnRow(
+    twoColumn: Boolean,
+    leftCard: @Composable (Modifier) -> Unit,
+    rightCard: @Composable (Modifier) -> Unit
+) {
+    if (twoColumn) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            leftCard(Modifier.weight(1f))
+            rightCard(Modifier.weight(1f))
+        }
+    } else {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            leftCard(Modifier.fillMaxWidth())
+            rightCard(Modifier.fillMaxWidth())
+        }
+    }
+}
+
+@Composable
+private fun CategoryHeaderBanner(
+    categoryTitle: String,
+    hint: String
+) {
+    val colors = LocalDxCarColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp, start = 4.dp, end = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            text = categoryTitle,
+            color = colors.accent,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.ExtraBold
+        )
+        Text(
+            text = hint,
+            color = colors.secondaryText,
+            fontSize = 12.sp
+        )
+    }
+}
+
+@Composable
+fun TutorialPillButton(
+    label: String = "教學",
+    onClick: () -> Unit
+) {
+    val colors = LocalDxCarColors.current
+    Surface(
+        color = colors.accent,
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.bouncyClickable(pressedScale = 0.90f, onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Rounded.HelpOutline, contentDescription = null, tint = colors.onAccent, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(label, color = colors.onAccent, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
         }
     }
 }
@@ -1386,29 +1295,40 @@ fun SettingsScreen(
 private fun SettingsSectionCard(
     icon: ImageVector,
     title: String,
+    headerTrailing: (@Composable () -> Unit)? = null,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
     val colors = LocalDxCarColors.current
     Surface(
         color = colors.cardSurface,
         shape = RoundedCornerShape(22.dp),
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .border(1.dp, colors.cardBorder, RoundedCornerShape(22.dp))
     ) {
         Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(11.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, contentDescription = null, tint = colors.accent, modifier = Modifier.size(22.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = title,
-                    color = colors.primaryText,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                ) {
+                    Icon(icon, contentDescription = null, tint = colors.accent, modifier = Modifier.size(21.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = title,
+                        color = colors.primaryText,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                headerTrailing?.invoke()
             }
             content()
         }
@@ -1424,21 +1344,17 @@ private fun SelectablePill(
     val colors = LocalDxCarColors.current
     Surface(
         color = if (selected) colors.accent else colors.cardSurfaceElevated,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         modifier = Modifier
-            .border(
-                1.dp,
-                if (selected) colors.accent else colors.cardBorder,
-                RoundedCornerShape(16.dp)
-            )
+            .border(1.dp, if (selected) colors.accent else colors.cardBorder, RoundedCornerShape(14.dp))
             .bouncyClickable(pressedScale = 0.91f, onClick = onClick)
     ) {
         Text(
             text = text,
             color = if (selected) colors.onAccent else colors.primaryText,
-            fontSize = 13.sp,
+            fontSize = 12.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
         )
     }
 }
@@ -1454,29 +1370,29 @@ private fun TimeStepperCard(
     val colors = LocalDxCarColors.current
     Surface(
         color = colors.cardSurfaceElevated,
-        shape = RoundedCornerShape(16.dp),
-        modifier = modifier.border(1.dp, colors.cardBorder, RoundedCornerShape(16.dp))
+        shape = RoundedCornerShape(14.dp),
+        modifier = modifier.border(1.dp, colors.cardBorder, RoundedCornerShape(14.dp))
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column {
-                Text(label, color = colors.secondaryText, fontSize = 11.sp)
+                Text(label, color = colors.secondaryText, fontSize = 10.sp)
                 Text(
                     text = String.format(Locale.US, "%02d:%02d", hour, minute),
                     color = colors.primaryText,
-                    fontSize = 20.sp,
+                    fontSize = 17.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
             Row {
-                IconButton(onClick = { onDeltaMinutes(-15) }) {
-                    Icon(Icons.Rounded.Remove, contentDescription = "減少15分", tint = colors.primaryText)
+                IconButton(onClick = { onDeltaMinutes(-15) }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Rounded.Remove, contentDescription = "減少15分", tint = colors.primaryText, modifier = Modifier.size(18.dp))
                 }
-                IconButton(onClick = { onDeltaMinutes(15) }) {
-                    Icon(Icons.Rounded.Add, contentDescription = "增加15分", tint = colors.primaryText)
+                IconButton(onClick = { onDeltaMinutes(15) }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Rounded.Add, contentDescription = "增加15分", tint = colors.primaryText, modifier = Modifier.size(18.dp))
                 }
             }
         }
@@ -1495,38 +1411,19 @@ private fun SettingsToggleRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onCheckedChange(!checked) }
-            .padding(vertical = 4.dp),
+            .padding(vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-            Text(title, color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = colors.secondaryText, fontSize = 12.sp)
+        Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+            Text(title, color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = colors.secondaryText, fontSize = 11.sp)
         }
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = colors.onAccent,
-                checkedTrackColor = colors.accent
-            )
+            colors = SwitchDefaults.colors(checkedThumbColor = colors.onAccent, checkedTrackColor = colors.accent)
         )
-    }
-}
-
-@Composable
-private fun GestureLegendRow(gesture: String, action: String) {
-    val colors = LocalDxCarColors.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(colors.cardSurfaceElevated)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(gesture, color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        Text(action, color = colors.primaryText, fontSize = 13.sp)
     }
 }
 
@@ -1549,7 +1446,7 @@ private fun PermissionRow(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f).padding(end = 8.dp)
         ) {
             Icon(
                 imageVector = if (granted) Icons.Rounded.CheckCircle else Icons.Rounded.WarningAmber,

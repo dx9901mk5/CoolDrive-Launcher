@@ -4,12 +4,13 @@ import android.app.Application
 import com.dxcar.launcher.comms.CarNotificationCenter
 import com.dxcar.launcher.comms.TtsAnnouncer
 import com.dxcar.launcher.data.LauncherPreferences
-import com.dxcar.launcher.map.BuiltInNavEngine
 import com.dxcar.launcher.map.LocationTracker
+import com.dxcar.launcher.map.OfflineMapManager
 import com.dxcar.launcher.media.MediaControlBridge
 import com.dxcar.launcher.system.InstalledAppsRepository
 import com.dxcar.launcher.system.SystemStatusMonitor
 import com.dxcar.launcher.update.UpdateManager
+import com.dxcar.launcher.weather.LocalWeatherRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,9 +28,11 @@ class DxCarApp : Application() {
         private set
     lateinit var mediaControlBridge: MediaControlBridge
         private set
-    lateinit var ttsAnnouncer: TtsAnnouncer
+    lateinit var weatherRepository: LocalWeatherRepository
         private set
-    lateinit var builtInNavEngine: BuiltInNavEngine
+    lateinit var offlineMapManager: OfflineMapManager
+        private set
+    lateinit var ttsAnnouncer: TtsAnnouncer
         private set
     lateinit var notificationCenter: CarNotificationCenter
         private set
@@ -46,12 +49,18 @@ class DxCarApp : Application() {
         runCatching { MapLibre.getInstance(this) }
 
         preferences = LauncherPreferences(this)
+        val cfg = preferences.config.value
         systemStatusMonitor = SystemStatusMonitor(this).apply { start() }
         installedAppsRepository = InstalledAppsRepository(this).apply { start() }
         locationTracker = LocationTracker(this, preferences).apply { startIfPermitted() }
-        mediaControlBridge = MediaControlBridge(this).apply { start() }
+        mediaControlBridge = MediaControlBridge(this, preferences).apply { start() }
+        weatherRepository = LocalWeatherRepository(this).apply {
+            start(cfg.lastKnownLat, cfg.lastKnownLon)
+        }
+        offlineMapManager = OfflineMapManager(this, preferences).apply {
+            evaluateUpdateNeeded(cfg.lastKnownLat, cfg.lastKnownLon)
+        }
         ttsAnnouncer = TtsAnnouncer(this)
-        builtInNavEngine = BuiltInNavEngine(ttsAnnouncer)
         notificationCenter = CarNotificationCenter(preferences, ttsAnnouncer)
         updateManager = UpdateManager(this)
     }

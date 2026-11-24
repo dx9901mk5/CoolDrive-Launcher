@@ -122,8 +122,9 @@ fun CoolwalkDock(
     onNotificationsClick: () -> Unit,
     onBackClick: () -> Unit = {},
     onRecentsClick: () -> Unit = {},
-    onTwoFingerTilt3D: (() -> Unit)? = null,
-    onTwoFingerTilt2D: (() -> Unit)? = null,
+    is3DCursorActive: Boolean = false,
+    onWifiLongClick: () -> Unit = onWifiClick,
+    onToggle3DCursor: (() -> Unit)? = null,
     onCollapseOverlay: (() -> Unit)? = null,
     onTogglePinOverlay: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -131,7 +132,7 @@ fun CoolwalkDock(
     val colors = LocalDxCarColors.current
     val timeText = if (is24HourClock) systemStatus.time24h else systemStatus.time12h
 
-    if (placement == ResolvedDockPlacement.BOTTOM) {
+    if (placement.isHorizontalBar) {
         val launcherCluster: @Composable () -> Unit = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -148,13 +149,12 @@ fun CoolwalkDock(
                     onBackClick = onBackClick,
                     onRecentsClick = onRecentsClick
                 )
-                if (isOverlayMode && onTwoFingerTilt3D != null) {
+                if (onToggle3DCursor != null) {
                     SmallDockUtilityIcon(
                         icon = Icons.Rounded.ViewInAr,
-                        contentDescription = "模擬雙指上滑切 3D 建築（長按回 2D）",
-                        tint = colors.accent,
-                        onClick = onTwoFingerTilt3D,
-                        onLongClick = onTwoFingerTilt2D
+                        contentDescription = "開啟 3D 類滑鼠指標",
+                        tint = if (is3DCursorActive) Color(0xFF22C55E) else colors.accent,
+                        onClick = onToggle3DCursor
                     )
                 }
                 if (isOverlayMode && onTogglePinOverlay != null) {
@@ -208,7 +208,8 @@ fun CoolwalkDock(
                     WifiStatusChip(
                         connected = systemStatus.wifiConnected,
                         enabled = systemStatus.wifiEnabled,
-                        onClick = onWifiClick
+                        onClick = onWifiClick,
+                        onLongClick = onWifiLongClick
                     )
                     BluetoothStatusChip(
                         connected = systemStatus.bluetoothConnected,
@@ -226,7 +227,8 @@ fun CoolwalkDock(
                     WifiStatusChip(
                         connected = systemStatus.wifiConnected,
                         enabled = systemStatus.wifiEnabled,
-                        onClick = onWifiClick
+                        onClick = onWifiClick,
+                        onLongClick = onWifiLongClick
                     )
                     NotificationBellButton(
                         unreadCount = unreadCount,
@@ -315,7 +317,8 @@ fun CoolwalkDock(
                             connected = systemStatus.wifiConnected,
                             enabled = systemStatus.wifiEnabled,
                             compact = true,
-                            onClick = onWifiClick
+                            onClick = onWifiClick,
+                            onLongClick = onWifiLongClick
                         )
                         BluetoothStatusChip(
                             connected = systemStatus.bluetoothConnected,
@@ -325,33 +328,30 @@ fun CoolwalkDock(
                             onLongClick = onBluetoothLongClick
                         )
                     }
-                    if (isOverlayMode && (onCollapseOverlay != null || onTogglePinOverlay != null || onTwoFingerTilt3D != null)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                            if (onTwoFingerTilt3D != null) {
-                                SmallDockUtilityIcon(
-                                    icon = Icons.Rounded.ViewInAr,
-                                    contentDescription = "模擬雙指上滑切 3D 建築（長按回 2D）",
-                                    tint = colors.accent,
-                                    onClick = onTwoFingerTilt3D,
-                                    onLongClick = onTwoFingerTilt2D
-                                )
-                            }
-                            if (onTogglePinOverlay != null) {
-                                SmallDockUtilityIcon(
-                                    icon = Icons.Rounded.PushPin,
-                                    contentDescription = if (isOverlayPinnedOpen) "取消釘選常駐" else "暫時釘選展開",
-                                    tint = if (isOverlayPinnedOpen) colors.accent else colors.secondaryText,
-                                    onClick = onTogglePinOverlay
-                                )
-                            }
-                            if (onCollapseOverlay != null) {
-                                SmallDockUtilityIcon(
-                                    icon = Icons.Rounded.ChevronLeft,
-                                    contentDescription = "收合常駐列",
-                                    tint = colors.secondaryText,
-                                    onClick = onCollapseOverlay
-                                )
-                            }
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        if (onToggle3DCursor != null) {
+                            SmallDockUtilityIcon(
+                                icon = Icons.Rounded.ViewInAr,
+                                contentDescription = "開啟 3D 俯瞰類滑鼠指標",
+                                tint = if (is3DCursorActive) Color(0xFF22C55E) else colors.accent,
+                                onClick = onToggle3DCursor
+                            )
+                        }
+                        if (isOverlayMode && onTogglePinOverlay != null) {
+                            SmallDockUtilityIcon(
+                                icon = Icons.Rounded.PushPin,
+                                contentDescription = if (isOverlayPinnedOpen) "取消釘選常駐" else "暫時釘選展開",
+                                tint = if (isOverlayPinnedOpen) colors.accent else colors.secondaryText,
+                                onClick = onTogglePinOverlay
+                            )
+                        }
+                        if (isOverlayMode && onCollapseOverlay != null) {
+                            SmallDockUtilityIcon(
+                                icon = Icons.Rounded.ChevronLeft,
+                                contentDescription = "收合常駐列",
+                                tint = colors.secondaryText,
+                                onClick = onCollapseOverlay
+                            )
                         }
                     }
                 }
@@ -488,12 +488,14 @@ private fun DockAppIconTile(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun WifiStatusChip(
     connected: Boolean,
     enabled: Boolean,
     compact: Boolean = false,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = onClick
 ) {
     val colors = LocalDxCarColors.current
     val tint by animateColorAsState(
@@ -511,11 +513,15 @@ private fun WifiStatusChip(
             .size(if (compact) 29.dp else 36.dp)
             .clip(CircleShape)
             .background(colors.dockIconContainer.copy(alpha = 0.85f))
-            .bouncyClickable(pressedScale = 0.86f, onClick = onClick)
+            .bouncyCombinedClickable(
+                pressedScale = 0.86f,
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
     ) {
         Icon(
             imageVector = if (connected) Icons.Rounded.Wifi else Icons.Rounded.WifiOff,
-            contentDescription = "Wi-Fi 設定",
+            contentDescription = "點擊展開下拉快捷鍵 · 長按進 Wi-Fi 設定",
             tint = tint,
             modifier = Modifier.size(if (compact) 16.dp else 20.dp)
         )
