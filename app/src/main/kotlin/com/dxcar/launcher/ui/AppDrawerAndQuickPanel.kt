@@ -1,6 +1,12 @@
 package com.dxcar.launcher.ui
 
 import android.annotation.SuppressLint
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
+import android.os.Handler
+import android.os.Looper
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -75,6 +81,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -87,6 +94,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -1454,10 +1462,60 @@ private fun QuickTile(
 }
 
 /**
- * Inline Non-Fullscreen Playable YouTube Card for Page 2 (1:1 Split Right Pane):
- * - Plays YouTube videos directly inside the right 50% card ("youtube可播放影片為右，不要全螢幕").
- * - Traps any HTML5 video customView inside its own local card FrameLayout so video playback
- *   NEVER expands into system fullscreen or covers the left 50% Plan A Map!
+ * Bridge connecting steering wheel / car media buttons (both KeyEvent and MediaSession)
+ * directly to Page 2's EmbeddedYoutubePlayerCard while it is active.
+ */
+object EmbeddedYoutubeBridge {
+    @Volatile
+    var isActive: Boolean = false
+    @Volatile
+    var onTogglePlayPause: (() -> Unit)? = null
+    @Volatile
+    var onPlay: (() -> Unit)? = null
+    @Volatile
+    var onPause: (() -> Unit)? = null
+    @Volatile
+    var onNext: (() -> Unit)? = null
+    @Volatile
+    var onPrevious: (() -> Unit)? = null
+
+    fun handleMediaKeyEvent(event: KeyEvent): Boolean {
+        if (!isActive || event.action != KeyEvent.ACTION_DOWN) return false
+        return when (event.keyCode) {
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            KeyEvent.KEYCODE_HEADSETHOOK -> {
+                onTogglePlayPause?.invoke()
+                true
+            }
+            KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                onPlay?.invoke()
+                true
+            }
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                onPause?.invoke()
+                true
+            }
+            KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                onNext?.invoke()
+                true
+            }
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                onPrevious?.invoke()
+                true
+            }
+            else -> false
+        }
+    }
+}
+
+/**
+ * Inline Playable YouTube Card for Page 2 (1:1 Split Right Pane):
+ * - Plays YouTube videos directly inside the right 50% card.
+ * - Swipe UP in the center video area -> enters Right-Half YouTube Fullscreen (hides top bar & traps
+ *   HTML5 customView inside this right 50% card so left 50% map ratio NEVER moves!).
+ * - Swipe DOWN on the right half while in fullscreen -> exits back to normal YouTube view.
+ * - Registers an active MediaSession + EmbeddedYoutubeBridge so steering wheel Play/Pause buttons
+ *   reliably play & pause YouTube!
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -1465,142 +1523,382 @@ fun EmbeddedYoutubePlayerCard(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalDxCarColors.current
+    val context = LocalContext.current
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var isRightPaneFullscreen by remember { mutableStateOf(false) }
+    var showFsHintBanner by remember { mutableStateOf(false) }
+    var exitCustomViewTrigger by remember { mutableStateOf<(() -> Unit)?>(null) }
 
-    Column(
+    fun evalYoutubeJs(js: String) {
+        Handler(Looper.getMainLooper()).post {
+            webViewRef?.evaluateJavascript(js, null)
+        }
+    }
+
+    val togglePlayPauseJs = """
+        (function() {
+          var v = document.querySelector('video');
+          if (v) {
+            if (v.paused) { v.play(); return 'PLAY'; }
+            else { v.pause(); return 'PAUSE'; }
+          }
+          var btn = document.querySelector('button[aria-label*="Play"], button[aria-label*="Pause"], button[aria-label*="播放"], button[aria-label*="暫停"], .ytp-play-button');
+          if (btn) btn.click();
+          return 'BTN';
+        })();
+    """.trimIndent()
+
+    val playOnlyJs = """
+        (function() {
+          var v = document.querySelector('video');
+          if (v && v.paused) { v.play(); return 'PLAY'; }
+          return 'OK';
+        })();
+    """.trimIndent()
+
+    val pauseOnlyJs = """
+        (function() {
+          var v = document.querySelector('video');
+          if (v && !v.paused) { v.pause(); return 'PAUSE'; }
+          return 'OK';
+        })();
+    """.trimIndent()
+
+    val enterFullscreenJs = """
+        (function() {
+          var fsBtn = document.querySelector('button.fullscreen-icon, button[aria-label*="Full screen"], button[aria-label*="全螢幕"], button[aria-label*="Enter full screen"], .ytp-fullscreen-button');
+          if (fsBtn) { fsBtn.click(); return 'CLICKED_FS'; }
+          var v = document.querySelector('video');
+          if (v && v.requestFullscreen) { v.requestFullscreen().catch(function(){}); return 'REQ_FS'; }
+          if (v && v.webkitEnterFullscreen) { v.webkitEnterFullscreen(); return 'WEBKIT_FS'; }
+          return 'NO_BTN';
+        })();
+    """.trimIndent()
+
+    val exitFullscreenJs = """
+        (function() {
+          if (document.fullscreenElement && document.exitFullscreen) { document.exitFullscreen().catch(function(){}); }
+          var fsBtn = document.querySelector('button[aria-label*="Exit full screen"], button[aria-label*="退出全螢幕"]');
+          if (fsBtn) { fsBtn.click(); }
+        })();
+    """.trimIndent()
+
+    LaunchedEffect(isRightPaneFullscreen) {
+        if (isRightPaneFullscreen) {
+            showFsHintBanner = true
+            kotlinx.coroutines.delay(2400L)
+            showFsHintBanner = false
+        } else {
+            showFsHintBanner = false
+        }
+    }
+
+    // Bind steering wheel MediaSession + KeyEvent bridge while Page 2 YouTube is active
+    DisposableEffect(context) {
+        val actions = PlaybackState.ACTION_PLAY_PAUSE or
+            PlaybackState.ACTION_PLAY or
+            PlaybackState.ACTION_PAUSE or
+            PlaybackState.ACTION_SKIP_TO_NEXT or
+            PlaybackState.ACTION_SKIP_TO_PREVIOUS
+        val session = runCatching {
+            MediaSession(context, "DxCarPage2YouTube").apply {
+                setPlaybackState(
+                    PlaybackState.Builder()
+                        .setActions(actions)
+                        .setState(PlaybackState.STATE_PLAYING, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1f)
+                        .build()
+                )
+                setCallback(object : MediaSession.Callback() {
+                    override fun onPlay() {
+                        evalYoutubeJs(playOnlyJs)
+                    }
+
+                    override fun onPause() {
+                        evalYoutubeJs(pauseOnlyJs)
+                    }
+
+                    override fun onSkipToNext() {
+                        evalYoutubeJs("document.querySelector('button[aria-label*=\"Next\"], .ytp-next-button')?.click();")
+                    }
+
+                    override fun onSkipToPrevious() {
+                        evalYoutubeJs("document.querySelector('button[aria-label*=\"Previous\"], .ytp-prev-button')?.click();")
+                    }
+
+                    override fun onMediaButtonEvent(mediaButtonIntent: android.content.Intent): Boolean {
+                        val ev = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                            mediaButtonIntent.getParcelableExtra(android.content.Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            mediaButtonIntent.getParcelableExtra(android.content.Intent.EXTRA_KEY_EVENT)
+                        }
+                        if (ev != null && EmbeddedYoutubeBridge.handleMediaKeyEvent(ev)) {
+                            return true
+                        }
+                        return super.onMediaButtonEvent(mediaButtonIntent)
+                    }
+                })
+                isActive = true
+            }
+        }.getOrNull()
+
+        EmbeddedYoutubeBridge.isActive = true
+        EmbeddedYoutubeBridge.onTogglePlayPause = { evalYoutubeJs(togglePlayPauseJs) }
+        EmbeddedYoutubeBridge.onPlay = { evalYoutubeJs(playOnlyJs) }
+        EmbeddedYoutubeBridge.onPause = { evalYoutubeJs(pauseOnlyJs) }
+        EmbeddedYoutubeBridge.onNext = {
+            evalYoutubeJs("document.querySelector('button[aria-label*=\"Next\"], .ytp-next-button')?.click();")
+        }
+        EmbeddedYoutubeBridge.onPrevious = {
+            evalYoutubeJs("document.querySelector('button[aria-label*=\"Previous\"], .ytp-prev-button')?.click();")
+        }
+
+        onDispose {
+            EmbeddedYoutubeBridge.isActive = false
+            EmbeddedYoutubeBridge.onTogglePlayPause = null
+            EmbeddedYoutubeBridge.onPlay = null
+            EmbeddedYoutubeBridge.onPause = null
+            EmbeddedYoutubeBridge.onNext = null
+            EmbeddedYoutubeBridge.onPrevious = null
+            runCatching {
+                session?.isActive = false
+                session?.release()
+            }
+        }
+    }
+
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // Compact Inline YouTube Control Bar (Back / Home / Reload — strictly NO fullscreen button!)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(colors.cardSurfaceElevated)
-                .padding(horizontal = 10.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    contentAlignment = Alignment.Center,
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Compact Inline YouTube Control Bar (auto-hides in right-pane fullscreen!)
+            AnimatedVisibility(visible = !isRightPaneFullscreen) {
+                Row(
                     modifier = Modifier
-                        .size(22.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFFFF0000))
+                        .fillMaxWidth()
+                        .background(colors.cardSurfaceElevated)
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.PlayArrow,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(15.dp)
-                    )
-                }
-                Spacer(Modifier.width(7.dp))
-                Text(
-                    text = "YouTube 視窗播放",
-                    color = colors.primaryText,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(
-                    onClick = { if (webViewRef?.canGoBack() == true) webViewRef?.goBack() },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "上一頁",
-                        tint = colors.primaryText,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                IconButton(
-                    onClick = { webViewRef?.loadUrl("https://m.youtube.com") },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Home,
-                        contentDescription = "YouTube 首頁",
-                        tint = colors.primaryText,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                IconButton(
-                    onClick = { webViewRef?.reload() },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Refresh,
-                        contentDescription = "重新整理",
-                        tint = colors.primaryText,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-        }
-
-        // Video WebView + In-Card CustomView Trap (guarantees video stays inside this 50% card!)
-        AndroidView(
-            factory = { ctx ->
-                val cardVideoContainer = FrameLayout(ctx).apply {
-                    setBackgroundColor(android.graphics.Color.BLACK)
-                }
-                var inlineCustomView: View? = null
-                var inlineCustomCallback: WebChromeClient.CustomViewCallback? = null
-
-                val wv = WebView(ctx).apply {
-                    layoutParams = FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                    CookieManager.getInstance().setAcceptCookie(true)
-                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                    settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        mediaPlaybackRequiresUserGesture = false
-                        loadsImagesAutomatically = true
-                        mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                        cacheMode = WebSettings.LOAD_DEFAULT
-                        userAgentString =
-                            "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
-                    }
-                    webViewClient = WebViewClient()
-                    webChromeClient = object : WebChromeClient() {
-                        override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                            if (view == null) return
-                            inlineCustomView?.let { cardVideoContainer.removeView(it) }
-                            inlineCustomView = view
-                            inlineCustomCallback = callback
-                            cardVideoContainer.addView(
-                                view,
-                                FrameLayout.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    ViewGroup.LayoutParams.MATCH_PARENT
-                                )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(22.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFFFF0000))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.PlayArrow,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(15.dp)
                             )
                         }
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            text = "YouTube 視窗播放",
+                            color = colors.primaryText,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
 
-                        override fun onHideCustomView() {
-                            inlineCustomView?.let { cardVideoContainer.removeView(it) }
-                            inlineCustomView = null
-                            inlineCustomCallback?.onCustomViewHidden()
-                            inlineCustomCallback = null
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { if (webViewRef?.canGoBack() == true) webViewRef?.goBack() },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                                contentDescription = "上一頁",
+                                tint = colors.primaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = { webViewRef?.loadUrl("https://m.youtube.com") },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Home,
+                                contentDescription = "YouTube 首頁",
+                                tint = colors.primaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = { webViewRef?.reload() },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Refresh,
+                                contentDescription = "重新整理",
+                                tint = colors.primaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
-                    loadUrl("https://m.youtube.com")
                 }
-                webViewRef = wv
-                cardVideoContainer.addView(wv)
-                cardVideoContainer
-            },
+            }
+
+            // Video WebView + In-Card CustomView Trap + Swipe-Up/Down Right-Half Fullscreen Gesture
+            AndroidView(
+                factory = { ctx ->
+                    var inlineCustomView: View? = null
+                    var inlineCustomCallback: WebChromeClient.CustomViewCallback? = null
+                    var downX = 0f
+                    var downY = 0f
+                    var swipeConsumed = false
+
+                    val cardVideoContainer = object : FrameLayout(ctx) {
+                        override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+                            when (ev.actionMasked) {
+                                MotionEvent.ACTION_DOWN -> {
+                                    downX = ev.x
+                                    downY = ev.y
+                                    swipeConsumed = false
+                                }
+                                MotionEvent.ACTION_MOVE -> {
+                                    if (!swipeConsumed) {
+                                        val dx = ev.x - downX
+                                        val dy = ev.y - downY
+                                        val h = height.toFloat().coerceAtLeast(240f)
+                                        if (!isRightPaneFullscreen) {
+                                            // Swipe UP from center/video zone -> Right-Half YouTube Fullscreen
+                                            if (downY in (h * 0.08f)..(h * 0.78f) &&
+                                                dy < -95f &&
+                                                kotlin.math.abs(dy) > kotlin.math.abs(dx) * 1.35f
+                                            ) {
+                                                swipeConsumed = true
+                                                isRightPaneFullscreen = true
+                                                evalYoutubeJs(enterFullscreenJs)
+                                                return true
+                                            }
+                                        } else {
+                                            // Swipe DOWN anywhere on right half -> Exit Right-Half Fullscreen
+                                            if (dy > 95f &&
+                                                kotlin.math.abs(dy) > kotlin.math.abs(dx) * 1.35f
+                                            ) {
+                                                swipeConsumed = true
+                                                exitCustomViewTrigger?.invoke()
+                                                evalYoutubeJs(exitFullscreenJs)
+                                                isRightPaneFullscreen = false
+                                                return true
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            return super.dispatchTouchEvent(ev)
+                        }
+                    }.apply {
+                        setBackgroundColor(android.graphics.Color.BLACK)
+                    }
+
+                    fun hideCustomInline() {
+                        inlineCustomView?.let { cardVideoContainer.removeView(it) }
+                        inlineCustomView = null
+                        inlineCustomCallback?.onCustomViewHidden()
+                        inlineCustomCallback = null
+                    }
+                    exitCustomViewTrigger = { hideCustomInline() }
+
+                    val wv = WebView(ctx).apply {
+                        layoutParams = FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        CookieManager.getInstance().setAcceptCookie(true)
+                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                        settings.apply {
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                            mediaPlaybackRequiresUserGesture = false
+                            loadsImagesAutomatically = true
+                            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                            cacheMode = WebSettings.LOAD_DEFAULT
+                            userAgentString =
+                                "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+                        }
+                        webViewClient = object : WebViewClient() {
+                            override fun onPageFinished(view: WebView?, url: String?) {
+                                super.onPageFinished(view, url)
+                                // Spoof Page Visibility API so YouTube keeps playing audio in background
+                                // (when switching to Page 1 or opening Google Maps / another app)
+                                view?.evaluateJavascript(
+                                    """
+                                    (function() {
+                                      try {
+                                        Object.defineProperty(document, 'hidden', { get: function() { return false; }, configurable: true });
+                                        Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; }, configurable: true });
+                                        document.addEventListener('visibilitychange', function(e) { e.stopImmediatePropagation(); }, true);
+                                        window.addEventListener('pagehide', function(e) { e.stopImmediatePropagation(); }, true);
+                                      } catch (e) {}
+                                    })();
+                                    """.trimIndent(),
+                                    null
+                                )
+                            }
+                        }
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                                if (view == null) return
+                                inlineCustomView?.let { cardVideoContainer.removeView(it) }
+                                inlineCustomView = view
+                                inlineCustomCallback = callback
+                                isRightPaneFullscreen = true
+                                cardVideoContainer.addView(
+                                    view,
+                                    FrameLayout.LayoutParams(
+                                        ViewGroup.LayoutParams.MATCH_PARENT,
+                                        ViewGroup.LayoutParams.MATCH_PARENT
+                                    )
+                                )
+                            }
+
+                            override fun onHideCustomView() {
+                                hideCustomInline()
+                                isRightPaneFullscreen = false
+                            }
+                        }
+                        loadUrl("https://m.youtube.com")
+                    }
+                    webViewRef = wv
+                    cardVideoContainer.addView(wv)
+                    cardVideoContainer
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            )
+        }
+
+        // Brief 2.4s hint when entering right-half YouTube fullscreen
+        AnimatedVisibility(
+            visible = showFsHintBanner,
+            enter = fadeIn(),
+            exit = fadeOut(),
             modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-        )
+                .align(Alignment.TopCenter)
+                .padding(top = 12.dp)
+        ) {
+            Surface(
+                color = Color(0xCC0F172A),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Text(
+                    text = "已進入右半邊全螢幕 · 下滑可退出",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+        }
     }
 }
 

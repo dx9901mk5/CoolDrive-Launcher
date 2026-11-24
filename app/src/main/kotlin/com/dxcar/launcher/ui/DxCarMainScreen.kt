@@ -1489,6 +1489,11 @@ private fun InfiniteLoopTwoPageDashboard(
             else -> (widthPx + curDx).roundToInt()
         }
 
+        var keepPageTwoAlive by remember { mutableStateOf(false) }
+        LaunchedEffect(currentPage) {
+            if (currentPage == 1) keepPageTwoAlive = true
+        }
+
         if (currentPage == 0 || isDragging) {
             Box(
                 modifier = Modifier
@@ -1501,12 +1506,12 @@ private fun InfiniteLoopTwoPageDashboard(
             }
         }
 
-        if (currentPage == 1 || isDragging) {
+        if (currentPage == 1 || isDragging || keepPageTwoAlive) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .clipToBounds()
-                    .zIndex(if (currentPage == 1) 2f else 1f)
+                    .zIndex(if (currentPage == 1) 2f else 0f)
                     .offset { IntOffset(page1OffsetX, 0) }
             ) {
                 pageTwoContent(handleDragDelta, handleDragEnd)

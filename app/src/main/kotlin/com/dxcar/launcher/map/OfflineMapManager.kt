@@ -2,6 +2,8 @@ package com.dxcar.launcher.map
 
 import android.content.Context
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import com.dxcar.launcher.data.LauncherPreferences
 import com.dxcar.launcher.data.MapEngineStyle
 import com.dxcar.launcher.data.OfflineRegionRecord
@@ -9,6 +11,7 @@ import com.dxcar.launcher.data.OfflineUpdatePolicy
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.maplibre.android.MapLibre
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.offline.OfflineManager
@@ -17,6 +20,7 @@ import org.maplibre.android.offline.OfflineRegionError
 import org.maplibre.android.offline.OfflineRegionStatus
 import org.maplibre.android.offline.OfflineTilePyramidRegionDefinition
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class OfflineRegionPreset(
     val id: String,
@@ -71,6 +75,7 @@ class OfflineMapManager(
     private val _state = MutableStateFlow(OfflineMapUiState())
     val state: StateFlow<OfflineMapUiState> = _state.asStateFlow()
 
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var activeDownloadingRegion: OfflineRegion? = null
     private val pendingQueue = ArrayDeque<OfflineRegionPreset>()
     private var activeBatchTotal = 1
@@ -218,9 +223,9 @@ class OfflineMapManager(
 
         pendingQueue.clear()
         pendingQueue.addAll(batchList)
-        activeBatchTotal = batchList.size
+        activeBatchTotal = batchList.size.coerceAtLeast(1)
         activeBatchCompleted = 0
-        startNextInQueue()
+        mainHandler.post { startNextInQueue() }
     }
 
     private fun buildLocalRegionBatch(lat: Double, lon: Double): List<OfflineRegionPreset> {
@@ -237,7 +242,9 @@ class OfflineMapManager(
     private fun buildEntireCountryBatch(lat: Double, lon: Double): List<OfflineRegionPreset> {
         val detected = describeDetectedLocation(lat, lon)
         return when (detected.countryCode) {
-            "TW" -> presets.filterNot { it.id == "current_gps_20km" }
+            "TW" -> presets
+                .filterNot { it.id == "current_gps_20km" }
+                .map { it.copy(maxZoom = it.maxZoom.coerceAtMost(13.0)) }
             "HK_MO" -> listOf(
                 OfflineRegionPreset(
                     id = "country_hk_mo",
@@ -298,8 +305,9 @@ class OfflineMapManager(
             return
         }
 
+        val safeBatchTotal = activeBatchTotal.coerceAtLeast(1)
         val stepIdx = activeBatchCompleted + 1
-        val stepPrefix = if (activeBatchTotal > 1) "[全區下載 $stepIdx/$activeBatchTotal] " else ""
+        val stepPrefix = if (safeBatchTotal > 1) "[全區下載 $stepIdx/$safeBatchTotal] " else ""
 
         val (minLat, maxLat, minLon, maxLon) = if (preset.isDynamicAroundGps && lastBatchLat != 0.0 && lastBatchLon != 0.0) {
             val dLat = 0.16
@@ -320,11 +328,12 @@ class OfflineMapManager(
             completedTiles = 0L,
             requiredTiles = 0L,
             batchIndex = stepIdx,
-            batchTotal = activeBatchTotal,
+            batchTotal = safeBatchTotal,
             statusMessage = "${stepPrefix}正在準備下載「${preset.titleZh}」離線圖磚…"
         )
 
         runCatching {
+            MapLibre.getInstance(context)
             val manager = OfflineManager.getInstance(context)
             manager.setOfflineMapboxTileCountLimit(250_000L)
 
@@ -347,60 +356,66 @@ class OfflineMapManager(
                 metadataBytes,
                 object : OfflineManager.CreateOfflineRegionCallback {
                     override fun onCreate(offlineRegion: OfflineRegion) {
+                        val completedOnce = AtomicBoolean(false)
                         activeDownloadingRegion = offlineRegion
                         offlineRegion.setObserver(object : OfflineRegion.OfflineRegionObserver {
                             override fun onStatusChanged(status: OfflineRegionStatus) {
-                                val req = status.requiredResourceCount.coerceAtLeast(1L)
-                                val comp = status.completedResourceCount
-                                val pct = (comp.toFloat() / req.toFloat()).coerceIn(0f, 1f)
-                                val sizeMb = status.completedResourceSize / (1024f * 1024f)
+                                runCatching {
+                                    val req = status.requiredResourceCount.coerceAtLeast(1L)
+                                    val comp = status.completedResourceCount
+                                    val pct = (comp.toFloat() / req.toFloat()).coerceIn(0f, 1f)
+                                    val sizeMb = status.completedResourceSize / (1024f * 1024f)
 
-                                if (status.isComplete) {
-                                    offlineRegion.setDownloadState(OfflineRegion.STATE_INACTIVE)
-                                    activeDownloadingRegion = null
-                                    val rec = OfflineRegionRecord(
-                                        regionId = preset.id,
-                                        titleZh = preset.titleZh,
-                                        centerLat = cLat,
-                                        centerLon = cLon,
-                                        minLat = minLat,
-                                        maxLat = maxLat,
-                                        minLon = minLon,
-                                        maxLon = maxLon,
-                                        downloadedAtMs = System.currentTimeMillis(),
-                                        approxSizeMb = sizeMb.coerceAtLeast(0.1f),
-                                        maplibreRegionId = offlineRegion.id
-                                    )
-                                    preferences.update { cur ->
-                                        val nextList = cur.offlineRegions.filterNot { it.regionId == preset.id } + rec
-                                        cur.copy(offlineRegions = nextList)
-                                    }
-                                    activeBatchCompleted++
-                                    if (pendingQueue.isNotEmpty()) {
-                                        startNextInQueue()
+                                    if (status.isComplete) {
+                                        if (!completedOnce.compareAndSet(false, true)) return
+                                        runCatching { offlineRegion.setObserver(null) }
+                                        runCatching { offlineRegion.setDownloadState(OfflineRegion.STATE_INACTIVE) }
+                                        activeDownloadingRegion = null
+                                        val rec = OfflineRegionRecord(
+                                            regionId = preset.id,
+                                            titleZh = preset.titleZh,
+                                            centerLat = cLat,
+                                            centerLon = cLon,
+                                            minLat = minLat,
+                                            maxLat = maxLat,
+                                            minLon = minLon,
+                                            maxLon = maxLon,
+                                            downloadedAtMs = System.currentTimeMillis(),
+                                            approxSizeMb = sizeMb.coerceAtLeast(0.1f),
+                                            maplibreRegionId = offlineRegion.id
+                                        )
+                                        preferences.update { cur ->
+                                            val nextList = cur.offlineRegions.filterNot { it.regionId == preset.id } + rec
+                                            cur.copy(offlineRegions = nextList)
+                                        }
+                                        activeBatchCompleted++
+                                        if (pendingQueue.isNotEmpty()) {
+                                            mainHandler.post { startNextInQueue() }
+                                        } else {
+                                            _state.value = OfflineMapUiState(
+                                                statusMessage = if (safeBatchTotal > 1) {
+                                                    "✓ 所在國家／區域共 $safeBatchTotal 區離線地圖已全數下載完成！"
+                                                } else {
+                                                    "✓ 「${preset.titleZh}」離線地圖下載完成（約 %.1f MB）".format(sizeMb.coerceAtLeast(0.1f))
+                                                },
+                                                updateSuggestion = null
+                                            )
+                                        }
                                     } else {
-                                        _state.value = OfflineMapUiState(
-                                            statusMessage = if (activeBatchTotal > 1) {
-                                                "✓ 所在國家／區域共 $activeBatchTotal 區離線地圖已全數下載完成！"
-                                            } else {
-                                                "✓ 「${preset.titleZh}」離線地圖下載完成（約 %.1f MB）".format(sizeMb.coerceAtLeast(0.1f))
-                                            },
-                                            updateSuggestion = null
+                                        val overallPct = ((activeBatchCompleted + pct) / safeBatchTotal.toFloat()).coerceIn(0.02f, 1f)
+                                        _state.value = _state.value.copy(
+                                            progress = overallPct,
+                                            completedTiles = comp,
+                                            requiredTiles = req,
+                                            statusMessage = "${stepPrefix}下載中 ${preset.titleZh}：${(pct * 100).toInt()}% ($comp / $req 圖磚 · %.1f MB)".format(sizeMb)
                                         )
                                     }
-                                } else {
-                                    val overallPct = ((activeBatchCompleted + pct) / activeBatchTotal.toFloat()).coerceIn(0.02f, 1f)
-                                    _state.value = _state.value.copy(
-                                        progress = overallPct,
-                                        completedTiles = comp,
-                                        requiredTiles = req,
-                                        statusMessage = "${stepPrefix}下載中 ${preset.titleZh}：${(pct * 100).toInt()}% ($comp / $req 圖磚 · %.1f MB)".format(sizeMb)
-                                    )
                                 }
                             }
 
                             override fun onError(error: OfflineRegionError) {
-                                activeDownloadingRegion?.setDownloadState(OfflineRegion.STATE_INACTIVE)
+                                runCatching { offlineRegion.setObserver(null) }
+                                runCatching { activeDownloadingRegion?.setDownloadState(OfflineRegion.STATE_INACTIVE) }
                                 activeDownloadingRegion = null
                                 pendingQueue.clear()
                                 _state.value = _state.value.copy(
@@ -410,7 +425,8 @@ class OfflineMapManager(
                             }
 
                             override fun mapboxTileCountLimitExceeded(limit: Long) {
-                                activeDownloadingRegion?.setDownloadState(OfflineRegion.STATE_INACTIVE)
+                                runCatching { offlineRegion.setObserver(null) }
+                                runCatching { activeDownloadingRegion?.setDownloadState(OfflineRegion.STATE_INACTIVE) }
                                 activeDownloadingRegion = null
                                 pendingQueue.clear()
                                 _state.value = _state.value.copy(

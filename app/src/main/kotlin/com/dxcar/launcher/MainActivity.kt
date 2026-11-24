@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.speech.RecognizerIntent
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
@@ -27,6 +28,7 @@ import com.dxcar.launcher.system.PermissionHelper
 import com.dxcar.launcher.system.StockSplitScreenBridge
 import com.dxcar.launcher.system.SystemStatusMonitor
 import com.dxcar.launcher.ui.DxCarRootScreen
+import com.dxcar.launcher.ui.EmbeddedYoutubeBridge
 import com.dxcar.launcher.voice.GeminiVoiceNavController
 import java.util.Locale
 import java.util.UUID
@@ -164,6 +166,13 @@ class MainActivity : ComponentActivity() {
                 onPickStockSystemShortcut = ::launchStockSystemShortcutPicker
             )
         }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (EmbeddedYoutubeBridge.handleMediaKeyEvent(event)) {
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onNewIntent(intent: Intent) {
