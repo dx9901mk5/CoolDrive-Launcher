@@ -252,9 +252,10 @@ class InstalledAppsRepository(private val context: Context) {
             intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
 
+        val isYoutubeDefault = packageName.lowercase().contains("youtube")
         val options = ActivityOptions.makeBasic().apply {
             launchDisplayId = Display.DEFAULT_DISPLAY
-            if (forceFullscreenWindowMode) {
+            if (forceFullscreenWindowMode && !isYoutubeDefault) {
                 runCatching {
                     val method = ActivityOptions::class.java.getMethod(
                         "setLaunchWindowingMode",

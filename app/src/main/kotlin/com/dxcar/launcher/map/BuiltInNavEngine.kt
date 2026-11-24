@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
@@ -86,19 +87,7 @@ class BuiltInNavEngine(private val ttsAnnouncer: TtsAnnouncer?) {
         scope.launch {
             _state.value = _state.value.copy(isSearching = true, errorMessage = "")
             val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val encoded = URLEncoder.encode(trimmed, "UTF-8")
-                    val url = "https://photon.komoot.io/api/?q=$encoded&lat=$biasLat&lon=$biasLon&limit=7"
-                    val req = Request.Builder()
-                        .url(url)
-                        .header("User-Agent", "DX-Car-Launcher/1.4")
-                        .build()
-                    httpClient.newCall(req).execute().use { resp ->
-                        if (!resp.isSuccessful) error("HTTP ${resp.code}")
-                        val body = resp.body?.string().orEmpty()
-                        parsePhotonResults(body)
-                    }
-                }
+                runCatching { queryPlacesDualEngine(trimmed, biasLat, biasLon) }
             }
             result.onSuccess { list ->
                 _state.value = _state.value.copy(
@@ -113,6 +102,169 @@ class BuiltInNavEngine(private val ttsAnnouncer: TtsAnnouncer?) {
                 )
             }
         }
+    }
+
+    /**
+     * One-step Gemini Voice -> Built-in Plan A Map Navigation:
+     * Resolves destination coordinates (using Gemini coordinates if available, or Nominatim zh-TW + Photon),
+     * then draws the live blue OSRM route & turn-by-turn guidance directly on the Launcher's own Map!
+     */
+    fun navigateByQuery(
+        query: String,
+        startLat: Double,
+        startLon: Double,
+        explicitDestLat: Double? = null,
+        explicitDestLon: Double? = null,
+        onStatus: (String) -> Unit = {}
+    ) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) return
+        val effStartLat = if (startLat != 0.0) startLat else 25.0330
+        val effStartLon = if (startLon != 0.0) startLon else 121.5654
+
+        if (explicitDestLat != null && explicitDestLon != null &&
+            explicitDestLat != 0.0 && explicitDestLon != 0.0
+        ) {
+            onStatus("🗺️ 啟動器地圖正在規劃前往「$trimmed」的路線…")
+            startNavigation(
+                startLat = effStartLat,
+                startLon = effStartLon,
+                destName = trimmed,
+                destLat = explicitDestLat,
+                destLon = explicitDestLon
+            )
+            return
+        }
+
+        scope.launch {
+            _state.value = _state.value.copy(isSearching = true, errorMessage = "")
+            onStatus("🔍 啟動器內建地圖正在搜尋：「$trimmed」…")
+            val foundResult = withContext(Dispatchers.IO) {
+                runCatching { queryPlacesDualEngine(trimmed, effStartLat, effStartLon) }
+            }
+            foundResult.onSuccess { list ->
+                if (list.isEmpty()) {
+                    _state.value = _state.value.copy(
+                        isSearching = false,
+                        errorMessage = "內建地圖找不到「$trimmed」，請換個地標名稱再試一次"
+                    )
+                    ttsAnnouncer?.speak("抱歉，地圖找不到$trimmed")
+                    onStatus("⚠️ 內建地圖找不到「$trimmed」")
+                } else {
+                    val best = list.first()
+                    _state.value = _state.value.copy(
+                        isSearching = false,
+                        searchResults = list
+                    )
+                    onStatus("🗺️ 已在啟動器內建地圖規劃前往：${best.name}")
+                    startNavigation(
+                        startLat = effStartLat,
+                        startLon = effStartLon,
+                        destName = best.name,
+                        destLat = best.latitude,
+                        destLon = best.longitude
+                    )
+                }
+            }.onFailure { err ->
+                _state.value = _state.value.copy(
+                    isSearching = false,
+                    errorMessage = "搜尋失敗：${err.message ?: "請檢查網路"}"
+                )
+                onStatus("⚠️ 內建地圖搜尋失敗，請確認網路連線")
+            }
+        }
+    }
+
+    private fun queryPlacesDualEngine(trimmed: String, biasLat: Double, biasLon: Double): List<NavSearchResult> {
+        val encoded = URLEncoder.encode(trimmed, "UTF-8")
+        val combined = mutableListOf<NavSearchResult>()
+
+        // 1. Nominatim (zh-TW) bounded near current vehicle GPS (~60km box) first for nearby POIs (gas stations, cafes)
+        if (biasLat != 0.0 && biasLon != 0.0) {
+            runCatching {
+                val left = biasLon - 0.55
+                val right = biasLon + 0.55
+                val top = biasLat + 0.50
+                val bottom = biasLat - 0.50
+                val nearUrl =
+                    "https://nominatim.openstreetmap.org/search?q=$encoded&format=jsonv2&accept-language=zh-TW&viewbox=$left,$top,$right,$bottom&bounded=1&limit=5"
+                val req = Request.Builder()
+                    .url(nearUrl)
+                    .header("User-Agent", "DX-Car-Launcher/1.5.3 (Android Car HeadUnit)")
+                    .build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        combined += parseNominatimResults(resp.body?.string().orEmpty())
+                    }
+                }
+            }
+        }
+
+        // 2. Nominatim (zh-TW) nationwide / global search if local box had < 3 hits
+        if (combined.size < 3) {
+            runCatching {
+                val wideUrl =
+                    "https://nominatim.openstreetmap.org/search?q=$encoded&format=jsonv2&accept-language=zh-TW&limit=6"
+                val req = Request.Builder()
+                    .url(wideUrl)
+                    .header("User-Agent", "DX-Car-Launcher/1.5.3 (Android Car HeadUnit)")
+                    .build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        combined += parseNominatimResults(resp.body?.string().orEmpty())
+                    }
+                }
+            }
+        }
+
+        // 3. Komoot Photon fallback / supplement
+        if (combined.isEmpty()) {
+            runCatching {
+                val photonUrl = "https://photon.komoot.io/api/?q=$encoded&lat=$biasLat&lon=$biasLon&limit=6"
+                val req = Request.Builder()
+                    .url(photonUrl)
+                    .header("User-Agent", "DX-Car-Launcher/1.5.3")
+                    .build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        combined += parsePhotonResults(resp.body?.string().orEmpty())
+                    }
+                }
+            }
+        }
+
+        // Deduplicate close coordinates
+        val deduped = mutableListOf<NavSearchResult>()
+        for (item in combined) {
+            val dup = deduped.any {
+                kotlin.math.abs(it.latitude - item.latitude) < 0.0008 &&
+                    kotlin.math.abs(it.longitude - item.longitude) < 0.0008
+            }
+            if (!dup) deduped += item
+        }
+        return deduped.take(7)
+    }
+
+    private fun parseNominatimResults(jsonStr: String): List<NavSearchResult> {
+        if (jsonStr.isBlank()) return emptyList()
+        val arr = JSONArray(jsonStr)
+        val out = mutableListOf<NavSearchResult>()
+        for (i in 0 until arr.length()) {
+            val obj = arr.optJSONObject(i) ?: continue
+            val lat = obj.optString("lat").toDoubleOrNull() ?: continue
+            val lon = obj.optString("lon").toDoubleOrNull() ?: continue
+            val display = obj.optString("display_name").orEmpty()
+            val rawName = obj.optString("name").takeIf { it.isNotBlank() }
+                ?: display.substringBefore(",").trim().ifBlank { continue }
+            val sub = display.removePrefix(rawName).trim(',', ' ').take(60)
+            out += NavSearchResult(
+                name = rawName,
+                subtitle = sub.ifBlank { "%.4f, %.4f".format(lat, lon) },
+                latitude = lat,
+                longitude = lon
+            )
+        }
+        return out
     }
 
     fun startNavigation(

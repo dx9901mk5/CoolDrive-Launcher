@@ -50,10 +50,12 @@ import androidx.compose.material.icons.rounded.Update
 import androidx.compose.material.icons.rounded.Work
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -96,6 +98,11 @@ import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapLibreMapOptions
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.Property
+import org.maplibre.android.style.layers.PropertyFactory
+import org.maplibre.android.style.sources.GeoJsonSource
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -105,6 +112,7 @@ import java.util.Locale
 fun LiveMapCard(
     location: VehicleLocationState,
     activeNav: ActiveNavBanner?,
+    builtInNavState: BuiltInNavState = BuiltInNavState(),
     isNight: Boolean,
     mapEngineStyle: MapEngineStyle,
     trafficEnabled: Boolean = true,
@@ -114,6 +122,7 @@ fun LiveMapCard(
     offlineUpdatePolicy: OfflineUpdatePolicy = OfflineUpdatePolicy.DAYS_30,
     isPrimary: Boolean,
     isFullscreen: Boolean,
+    showSwapButton: Boolean = true,
     homeAddress: String,
     workAddress: String,
     onSelectMapStyle: (MapEngineStyle) -> Unit = {},
@@ -129,6 +138,10 @@ fun LiveMapCard(
     onLaunchGoogleMapsApp: (String?) -> Unit,
     onLaunchRealMapsSplit: () -> Unit = {},
     onVoiceNavClick: () -> Unit = {},
+    onSearchBuiltInPlace: (String) -> Unit = {},
+    onStartBuiltInNavResult: (NavSearchResult) -> Unit = {},
+    onQuickBuiltInNavigateQuery: (String) -> Unit = {},
+    onStopBuiltInNav: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = LocalDxCarColors.current
@@ -140,6 +153,8 @@ fun LiveMapCard(
     var currentZoom by remember { mutableDoubleStateOf(15.6) }
     var showLayerPicker by remember { mutableStateOf(false) }
     var showOfflineSheet by remember { mutableStateOf(false) }
+    var showBuiltInSearchBox by remember { mutableStateOf(false) }
+    var builtInQueryText by remember { mutableStateOf("") }
 
     val googleNightPaint = remember {
         Paint().apply {
@@ -198,7 +213,22 @@ fun LiveMapCard(
             is MapStyleFactory.ResolvedMapStyle.StyleUrl -> Style.Builder().fromUri(resolved.url)
             is MapStyleFactory.ResolvedMapStyle.StyleJson -> Style.Builder().fromJson(resolved.json)
         }
-        runCatching { map.setStyle(builder) }
+        runCatching {
+            map.setStyle(builder) { style ->
+                applyRouteOverlayToStyle(style, builtInNavState)
+            }
+        }
+    }
+
+    LaunchedEffect(mapLibreMap, builtInNavState.isNavigating, builtInNavState.routePoints) {
+        val map = mapLibreMap ?: return@LaunchedEffect
+        if (builtInNavState.isNavigating) {
+            followVehicle = true
+            if (currentZoom < 16.0) currentZoom = 16.3
+        }
+        map.getStyle { style ->
+            applyRouteOverlayToStyle(style, builtInNavState)
+        }
     }
 
     LaunchedEffect(mapLibreMap, location, followVehicle, isPrimary, mapEngineStyle) {
@@ -266,7 +296,7 @@ fun LiveMapCard(
             )
         }
 
-        if (!isPrimary && !isFullscreen) {
+        if (!isPrimary && !isFullscreen && showSwapButton) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -274,7 +304,7 @@ fun LiveMapCard(
             )
         }
 
-        // TOP HUD: Google Maps Active Nav Banner OR Plan A Multi-Layer + Offline Map Bar
+        // TOP HUD: Built-In Plan A Turn-by-Turn Navigation Banner OR Google Maps Banner OR Plan A Search & Gemini Bar
         Column(
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -282,7 +312,74 @@ fun LiveMapCard(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (activeNav != null) {
+            if (builtInNavState.isNavigating || builtInNavState.isSearching || builtInNavState.isRouting) {
+                Surface(
+                    color = colors.navGreenBanner,
+                    shape = RoundedCornerShape(18.dp),
+                    shadowElevation = 10.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (builtInNavState.isSearching || builtInNavState.isRouting) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                strokeWidth = 3.dp,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.TurnRight,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(34.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            val distTxt = if (builtInNavState.distanceToNextTurnMeters >= 1000) {
+                                "%.1f km".format(builtInNavState.distanceToNextTurnMeters / 1000f)
+                            } else {
+                                "${builtInNavState.distanceToNextTurnMeters} m"
+                            }
+                            Text(
+                                text = when {
+                                    builtInNavState.isSearching -> "✨ 正在於內建地圖搜尋目的地…"
+                                    builtInNavState.isRouting -> "🗺️ 正在規劃內建地圖導航藍線…"
+                                    else -> "$distTxt · ${builtInNavState.currentInstructionZh}"
+                                },
+                                color = Color.White,
+                                fontSize = if (isPrimary) 18.sp else 14.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (builtInNavState.isNavigating) {
+                                val remKm = "%.1f km".format(builtInNavState.remainingDistanceMeters / 1000f)
+                                val remMin = (builtInNavState.remainingDurationSeconds / 60).coerceAtLeast(1)
+                                Text(
+                                    text = "目的地：${builtInNavState.destinationName} · 剩餘 $remKm · 約 $remMin 分鐘",
+                                    color = Color(0xFFD1FAE5),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        IconButton(onClick = onVoiceNavClick) {
+                            Icon(Icons.Rounded.Mic, contentDescription = "語音換目的地", tint = Color.White)
+                        }
+                        IconButton(onClick = onStopBuiltInNav) {
+                            Icon(Icons.Rounded.Close, contentDescription = "結束導航", tint = Color.White)
+                        }
+                    }
+                }
+            } else if (activeNav != null) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -333,7 +430,7 @@ fun LiveMapCard(
                             modifier = Modifier
                                 .weight(1f, fill = false)
                                 .border(1.2.dp, colors.cardBorder, RoundedCornerShape(24.dp))
-                                .bouncyClickable { onLaunchGoogleMapsApp(null) }
+                                .bouncyClickable { showBuiltInSearchBox = !showBuiltInSearchBox }
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -347,7 +444,7 @@ fun LiveMapCard(
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    text = "Google 地圖導航搜尋…",
+                                    text = "內建地圖導航搜尋…",
                                     color = colors.primaryText,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Medium,
@@ -360,6 +457,12 @@ fun LiveMapCard(
                         Spacer(Modifier.width(8.dp))
 
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            MapChipButton(
+                                icon = Icons.Rounded.Mic,
+                                label = "✨ Gemini 語音導航",
+                                highlight = true,
+                                onClick = onVoiceNavClick
+                            )
                             MapChipButton(
                                 icon = Icons.Rounded.CloudDownload,
                                 label = if (offlineState.downloadingRegionId != null) {
@@ -378,35 +481,95 @@ fun LiveMapCard(
                                         mapEngineStyle == MapEngineStyle.GOOGLE_SATELLITE_HYBRID),
                                 onClick = onToggleTraffic
                             )
-                            MapChipButton(
-                                icon = Icons.Rounded.Home,
-                                label = "回家",
-                                onClick = { onLaunchGoogleMapsApp(homeAddress.ifBlank { "家" }) }
-                            )
+                            if (homeAddress.isNotBlank()) {
+                                MapChipButton(
+                                    icon = Icons.Rounded.Home,
+                                    label = "回家",
+                                    onClick = { onQuickBuiltInNavigateQuery(homeAddress) }
+                                )
+                            }
                             if (workAddress.isNotBlank()) {
                                 MapChipButton(
                                     icon = Icons.Rounded.Work,
                                     label = "公司",
-                                    onClick = { onLaunchGoogleMapsApp(workAddress) }
+                                    onClick = { onQuickBuiltInNavigateQuery(workAddress) }
                                 )
                             }
-                            MapChipButton(
-                                icon = Icons.Rounded.Splitscreen,
-                                label = "分割G地圖",
-                                onClick = onLaunchRealMapsSplit
-                            )
-                            MapChipButton(
-                                icon = Icons.Rounded.Mic,
-                                label = "✨ Gemini 語音導航",
-                                highlight = true,
-                                onClick = onVoiceNavClick
-                            )
                             MapChipButton(
                                 icon = Icons.Rounded.Navigation,
                                 label = "G地圖",
                                 highlight = false,
                                 onClick = { onLaunchGoogleMapsApp(null) }
                             )
+                        }
+                    }
+
+                    // Built-in Plan A Destination Search Box (routes directly on Launcher's own Map!)
+                    if (showBuiltInSearchBox) {
+                        Surface(
+                            color = colors.cardSurface.copy(alpha = 0.96f),
+                            shape = RoundedCornerShape(18.dp),
+                            shadowElevation = 12.dp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.2.dp, colors.accent, RoundedCornerShape(18.dp))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedTextField(
+                                        value = builtInQueryText,
+                                        onValueChange = { builtInQueryText = it },
+                                        singleLine = true,
+                                        placeholder = { Text("輸入目的地（直接於本啟動器內建地圖導航）…", fontSize = 12.sp) },
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Button(
+                                        onClick = { onSearchBuiltInPlace(builtInQueryText) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text("搜尋", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    IconButton(onClick = onVoiceNavClick) {
+                                        Icon(Icons.Rounded.Mic, contentDescription = "語音輸入", tint = Color(0xFFA78BFA))
+                                    }
+                                    IconButton(onClick = { showBuiltInSearchBox = false }) {
+                                        Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.secondaryText)
+                                    }
+                                }
+                                if (builtInNavState.errorMessage.isNotBlank()) {
+                                    Text(builtInNavState.errorMessage, color = Color(0xFFF59E0B), fontSize = 12.sp)
+                                }
+                                builtInNavState.searchResults.take(4).forEach { res ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(colors.cardSurfaceElevated)
+                                            .clickable {
+                                                showBuiltInSearchBox = false
+                                                onStartBuiltInNavResult(res)
+                                            }
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(res.name, color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Text(res.subtitle, color = colors.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+                                        Text("開始導航 →", color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -510,17 +673,19 @@ fun LiveMapCard(
                             Text("即時地圖", color = colors.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
-                    Surface(
-                        color = colors.accent,
-                        shape = CircleShape,
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clickable { onSwapRequested() }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Rounded.SwapHoriz, contentDescription = "切換為主畫面", tint = colors.onAccent, modifier = Modifier.size(18.dp))
-                        }
+            if (showSwapButton) {
+                Surface(
+                    color = colors.accent,
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clickable { onSwapRequested() }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.SwapHoriz, contentDescription = "切換為主畫面", tint = colors.onAccent, modifier = Modifier.size(18.dp))
                     }
+                }
+            }
                 }
             }
         }
@@ -1005,6 +1170,69 @@ private fun SmallGlassCircleButton(
                 contentDescription = contentDescription,
                 tint = if (active) colors.onAccent else colors.primaryText,
                 modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+private fun applyRouteOverlayToStyle(style: Style, navState: BuiltInNavState) {
+    val srcId = "dxcar-nav-route-src"
+    val casingLayerId = "dxcar-nav-route-casing-layer"
+    val layerId = "dxcar-nav-route-layer"
+    val destSrcId = "dxcar-nav-dest-src"
+    val destLayerId = "dxcar-nav-dest-layer"
+
+    if (!navState.isNavigating || navState.routePoints.size < 2) {
+        runCatching { style.removeLayer(layerId) }
+        runCatching { style.removeLayer(casingLayerId) }
+        runCatching { style.removeSource(srcId) }
+        runCatching { style.removeLayer(destLayerId) }
+        runCatching { style.removeSource(destSrcId) }
+        return
+    }
+
+    val coordsJson = navState.routePoints.joinToString(",") { "[${it.longitude},${it.latitude}]" }
+    val lineGeoJson =
+        """{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"LineString","coordinates":[$coordsJson]}}]}"""
+    val destGeoJson =
+        """{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[${navState.destinationLon},${navState.destinationLat}]}}]}"""
+
+    runCatching {
+        val existing = style.getSourceAs<GeoJsonSource>(srcId)
+        if (existing != null) {
+            existing.setGeoJson(lineGeoJson)
+        } else {
+            style.addSource(GeoJsonSource(srcId, lineGeoJson))
+            style.addLayer(
+                LineLayer(casingLayerId, srcId).withProperties(
+                    PropertyFactory.lineColor(android.graphics.Color.parseColor("#1E3A8A")),
+                    PropertyFactory.lineWidth(12.0f),
+                    PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                    PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
+                )
+            )
+            style.addLayer(
+                LineLayer(layerId, srcId).withProperties(
+                    PropertyFactory.lineColor(android.graphics.Color.parseColor("#3B82F6")),
+                    PropertyFactory.lineWidth(7.5f),
+                    PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                    PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
+                )
+            )
+        }
+
+        val existingDest = style.getSourceAs<GeoJsonSource>(destSrcId)
+        if (existingDest != null) {
+            existingDest.setGeoJson(destGeoJson)
+        } else {
+            style.addSource(GeoJsonSource(destSrcId, destGeoJson))
+            style.addLayer(
+                CircleLayer(destLayerId, destSrcId).withProperties(
+                    PropertyFactory.circleColor(android.graphics.Color.parseColor("#EF4444")),
+                    PropertyFactory.circleRadius(9.0f),
+                    PropertyFactory.circleStrokeColor(android.graphics.Color.WHITE),
+                    PropertyFactory.circleStrokeWidth(3.0f)
+                )
             )
         }
     }

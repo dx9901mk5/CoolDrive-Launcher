@@ -46,21 +46,23 @@ object GeminiVoiceNavController {
     }
 
     /**
-     * Builds the `RecognizerIntent` forMainActivity's `ActivityResultLauncher`, or returns `null` if
-     * the user selected Direct Gemini App mode or the AI Box lacks a system speech recognizer.
+     * Builds the `RecognizerIntent` for MainActivity's `ActivityResultLauncher`.
+     * When [forceBuiltInMap] is true (e.g. tapped directly on Plan A's built-in map), we ALWAYS capture speech
+     * so the destination routes on the Launcher's own built-in Plan A map rather than jumping out to Google Maps!
      */
     fun buildSpeechRecognizerIntentOrOpenGemini(
         context: Context,
         mode: GeminiVoiceMode,
+        forceBuiltInMap: Boolean = true,
         onStatusToast: (String) -> Unit
     ): Intent? {
-        if (mode == GeminiVoiceMode.GEMINI_APP_DIRECT) {
+        if (!forceBuiltInMap && mode == GeminiVoiceMode.GEMINI_APP_DIRECT) {
             val opened = launchGeminiVoiceAssistantDirect(context, query = null)
             onStatusToast(
-                if (opened) "✨ 已喚起 Google Gemini 語音助理（請直接說「導航到…」）"
-                else "⚠️ 未安裝 Google Gemini App，請先安裝 Gemini 或改用「智慧雙通語音導航」模式"
+                if (opened) "✨ 已喚起 Google Gemini 語音助理"
+                else "⚠️ 未安裝 Google Gemini App，已改用內建語音辨識導航"
             )
-            return null
+            if (opened) return null
         }
 
         val speechIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -68,7 +70,7 @@ object GeminiVoiceNavController {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.TRADITIONAL_CHINESE.toLanguageTag())
             putExtra(
                 RecognizerIntent.EXTRA_PROMPT,
-                "🎙️✨ Gemini 語音導航：請說出目的地（如「導航到台北101」「附近加油站」「回家」）…"
+                "🎙️✨ Gemini 內建地圖語音導航：請說出目的地（如「導航到台北101」「附近加油站」「回家」）…"
             )
         }
         val canHandleSpeech = speechIntent.resolveActivity(context.packageManager) != null
@@ -76,12 +78,7 @@ object GeminiVoiceNavController {
             return speechIntent
         }
 
-        // Fallback on barebones AI Boxes without Google Speech Services: hand off straight to Gemini App / Voice Command!
-        val opened = launchGeminiVoiceAssistantDirect(context, query = null)
-        onStatusToast(
-            if (opened) "✨ 已喚起 Gemini 語音助理進行導航輸入"
-            else "⚠️ 此車機尚未安裝 Google 語音服務或 Gemini App，請於 Play 商店安裝 Google / Gemini"
-        )
+        onStatusToast("⚠️ 未偵測到系統語音辨識元件，請點擊地圖頂端搜尋框直接輸入目的地（或於商店安裝 Google 語音服務）")
         return null
     }
 
@@ -123,8 +120,8 @@ object GeminiVoiceNavController {
     }
 
     /**
-     * Processes spoken transcript from SpeechRecognizer via Gemini API (if key provided) + Smart Mandarin Parser,
-     * then dispatches turn-by-turn Google Maps navigation or hands conversational queries to Gemini!
+     * Processes spoken transcript via Gemini 2.5 Flash NLU (if API key configured) + Smart Mandarin Parser,
+     * and starts turn-by-turn navigation DIRECTLY ON THE LAUNCHER'S BUILT-IN PLAN A MAP (`BuiltInNavEngine`)!
      */
     fun handleSpokenNavigationTranscript(
         context: Context,
@@ -135,21 +132,30 @@ object GeminiVoiceNavController {
         if (spoken.isBlank()) return
         val app = DxCarApp.instance ?: return
         val cfg = app.preferences.config.value
+        val curLoc = app.locationTracker.location.value
+        val startLat = if (curLoc.latitude != 0.0) curLoc.latitude else cfg.lastKnownLat
+        val startLon = if (curLoc.longitude != 0.0) curLoc.longitude else cfg.lastKnownLon
 
-        // Quick local shortcuts for Home / Work
+        // Quick local shortcuts for Home / Work -> Routed directly on Launcher's Built-In Map!
         if (spoken == "回家" || spoken.contains("導航回家") || spoken.contains("帶我回家")) {
             if (cfg.homeAddress.isNotBlank()) {
-                app.ttsAnnouncer.speak("好的，正在為您導航回家")
-                app.installedAppsRepository.launchGoogleMapsNavigation(cfg.homeAddress)
-                onStatusHud("🏠 Gemini 語音導航：正在導航回家（${cfg.homeAddress}）")
+                app.builtInNavEngine.navigateByQuery(
+                    query = cfg.homeAddress,
+                    startLat = startLat,
+                    startLon = startLon,
+                    onStatus = onStatusHud
+                )
                 return
             }
         }
         if (spoken == "去公司" || spoken.contains("導航去公司") || spoken.contains("導航到公司") || spoken == "上班") {
             if (cfg.workAddress.isNotBlank()) {
-                app.ttsAnnouncer.speak("好的，正在為您導航前往公司")
-                app.installedAppsRepository.launchGoogleMapsNavigation(cfg.workAddress)
-                onStatusHud("🏢 Gemini 語音導航：正在導航前往公司（${cfg.workAddress}）")
+                app.builtInNavEngine.navigateByQuery(
+                    query = cfg.workAddress,
+                    startLat = startLat,
+                    startLon = startLon,
+                    onStatus = onStatusHud
+                )
                 return
             }
         }
@@ -157,16 +163,23 @@ object GeminiVoiceNavController {
         scope.launch {
             val apiKey = cfg.geminiApiKey.trim()
             if (apiKey.isNotBlank()) {
-                onStatusHud("✨ Gemini 正在理解語音指令：「$spoken」…")
+                onStatusHud("✨ Gemini 正在理解語音並於啟動器地圖規劃：「$spoken」…")
                 val parsed = withContext(Dispatchers.IO) {
-                    parseDestinationWithGeminiCloud(apiKey, spoken, cfg.homeAddress, cfg.workAddress)
+                    parseDestinationWithGeminiCloud(apiKey, spoken, startLat, startLon, cfg.homeAddress, cfg.workAddress)
                 }
                 if (parsed != null) {
                     if (parsed.isNavigation && parsed.destination.isNotBlank()) {
-                        val reply = parsed.spokenReply.ifBlank { "好的，正在為您導航前往${parsed.destination}" }
-                        app.ttsAnnouncer.speak(reply)
-                        app.installedAppsRepository.launchGoogleMapsNavigation(parsed.destination)
-                        onStatusHud("🗺️✨ Gemini 導航：${parsed.destination}")
+                        if (parsed.spokenReply.isNotBlank()) {
+                            app.ttsAnnouncer.speak(parsed.spokenReply)
+                        }
+                        app.builtInNavEngine.navigateByQuery(
+                            query = parsed.destination,
+                            startLat = startLat,
+                            startLon = startLon,
+                            explicitDestLat = parsed.lat,
+                            explicitDestLon = parsed.lon,
+                            onStatus = onStatusHud
+                        )
                         return@launch
                     } else if (!parsed.isNavigation) {
                         if (parsed.spokenReply.isNotBlank()) {
@@ -180,10 +193,10 @@ object GeminiVoiceNavController {
                 }
             }
 
-            // Smart Zero-Key Mandarin Intent Classification (Navigation vs Ask Gemini App)
+            // Smart Zero-Key Mandarin Intent Classification -> Built-In Plan A Map Navigation!
             val lower = spoken.lowercase()
             val isExplicitGeminiChat = (lower.startsWith("問gemini") || lower.startsWith("問 gemini") ||
-                spoken.contains("為什麼") || spoken.contains("笑話") || spoken.contains("新聞") || spoken.contains("天氣")) &&
+                spoken.contains("為什麼") || spoken.contains("笑話") || spoken.contains("新聞")) &&
                 !spoken.contains("導航") && !spoken.contains("帶我去") && !spoken.contains("怎麼走")
 
             if (isExplicitGeminiChat && isGeminiAppInstalled(context)) {
@@ -194,11 +207,12 @@ object GeminiVoiceNavController {
 
             val cleanDest = extractDestinationFromMandarin(spoken)
             if (cleanDest.isNotBlank()) {
-                app.ttsAnnouncer.speak("好的，正在為您導航前往$cleanDest")
-                app.installedAppsRepository.launchGoogleMapsNavigation(cleanDest)
-                onStatusHud("🗺️✨ 語音導航前往：$cleanDest")
-            } else {
-                launchGeminiVoiceAssistantDirect(context, query = spoken)
+                app.builtInNavEngine.navigateByQuery(
+                    query = cleanDest,
+                    startLat = startLat,
+                    startLon = startLon,
+                    onStatus = onStatusHud
+                )
             }
         }
     }
@@ -229,12 +243,16 @@ object GeminiVoiceNavController {
     private data class GeminiNavParsed(
         val isNavigation: Boolean,
         val destination: String,
+        val lat: Double?,
+        val lon: Double?,
         val spokenReply: String
     )
 
     private fun parseDestinationWithGeminiCloud(
         apiKey: String,
         userSpeech: String,
+        curLat: Double,
+        curLon: Double,
         homeAddr: String,
         workAddr: String
     ): GeminiNavParsed? {
@@ -242,12 +260,12 @@ object GeminiVoiceNavController {
             val endpoint =
                 "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${Uri.encode(apiKey)}"
             val prompt = """
-                你是車機導航語音助理。請分析駕駛人的語音：「$userSpeech」。
-                已知住家地址：「$homeAddr」，公司地址：「$workAddr」。
-                若駕駛人想去某地點、找餐廳/加油站/停車場或導航，請回傳純 JSON：
-                {"isNavigation":true,"destination":"可直接給Google地圖搜尋的精準地點或關鍵字","spokenReply":"簡短繁體中文語音確認"}
-                若純粹是聊天問答（非找地點或導航），請回傳純 JSON：
-                {"isNavigation":false,"destination":"","spokenReply":"50字內繁體中文簡短回答"}
+                你是車機內建地圖導航語音助理。目前車輛座標 ($curLat, $curLon)，住家：「$homeAddr」，公司：「$workAddr」。
+                請分析駕駛人語音：「$userSpeech」。
+                若駕駛人想去某地點、找地標/餐廳/加油站/停車場或導航，請回傳純 JSON（若你能確定該台灣/當地知名地標經緯度請一併填入 lat 與 lon，不確定則填 0）：
+                {"isNavigation":true,"destination":"地標或地址名稱","lat":0.0,"lon":0.0,"spokenReply":"簡短繁體中文語音確認"}
+                若純粹是聊天問答，請回傳純 JSON：
+                {"isNavigation":false,"destination":"","lat":0.0,"lon":0.0,"spokenReply":"50字內繁體中文簡短回答"}
                 只輸出 JSON，不要加 markdown 語法。
             """.trimIndent()
 
@@ -284,9 +302,13 @@ object GeminiVoiceNavController {
                 ?: return null
 
             val parsedJson = json.parseToJsonElement(candidateText).jsonObject
+            val pLat = parsedJson["lat"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()?.takeIf { it != 0.0 }
+            val pLon = parsedJson["lon"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()?.takeIf { it != 0.0 }
             GeminiNavParsed(
                 isNavigation = parsedJson["isNavigation"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true,
                 destination = parsedJson["destination"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                lat = pLat,
+                lon = pLon,
                 spokenReply = parsedJson["spokenReply"]?.jsonPrimitive?.contentOrNull.orEmpty()
             )
         }.getOrNull()

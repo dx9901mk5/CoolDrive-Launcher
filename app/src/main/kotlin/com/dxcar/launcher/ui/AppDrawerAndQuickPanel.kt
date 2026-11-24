@@ -1,11 +1,14 @@
 package com.dxcar.launcher.ui
 
 import android.annotation.SuppressLint
+import android.view.View
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -40,6 +43,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.Brightness6
@@ -49,8 +53,10 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Splitscreen
 import androidx.compose.material.icons.rounded.SwapHoriz
@@ -369,17 +375,6 @@ fun AppDrawerScreen(
                         tint = colors.accent,
                         badgeAlert = hasPendingUpdate,
                         onClick = onOpenSettings
-                    )
-                }
-
-                item(key = "__dxcar_youtube__") {
-                    BuiltInDrawerTile(
-                        label = "YouTube 全螢幕",
-                        subLabel = "影音播放",
-                        icon = Icons.Rounded.PlayArrow,
-                        tint = Color(0xFFEF4444),
-                        badgeAlert = false,
-                        onClick = onLaunchYoutube
                     )
                 }
 
@@ -1443,6 +1438,157 @@ private fun QuickTile(
                 maxLines = 1
             )
         }
+    }
+}
+
+/**
+ * Inline Non-Fullscreen Playable YouTube Card for Page 2 (1:1 Split Right Pane):
+ * - Plays YouTube videos directly inside the right 50% card ("youtube可播放影片為右，不要全螢幕").
+ * - Traps any HTML5 video customView inside its own local card FrameLayout so video playback
+ *   NEVER expands into system fullscreen or covers the left 50% Plan A Map!
+ */
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+fun EmbeddedYoutubePlayerCard(
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalDxCarColors.current
+    var webViewRef by remember { mutableStateOf<WebView?>(null) }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        // Compact Inline YouTube Control Bar (Back / Home / Reload — strictly NO fullscreen button!)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(colors.cardSurfaceElevated)
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFFFF0000))
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.PlayArrow,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    text = "YouTube 視窗播放",
+                    color = colors.primaryText,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = { if (webViewRef?.canGoBack() == true) webViewRef?.goBack() },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = "上一頁",
+                        tint = colors.primaryText,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                IconButton(
+                    onClick = { webViewRef?.loadUrl("https://m.youtube.com") },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Home,
+                        contentDescription = "YouTube 首頁",
+                        tint = colors.primaryText,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                IconButton(
+                    onClick = { webViewRef?.reload() },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Refresh,
+                        contentDescription = "重新整理",
+                        tint = colors.primaryText,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+
+        // Video WebView + In-Card CustomView Trap (guarantees video stays inside this 50% card!)
+        AndroidView(
+            factory = { ctx ->
+                val cardVideoContainer = FrameLayout(ctx).apply {
+                    setBackgroundColor(android.graphics.Color.BLACK)
+                }
+                var inlineCustomView: View? = null
+                var inlineCustomCallback: WebChromeClient.CustomViewCallback? = null
+
+                val wv = WebView(ctx).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    CookieManager.getInstance().setAcceptCookie(true)
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        mediaPlaybackRequiresUserGesture = false
+                        loadsImagesAutomatically = true
+                        mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                        cacheMode = WebSettings.LOAD_DEFAULT
+                        userAgentString =
+                            "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+                    }
+                    webViewClient = WebViewClient()
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                            if (view == null) return
+                            inlineCustomView?.let { cardVideoContainer.removeView(it) }
+                            inlineCustomView = view
+                            inlineCustomCallback = callback
+                            cardVideoContainer.addView(
+                                view,
+                                FrameLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                            )
+                        }
+
+                        override fun onHideCustomView() {
+                            inlineCustomView?.let { cardVideoContainer.removeView(it) }
+                            inlineCustomView = null
+                            inlineCustomCallback?.onCustomViewHidden()
+                            inlineCustomCallback = null
+                        }
+                    }
+                    loadUrl("https://m.youtube.com")
+                }
+                webViewRef = wv
+                cardVideoContainer.addView(wv)
+                cardVideoContainer
+            },
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        )
     }
 }
 

@@ -20,6 +20,8 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -51,6 +53,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -58,17 +61,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import com.dxcar.launcher.DxCarApp
 import com.dxcar.launcher.SplitSidePanelActivity
@@ -89,7 +96,9 @@ import com.dxcar.launcher.data.ThemeMode
 import com.dxcar.launcher.layout.CoolwalkLayoutEngine
 import com.dxcar.launcher.layout.ResolvedDockPlacement
 import com.dxcar.launcher.layout.ScreenMetrics
+import com.dxcar.launcher.map.BuiltInNavState
 import com.dxcar.launcher.map.LiveMapCard
+import com.dxcar.launcher.map.NavSearchResult
 import com.dxcar.launcher.map.OfflineMapUiState
 import com.dxcar.launcher.map.OfflineRegionPreset
 import com.dxcar.launcher.overlay.Cursor3DStateHolder
@@ -144,6 +153,7 @@ fun DxCarRootScreen(
     val popupMessage by app.notificationCenter.popupMessage.collectAsState()
     val messages by app.notificationCenter.messages.collectAsState()
     val activeNav by app.notificationCenter.activeNavigation.collectAsState()
+    val builtInNavState by app.builtInNavEngine.state.collectAsState()
     val bridgeStatus by BluetoothCompanionService.bridgeState.collectAsState()
     val updateState by app.updateManager.state.collectAsState()
     val cursor3DActive by Cursor3DStateHolder.active.collectAsState()
@@ -162,13 +172,15 @@ fun DxCarRootScreen(
         }
     }
 
-    // Feed live GPS coordinates to LocalWeatherRepository & OfflineMapManager staleness/region detector
+    // Feed live GPS coordinates to LocalWeatherRepository, BuiltInNavEngine & OfflineMapManager
     LaunchedEffect(location.latitude, location.longitude, config.offlineUpdatePolicy, config.offlineRegions.size) {
         app.weatherRepository.onLocationUpdated(location.latitude, location.longitude)
+        app.builtInNavEngine.onLocationUpdated(location.latitude, location.longitude)
         app.offlineMapManager.evaluateUpdateNeeded(location.latitude, location.longitude)
     }
 
     var destination by remember { mutableStateOf(LauncherDestination.DASHBOARD_SPLIT) }
+    var currentDashboardPage by remember { mutableIntStateOf(0) } // 0 = 第一介面, 1 = 第二介面 (1:1 方案A地圖 + 內嵌YouTube)
     var isMapPrimary by remember { mutableStateOf(true) }
     var showQuickControlCenter by remember { mutableStateOf(false) }
     var showNotificationCenter by remember { mutableStateOf(false) }
@@ -515,7 +527,10 @@ fun DxCarRootScreen(
                     onClockClick = { showQuickControlCenter = !showQuickControlCenter },
                     onNotificationsClick = { showNotificationCenter = !showNotificationCenter },
                     onToggle3DCursor = ::toggle3DPointerGlobal,
-                    onVoiceNavClick = onStartGeminiVoiceNav,
+                    onVoiceNavClick = {
+                        destination = LauncherDestination.DASHBOARD_SPLIT
+                        onStartGeminiVoiceNav()
+                    },
                     onBackClick = {
                         when {
                             showQuickControlCenter -> showQuickControlCenter = false
@@ -576,120 +591,230 @@ fun DxCarRootScreen(
                 ) { targetDest ->
                     when (targetDest) {
                         LauncherDestination.DASHBOARD_SPLIT -> {
-                            CoolwalkSplitDashboard(
-                                isHorizontalSplit = layoutSpec.isHorizontalSplit,
-                                supportsThirdSubCard = layoutSpec.supportsThirdSubCard,
-                                rightHandDrive = config.rightHandDrive,
-                                primaryRatio = layoutSpec.primaryWeight,
-                                isMapPrimary = isMapPrimary,
-                                experimentMode = config.homeExperimentMode,
-                                location = location,
-                                activeNav = activeNav,
-                                media = media,
-                                weather = weather,
-                                offlineState = offlineState,
-                                offlinePresets = app.offlineMapManager.presets,
-                                downloadedRegions = config.offlineRegions,
-                                offlineUpdatePolicy = config.offlineUpdatePolicy,
-                                isNight = isNight,
-                                mapEngineStyle = config.mapEngineStyle,
-                                trafficEnabled = config.mapTrafficEnabled,
-                                homeMapDisplayMode = config.homeMapDisplayMode,
-                                planCNavPackage = config.planCNavPackage,
-                                showSixShortcutsInMediaPanel = config.showSixShortcutsInMediaPanel,
-                                homeAddress = config.homeAddress,
-                                workAddress = config.workAddress,
-                                customShortcutSlots = config.customShortcutSlots,
-                                splitShortcuts = config.splitShortcuts,
-                                installedApps = installedApps,
-                                onMapCardBoundsMeasured = { rect -> latestMapCardRect = rect },
-                                onPinRealMapsHere = { launchFreeformPrimaryBox(null) },
-                                onSwitchToBuiltinMap = {
-                                    app.preferences.update { it.copy(homeMapDisplayMode = HomeMapDisplayMode.BUILTIN_LIVE_MAP) }
-                                },
-                                onSelectMapStyle = { styleItem ->
-                                    app.preferences.update { it.copy(mapEngineStyle = styleItem) }
-                                    gestureHudText = "🗺 已切換圖層：${styleItem.labelZh}"
-                                },
-                                onToggleTraffic = {
-                                    val nextTraffic = !config.mapTrafficEnabled
-                                    app.preferences.update { it.copy(mapTrafficEnabled = nextTraffic) }
-                                    gestureHudText = if (nextTraffic) "🚦 已開啟 Google 即時路況" else "🗺 已關閉即時路況圖層"
-                                },
-                                onToggleMapStyle = {
-                                    val allStyles = MapEngineStyle.entries
-                                    val next = allStyles[(allStyles.indexOf(config.mapEngineStyle) + 1) % allStyles.size]
-                                    app.preferences.update { it.copy(mapEngineStyle = next) }
-                                    gestureHudText = "🗺 切換至 ${next.labelZh}"
-                                },
-                                onSelectOfflinePolicy = { pol ->
-                                    app.preferences.update { it.copy(offlineUpdatePolicy = pol) }
-                                },
-                                onDownloadOfflineRegion = { presetId ->
-                                    app.offlineMapManager.downloadOrUpdatePreset(
-                                        presetId = presetId,
-                                        currentLat = location.latitude,
-                                        currentLon = location.longitude,
-                                        style = config.mapEngineStyle
-                                    )
-                                },
-                                onCancelOfflineDownload = { app.offlineMapManager.cancelCurrentDownload() },
-                                onDeleteOfflineRegion = { rid -> app.offlineMapManager.deleteDownloadedRegion(rid) },
-                                onDismissOfflineSuggestion = { app.offlineMapManager.dismissUpdateSuggestion() },
-                                onSelectPlanCNavPkg = { pkg ->
-                                    app.preferences.update { it.copy(planCNavPackage = pkg) }
-                                    val label = app.installedAppsRepository.findApp(pkg)?.label ?: pkg
-                                    gestureHudText = "🧭 已指定左側導航：$label"
-                                },
-                                onLaunchPlanCFreeform = { pkg ->
-                                    launchFreeformPrimaryBox(pkg)
-                                    if (config.planCOverlayMusicPanelEnabled) {
-                                        if (Settings.canDrawOverlays(context)) {
-                                            PersistentDockOverlayService.showPlanCMusicPanel(context)
-                                        } else {
-                                            gestureHudText = "請點設定最上方「權限需求」授予懸浮權限以顯示右側音樂控盤"
-                                        }
+                            val startLatFallback = if (location.latitude != 0.0) location.latitude else config.lastKnownLat
+                            val startLonFallback = if (location.longitude != 0.0) location.longitude else config.lastKnownLon
+
+                            InfiniteLoopTwoPageDashboard(
+                                currentPage = currentDashboardPage,
+                                onPageChanged = { nextPage ->
+                                    currentDashboardPage = nextPage
+                                    gestureHudText = if (nextPage == 0) {
+                                        "① 第一介面 · 導航與音樂天氣"
+                                    } else {
+                                        "② 第二介面 · 1:1 方案A地圖 ＋ YouTube 視窗"
                                     }
                                 },
-                                onLaunchPlanCSplit = { pkg -> SplitSidePanelActivity.launchWithRealGoogleMaps(context, pkg) },
-                                onLaunchPlanCFullscreen = { pkg ->
-                                    PersistentDockOverlayService.hidePlanCMusicPanel()
-                                    launchAppRespectingOptions(pkg)
+                                pageOneContent = { onSeamDragDelta, onSeamDragEnd ->
+                                    CoolwalkSplitDashboard(
+                                        isHorizontalSplit = layoutSpec.isHorizontalSplit,
+                                        supportsThirdSubCard = layoutSpec.supportsThirdSubCard,
+                                        rightHandDrive = config.rightHandDrive,
+                                        primaryRatio = layoutSpec.primaryWeight,
+                                        isMapPrimary = isMapPrimary,
+                                        experimentMode = config.homeExperimentMode,
+                                        location = location,
+                                        activeNav = activeNav,
+                                        builtInNavState = builtInNavState,
+                                        media = media,
+                                        weather = weather,
+                                        offlineState = offlineState,
+                                        offlinePresets = app.offlineMapManager.presets,
+                                        downloadedRegions = config.offlineRegions,
+                                        offlineUpdatePolicy = config.offlineUpdatePolicy,
+                                        isNight = isNight,
+                                        mapEngineStyle = config.mapEngineStyle,
+                                        trafficEnabled = config.mapTrafficEnabled,
+                                        homeMapDisplayMode = config.homeMapDisplayMode,
+                                        planCNavPackage = config.planCNavPackage,
+                                        showSixShortcutsInMediaPanel = config.showSixShortcutsInMediaPanel,
+                                        homeAddress = config.homeAddress,
+                                        workAddress = config.workAddress,
+                                        customShortcutSlots = config.customShortcutSlots,
+                                        splitShortcuts = config.splitShortcuts,
+                                        installedApps = installedApps,
+                                        onSeamDragDelta = onSeamDragDelta,
+                                        onSeamDragEnd = onSeamDragEnd,
+                                        onMapCardBoundsMeasured = { rect -> latestMapCardRect = rect },
+                                        onPinRealMapsHere = { launchFreeformPrimaryBox(null) },
+                                        onSwitchToBuiltinMap = {
+                                            app.preferences.update { it.copy(homeMapDisplayMode = HomeMapDisplayMode.BUILTIN_LIVE_MAP) }
+                                        },
+                                        onSelectMapStyle = { styleItem ->
+                                            app.preferences.update { it.copy(mapEngineStyle = styleItem) }
+                                            gestureHudText = "🗺 已切換圖層：${styleItem.labelZh}"
+                                        },
+                                        onToggleTraffic = {
+                                            val nextTraffic = !config.mapTrafficEnabled
+                                            app.preferences.update { it.copy(mapTrafficEnabled = nextTraffic) }
+                                            gestureHudText = if (nextTraffic) "🚦 已開啟 Google 即時路況" else "🗺 已關閉即時路況圖層"
+                                        },
+                                        onToggleMapStyle = {
+                                            val allStyles = MapEngineStyle.entries
+                                            val next = allStyles[(allStyles.indexOf(config.mapEngineStyle) + 1) % allStyles.size]
+                                            app.preferences.update { it.copy(mapEngineStyle = next) }
+                                            gestureHudText = "🗺 切換至 ${next.labelZh}"
+                                        },
+                                        onSelectOfflinePolicy = { pol ->
+                                            app.preferences.update { it.copy(offlineUpdatePolicy = pol) }
+                                        },
+                                        onDownloadOfflineRegion = { presetId ->
+                                            app.offlineMapManager.downloadOrUpdatePreset(
+                                                presetId = presetId,
+                                                currentLat = location.latitude,
+                                                currentLon = location.longitude,
+                                                style = config.mapEngineStyle
+                                            )
+                                        },
+                                        onCancelOfflineDownload = { app.offlineMapManager.cancelCurrentDownload() },
+                                        onDeleteOfflineRegion = { rid -> app.offlineMapManager.deleteDownloadedRegion(rid) },
+                                        onDismissOfflineSuggestion = { app.offlineMapManager.dismissUpdateSuggestion() },
+                                        onSelectPlanCNavPkg = { pkg ->
+                                            app.preferences.update { it.copy(planCNavPackage = pkg) }
+                                            val label = app.installedAppsRepository.findApp(pkg)?.label ?: pkg
+                                            gestureHudText = "🧭 已指定左側導航：$label"
+                                        },
+                                        onLaunchPlanCFreeform = { pkg ->
+                                            launchFreeformPrimaryBox(pkg)
+                                            if (config.planCOverlayMusicPanelEnabled) {
+                                                if (Settings.canDrawOverlays(context)) {
+                                                    PersistentDockOverlayService.showPlanCMusicPanel(context)
+                                                } else {
+                                                    gestureHudText = "請點設定最上方「權限需求」授予懸浮權限以顯示右側音樂控盤"
+                                                }
+                                            }
+                                        },
+                                        onLaunchPlanCSplit = { pkg -> SplitSidePanelActivity.launchWithRealGoogleMaps(context, pkg) },
+                                        onLaunchPlanCFullscreen = { pkg ->
+                                            PersistentDockOverlayService.hidePlanCMusicPanel()
+                                            launchAppRespectingOptions(pkg)
+                                        },
+                                        onSwapPanes = { isMapPrimary = !isMapPrimary },
+                                        onOpenFullscreenMap = { destination = LauncherDestination.FULLSCREEN_MAP },
+                                        onLaunchRealGoogleMaps = { query ->
+                                            app.installedAppsRepository.launchGoogleMapsNavigation(query)
+                                        },
+                                        onLaunchRealMapsSplit = {
+                                            SplitSidePanelActivity.launchWithRealGoogleMaps(context)
+                                        },
+                                        onVoiceNavClick = onStartGeminiVoiceNav,
+                                        onSearchBuiltInPlace = { q ->
+                                            app.builtInNavEngine.searchPlaces(q, startLatFallback, startLonFallback)
+                                        },
+                                        onStartBuiltInNavResult = { res ->
+                                            app.builtInNavEngine.startNavigation(
+                                                startLat = startLatFallback,
+                                                startLon = startLonFallback,
+                                                destName = res.name,
+                                                destLat = res.latitude,
+                                                destLon = res.longitude
+                                            )
+                                        },
+                                        onQuickBuiltInNavigateQuery = { q ->
+                                            app.builtInNavEngine.navigateByQuery(
+                                                query = q,
+                                                startLat = startLatFallback,
+                                                startLon = startLonFallback,
+                                                onStatus = { msg -> gestureHudText = msg }
+                                            )
+                                        },
+                                        onStopBuiltInNav = { app.builtInNavEngine.stopNavigation() },
+                                        onWeatherClick = { app.weatherRepository.openGoogleWeatherApp(context) },
+                                        onMediaPlayPause = { app.mediaControlBridge.togglePlayPause() },
+                                        onMediaNext = { app.mediaControlBridge.skipNext() },
+                                        onMediaPrev = { app.mediaControlBridge.skipPrevious() },
+                                        onMediaToggleFavorite = {
+                                            val (_, msg) = app.mediaControlBridge.toggleFavoriteOrLike()
+                                            gestureHudText = msg
+                                        },
+                                        onSelectMediaSession = { app.mediaControlBridge.selectSession(it) },
+                                        onOpenMediaApp = {
+                                            val pkg = media.packageName
+                                            if (pkg.isNotBlank()) app.installedAppsRepository.launchAppFullscreen(pkg)
+                                            else launchYoutubeBest()
+                                        },
+                                        onOpenYoutubeFullscreen = ::launchYoutubeBest,
+                                        onCustomSlotEmptyClick = { slotIdx -> pickingShortcutSlotIndex = slotIdx },
+                                        onCustomSlotLaunch = ::handleCustomShortcutLaunch,
+                                        onCustomSlotRemove = { slotIdx, label ->
+                                            app.preferences.clearCustomShortcutSlot(slotIdx)
+                                            gestureHudText = "🗑 已移除 $label（點擊 ＋ 可重新加入）"
+                                        }
+                                    )
                                 },
-                                onSwapPanes = { isMapPrimary = !isMapPrimary },
-                                onOpenFullscreenMap = { destination = LauncherDestination.FULLSCREEN_MAP },
-                                onLaunchRealGoogleMaps = { query ->
-                                    app.installedAppsRepository.launchGoogleMapsNavigation(query)
-                                },
-                                onLaunchRealMapsSplit = {
-                                    SplitSidePanelActivity.launchWithRealGoogleMaps(context)
-                                },
-                                onVoiceNavClick = onStartGeminiVoiceNav,
-                                onWeatherClick = { app.weatherRepository.openGoogleWeatherApp(context) },
-                                onMediaPlayPause = { app.mediaControlBridge.togglePlayPause() },
-                                onMediaNext = { app.mediaControlBridge.skipNext() },
-                                onMediaPrev = { app.mediaControlBridge.skipPrevious() },
-                                onMediaToggleFavorite = {
-                                    val (_, msg) = app.mediaControlBridge.toggleFavoriteOrLike()
-                                    gestureHudText = msg
-                                },
-                                onSelectMediaSession = { app.mediaControlBridge.selectSession(it) },
-                                onOpenMediaApp = {
-                                    val pkg = media.packageName
-                                    if (pkg.isNotBlank()) app.installedAppsRepository.launchAppFullscreen(pkg)
-                                    else launchYoutubeBest()
-                                },
-                                onOpenYoutubeFullscreen = ::launchYoutubeBest,
-                                onCustomSlotEmptyClick = { slotIdx -> pickingShortcutSlotIndex = slotIdx },
-                                onCustomSlotLaunch = ::handleCustomShortcutLaunch,
-                                onCustomSlotRemove = { slotIdx, label ->
-                                    app.preferences.clearCustomShortcutSlot(slotIdx)
-                                    gestureHudText = "🗑 已移除 $label（點擊 ＋ 可重新加入）"
+                                pageTwoContent = { onSeamDragDelta, onSeamDragEnd ->
+                                    SecondEqualMapYoutubeDashboard(
+                                        isHorizontalSplit = layoutSpec.isHorizontalSplit,
+                                        location = location,
+                                        activeNav = activeNav,
+                                        builtInNavState = builtInNavState,
+                                        offlineState = offlineState,
+                                        offlinePresets = app.offlineMapManager.presets,
+                                        downloadedRegions = config.offlineRegions,
+                                        offlineUpdatePolicy = config.offlineUpdatePolicy,
+                                        isNight = isNight,
+                                        mapEngineStyle = config.mapEngineStyle,
+                                        trafficEnabled = config.mapTrafficEnabled,
+                                        homeAddress = config.homeAddress,
+                                        workAddress = config.workAddress,
+                                        onSeamDragDelta = onSeamDragDelta,
+                                        onSeamDragEnd = onSeamDragEnd,
+                                        onSelectMapStyle = { styleItem ->
+                                            app.preferences.update { it.copy(mapEngineStyle = styleItem) }
+                                        },
+                                        onToggleTraffic = {
+                                            app.preferences.update { it.copy(mapTrafficEnabled = !it.mapTrafficEnabled) }
+                                        },
+                                        onToggleMapStyle = {
+                                            val allStyles = MapEngineStyle.entries
+                                            val next = allStyles[(allStyles.indexOf(config.mapEngineStyle) + 1) % allStyles.size]
+                                            app.preferences.update { it.copy(mapEngineStyle = next) }
+                                        },
+                                        onSelectOfflinePolicy = { pol ->
+                                            app.preferences.update { it.copy(offlineUpdatePolicy = pol) }
+                                        },
+                                        onDownloadOfflineRegion = { presetId ->
+                                            app.offlineMapManager.downloadOrUpdatePreset(presetId, location.latitude, location.longitude, config.mapEngineStyle)
+                                        },
+                                        onCancelOfflineDownload = { app.offlineMapManager.cancelCurrentDownload() },
+                                        onDeleteOfflineRegion = { rid -> app.offlineMapManager.deleteDownloadedRegion(rid) },
+                                        onDismissOfflineSuggestion = { app.offlineMapManager.dismissUpdateSuggestion() },
+                                        onOpenFullscreenMap = { destination = LauncherDestination.FULLSCREEN_MAP },
+                                        onLaunchRealGoogleMaps = { query ->
+                                            app.installedAppsRepository.launchGoogleMapsNavigation(query)
+                                        },
+                                        onLaunchRealMapsSplit = {
+                                            SplitSidePanelActivity.launchWithRealGoogleMaps(context)
+                                        },
+                                        onVoiceNavClick = onStartGeminiVoiceNav,
+                                        onSearchBuiltInPlace = { q ->
+                                            app.builtInNavEngine.searchPlaces(q, startLatFallback, startLonFallback)
+                                        },
+                                        onStartBuiltInNavResult = { res ->
+                                            app.builtInNavEngine.startNavigation(
+                                                startLat = startLatFallback,
+                                                startLon = startLonFallback,
+                                                destName = res.name,
+                                                destLat = res.latitude,
+                                                destLon = res.longitude
+                                            )
+                                        },
+                                        onQuickBuiltInNavigateQuery = { q ->
+                                            app.builtInNavEngine.navigateByQuery(
+                                                query = q,
+                                                startLat = startLatFallback,
+                                                startLon = startLonFallback,
+                                                onStatus = { msg -> gestureHudText = msg }
+                                            )
+                                        },
+                                        onStopBuiltInNav = { app.builtInNavEngine.stopNavigation() }
+                                    )
                                 }
                             )
                         }
 
                         LauncherDestination.FULLSCREEN_MAP -> {
+                            val startLatFallback = if (location.latitude != 0.0) location.latitude else config.lastKnownLat
+                            val startLonFallback = if (location.longitude != 0.0) location.longitude else config.lastKnownLon
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -700,6 +825,7 @@ fun DxCarRootScreen(
                                 LiveMapCard(
                                     location = location,
                                     activeNav = activeNav,
+                                    builtInNavState = builtInNavState,
                                     isNight = isNight,
                                     mapEngineStyle = config.mapEngineStyle,
                                     trafficEnabled = config.mapTrafficEnabled,
@@ -739,7 +865,17 @@ fun DxCarRootScreen(
                                     onLaunchRealMapsSplit = {
                                         SplitSidePanelActivity.launchWithRealGoogleMaps(context)
                                     },
-                                    onVoiceNavClick = onStartGeminiVoiceNav
+                                    onVoiceNavClick = onStartGeminiVoiceNav,
+                                    onSearchBuiltInPlace = { q ->
+                                        app.builtInNavEngine.searchPlaces(q, startLatFallback, startLonFallback)
+                                    },
+                                    onStartBuiltInNavResult = { res ->
+                                        app.builtInNavEngine.startNavigation(startLatFallback, startLonFallback, res.name, res.latitude, res.longitude)
+                                    },
+                                    onQuickBuiltInNavigateQuery = { q ->
+                                        app.builtInNavEngine.navigateByQuery(q, startLatFallback, startLonFallback) { gestureHudText = it }
+                                    },
+                                    onStopBuiltInNav = { app.builtInNavEngine.stopNavigation() }
                                 )
                             }
                         }
@@ -820,7 +956,10 @@ fun DxCarRootScreen(
                                     )
                                 },
                                 onCancelOfflineDownload = { app.offlineMapManager.cancelCurrentDownload() },
-                                onStartVoiceNavigation = onStartGeminiVoiceNav,
+                                onStartVoiceNavigation = {
+                                    destination = LauncherDestination.DASHBOARD_SPLIT
+                                    onStartGeminiVoiceNav()
+                                },
                                 onUpdateConfig = { transform -> app.preferences.update(transform) },
                                 onRequestSetDefaultHome = {
                                     onRequestSetDefaultHome()
@@ -1142,6 +1281,355 @@ fun DxCarRootScreen(
     }
 }
 
+/**
+ * Infinite-Loop Two-Interface Dashboard Container:
+ * - Page 0 (第一介面): Coolwalk Split Dashboard (70/30 adjustable, Map + Weather/Media/6-Shortcuts)
+ * - Page 1 (第二介面): 1:1 Equal Split Dashboard (Left = Plan A Built-in Map, Right = Inline Playable YouTube)
+ * - Dragging the center divider line ("兩個視窗中間的線") rightward (or leftward) slides smoothly and wraps infinitely (0 -> 1 -> 0 -> 1)!
+ */
+@Composable
+private fun InfiniteLoopTwoPageDashboard(
+    currentPage: Int,
+    onPageChanged: (Int) -> Unit,
+    pageOneContent: @Composable (onSeamDragDelta: (Float) -> Unit, onSeamDragEnd: () -> Unit) -> Unit,
+    pageTwoContent: @Composable (onSeamDragDelta: (Float) -> Unit, onSeamDragEnd: () -> Unit) -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val dragPx = remember { Animatable(0f) }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val widthPx = constraints.maxWidth.toFloat().coerceAtLeast(320f)
+        val thresholdPx = (widthPx * 0.10f).coerceIn(55f, 150f)
+
+        val handleDragDelta: (Float) -> Unit = { delta ->
+            scope.launch {
+                val next = (dragPx.value + delta).coerceIn(-widthPx * 0.95f, widthPx * 0.95f)
+                dragPx.snapTo(next)
+            }
+        }
+
+        val handleDragEnd: () -> Unit = {
+            val cur = dragPx.value
+            scope.launch {
+                if (abs(cur) >= thresholdPx) {
+                    val target = if (cur >= 0f) widthPx else -widthPx
+                    dragPx.animateTo(
+                        targetValue = target,
+                        animationSpec = tween(
+                            durationMillis = 360,
+                            easing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1.0f)
+                        )
+                    )
+                    // Infinite cyclic wrap-around: 0 -> 1 -> 0 -> 1 ...
+                    onPageChanged((currentPage + 1) % 2)
+                    dragPx.snapTo(0f)
+                } else {
+                    dragPx.animateTo(0f, spring(stiffness = Spring.StiffnessMedium))
+                }
+            }
+        }
+
+        val curDx = dragPx.value
+        val isDragging = abs(curDx) > 0.5f
+
+        val page0OffsetX = when {
+            currentPage == 0 -> curDx.roundToInt()
+            !isDragging -> -constraints.maxWidth - 40
+            curDx >= 0f -> (-widthPx + curDx).roundToInt()
+            else -> (widthPx + curDx).roundToInt()
+        }
+
+        val page1OffsetX = when {
+            currentPage == 1 -> curDx.roundToInt()
+            !isDragging -> -constraints.maxWidth - 40
+            curDx >= 0f -> (-widthPx + curDx).roundToInt()
+            else -> (widthPx + curDx).roundToInt()
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(if (currentPage == 0) 2f else 1f)
+                .offset { IntOffset(page0OffsetX, 0) }
+        ) {
+            pageOneContent(handleDragDelta, handleDragEnd)
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(if (currentPage == 1) 2f else 1f)
+                .offset { IntOffset(page1OffsetX, 0) }
+        ) {
+            pageTwoContent(handleDragDelta, handleDragEnd)
+        }
+    }
+}
+
+/**
+ * Interactive Center Seam Divider Handle between Left & Right windows:
+ * Slide rightward (or leftward) to switch infinitely between 第一介面 and 第二介面!
+ */
+@Composable
+private fun DashboardSeamSwipeHandle(
+    pageIndicator: String,
+    onDragDelta: (Float) -> Unit,
+    onDragEnd: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalDxCarColors.current
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .pointerInput(pageIndicator) {
+                detectHorizontalDragGestures(
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        onDragDelta(dragAmount)
+                    },
+                    onDragEnd = onDragEnd,
+                    onDragCancel = onDragEnd
+                )
+            }
+    ) {
+        // Subtle vertical center seam line
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .fillMaxHeight(0.76f)
+                .clip(RoundedCornerShape(2.dp))
+                .background(colors.accent.copy(alpha = 0.35f))
+        )
+
+        // Tactile Center Grip Pill ("往右滑動切換介面")
+        Surface(
+            color = colors.cardSurfaceElevated.copy(alpha = 0.94f),
+            shape = RoundedCornerShape(12.dp),
+            shadowElevation = 6.dp,
+            modifier = Modifier
+                .border(1.2.dp, colors.accent.copy(alpha = 0.85f), RoundedCornerShape(12.dp))
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(4.dp)
+                        .height(22.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(colors.accent)
+                )
+                Text(
+                    text = pageIndicator,
+                    color = colors.primaryText,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 第二介面 (Page 2): Exact 1:1 Ratio Split Dashboard
+ * - Left 50%: Plan A Built-In Live Map (with Gemini Built-in Voice Navigation & Route Line)
+ * - Center Seam: Interactive Seam Divider Handle (swipe right to loop back to 第一介面!)
+ * - Right 50%: Inline Playable YouTube Video Card (strictly non-fullscreen!)
+ */
+@Composable
+private fun SecondEqualMapYoutubeDashboard(
+    isHorizontalSplit: Boolean,
+    location: com.dxcar.launcher.map.VehicleLocationState,
+    activeNav: com.dxcar.launcher.comms.ActiveNavBanner?,
+    builtInNavState: BuiltInNavState,
+    offlineState: OfflineMapUiState,
+    offlinePresets: List<OfflineRegionPreset>,
+    downloadedRegions: List<OfflineRegionRecord>,
+    offlineUpdatePolicy: OfflineUpdatePolicy,
+    isNight: Boolean,
+    mapEngineStyle: MapEngineStyle,
+    trafficEnabled: Boolean,
+    homeAddress: String,
+    workAddress: String,
+    onSeamDragDelta: (Float) -> Unit,
+    onSeamDragEnd: () -> Unit,
+    onSelectMapStyle: (MapEngineStyle) -> Unit,
+    onToggleTraffic: () -> Unit,
+    onToggleMapStyle: () -> Unit,
+    onSelectOfflinePolicy: (OfflineUpdatePolicy) -> Unit,
+    onDownloadOfflineRegion: (String) -> Unit,
+    onCancelOfflineDownload: () -> Unit,
+    onDeleteOfflineRegion: (String) -> Unit,
+    onDismissOfflineSuggestion: () -> Unit,
+    onOpenFullscreenMap: () -> Unit,
+    onLaunchRealGoogleMaps: (String?) -> Unit,
+    onLaunchRealMapsSplit: () -> Unit,
+    onVoiceNavClick: () -> Unit,
+    onSearchBuiltInPlace: (String) -> Unit,
+    onStartBuiltInNavResult: (NavSearchResult) -> Unit,
+    onQuickBuiltInNavigateQuery: (String) -> Unit,
+    onStopBuiltInNav: () -> Unit
+) {
+    val colors = LocalDxCarColors.current
+    val cardShape = RoundedCornerShape(colors.cardCornerDp.dp)
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(12.dp)
+    ) {
+        val gap = 16.dp
+        if (isHorizontalSplit) {
+            val halfPaneW = ((maxWidth - gap) / 2f).coerceAtLeast(140.dp)
+            val fullH = maxHeight
+
+            // Left 50% (1:1): Plan A Built-in Map
+            Box(
+                modifier = Modifier
+                    .zIndex(1f)
+                    .offset(x = 0.dp, y = 0.dp)
+                    .width(halfPaneW)
+                    .height(fullH)
+                    .clip(cardShape)
+                    .border(colors.cardBorderWidthDp.dp, colors.cardBorder, cardShape)
+            ) {
+                LiveMapCard(
+                    location = location,
+                    activeNav = activeNav,
+                    builtInNavState = builtInNavState,
+                    isNight = isNight,
+                    mapEngineStyle = mapEngineStyle,
+                    trafficEnabled = trafficEnabled,
+                    offlineState = offlineState,
+                    offlinePresets = offlinePresets,
+                    downloadedRegions = downloadedRegions,
+                    offlineUpdatePolicy = offlineUpdatePolicy,
+                    isPrimary = true,
+                    isFullscreen = false,
+                    showSwapButton = false,
+                    homeAddress = homeAddress,
+                    workAddress = workAddress,
+                    onSelectMapStyle = onSelectMapStyle,
+                    onToggleTraffic = onToggleTraffic,
+                    onToggleStyle = onToggleMapStyle,
+                    onSelectOfflinePolicy = onSelectOfflinePolicy,
+                    onDownloadOfflineRegion = onDownloadOfflineRegion,
+                    onCancelOfflineDownload = onCancelOfflineDownload,
+                    onDeleteOfflineRegion = onDeleteOfflineRegion,
+                    onDismissOfflineSuggestion = onDismissOfflineSuggestion,
+                    onSwapRequested = {},
+                    onToggleFullscreen = onOpenFullscreenMap,
+                    onLaunchGoogleMapsApp = onLaunchRealGoogleMaps,
+                    onLaunchRealMapsSplit = onLaunchRealMapsSplit,
+                    onVoiceNavClick = onVoiceNavClick,
+                    onSearchBuiltInPlace = onSearchBuiltInPlace,
+                    onStartBuiltInNavResult = onStartBuiltInNavResult,
+                    onQuickBuiltInNavigateQuery = onQuickBuiltInNavigateQuery,
+                    onStopBuiltInNav = onStopBuiltInNav
+                )
+            }
+
+            // Right 50% (1:1): Inline Playable YouTube Video Card (Non-Fullscreen!)
+            Box(
+                modifier = Modifier
+                    .zIndex(1f)
+                    .offset(x = halfPaneW + gap, y = 0.dp)
+                    .width(halfPaneW)
+                    .height(fullH)
+                    .clip(cardShape)
+                    .border(colors.cardBorderWidthDp.dp, colors.cardBorder, cardShape)
+            ) {
+                EmbeddedYoutubePlayerCard()
+            }
+
+            // Center 1:1 Seam Divider Line (Swipe Right/Left -> Infinite Loop back to 第一介面!)
+            DashboardSeamSwipeHandle(
+                pageIndicator = "2/2",
+                onDragDelta = onSeamDragDelta,
+                onDragEnd = onSeamDragEnd,
+                modifier = Modifier
+                    .zIndex(5f)
+                    .offset(x = halfPaneW + (gap / 2f) - 16.dp, y = 0.dp)
+                    .width(32.dp)
+                    .height(fullH)
+            )
+        } else {
+            val halfPaneH = ((maxHeight - gap) / 2f).coerceAtLeast(140.dp)
+            val fullW = maxWidth
+
+            Box(
+                modifier = Modifier
+                    .zIndex(1f)
+                    .offset(x = 0.dp, y = 0.dp)
+                    .width(fullW)
+                    .height(halfPaneH)
+                    .clip(cardShape)
+                    .border(colors.cardBorderWidthDp.dp, colors.cardBorder, cardShape)
+            ) {
+                LiveMapCard(
+                    location = location,
+                    activeNav = activeNav,
+                    builtInNavState = builtInNavState,
+                    isNight = isNight,
+                    mapEngineStyle = mapEngineStyle,
+                    trafficEnabled = trafficEnabled,
+                    offlineState = offlineState,
+                    offlinePresets = offlinePresets,
+                    downloadedRegions = downloadedRegions,
+                    offlineUpdatePolicy = offlineUpdatePolicy,
+                    isPrimary = true,
+                    isFullscreen = false,
+                    showSwapButton = false,
+                    homeAddress = homeAddress,
+                    workAddress = workAddress,
+                    onSelectMapStyle = onSelectMapStyle,
+                    onToggleTraffic = onToggleTraffic,
+                    onToggleStyle = onToggleMapStyle,
+                    onSelectOfflinePolicy = onSelectOfflinePolicy,
+                    onDownloadOfflineRegion = onDownloadOfflineRegion,
+                    onCancelOfflineDownload = onCancelOfflineDownload,
+                    onDeleteOfflineRegion = onDeleteOfflineRegion,
+                    onDismissOfflineSuggestion = onDismissOfflineSuggestion,
+                    onSwapRequested = {},
+                    onToggleFullscreen = onOpenFullscreenMap,
+                    onLaunchGoogleMapsApp = onLaunchRealGoogleMaps,
+                    onLaunchRealMapsSplit = onLaunchRealMapsSplit,
+                    onVoiceNavClick = onVoiceNavClick,
+                    onSearchBuiltInPlace = onSearchBuiltInPlace,
+                    onStartBuiltInNavResult = onStartBuiltInNavResult,
+                    onQuickBuiltInNavigateQuery = onQuickBuiltInNavigateQuery,
+                    onStopBuiltInNav = onStopBuiltInNav
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .zIndex(1f)
+                    .offset(x = 0.dp, y = halfPaneH + gap)
+                    .width(fullW)
+                    .height(halfPaneH)
+                    .clip(cardShape)
+                    .border(colors.cardBorderWidthDp.dp, colors.cardBorder, cardShape)
+            ) {
+                EmbeddedYoutubePlayerCard()
+            }
+
+            DashboardSeamSwipeHandle(
+                pageIndicator = "2/2",
+                onDragDelta = onSeamDragDelta,
+                onDragEnd = onSeamDragEnd,
+                modifier = Modifier
+                    .zIndex(5f)
+                    .offset(x = (fullW / 2f) - 45.dp, y = halfPaneH + (gap / 2f) - 16.dp)
+                    .width(90.dp)
+                    .height(32.dp)
+            )
+        }
+    }
+}
+
 @Composable
 private fun CoolwalkSplitDashboard(
     isHorizontalSplit: Boolean,
@@ -1152,6 +1640,7 @@ private fun CoolwalkSplitDashboard(
     experimentMode: HomeExperimentMode,
     location: com.dxcar.launcher.map.VehicleLocationState,
     activeNav: com.dxcar.launcher.comms.ActiveNavBanner?,
+    builtInNavState: BuiltInNavState = BuiltInNavState(),
     media: com.dxcar.launcher.media.ActiveMediaState,
     weather: LocalWeatherState,
     offlineState: OfflineMapUiState,
@@ -1169,6 +1658,8 @@ private fun CoolwalkSplitDashboard(
     customShortcutSlots: List<String>,
     splitShortcuts: List<SplitScreenShortcut>,
     installedApps: List<InstalledAppInfo>,
+    onSeamDragDelta: (Float) -> Unit = {},
+    onSeamDragEnd: () -> Unit = {},
     onMapCardBoundsMeasured: (Rect) -> Unit,
     onPinRealMapsHere: () -> Unit,
     onSwitchToBuiltinMap: () -> Unit,
@@ -1189,6 +1680,10 @@ private fun CoolwalkSplitDashboard(
     onLaunchRealGoogleMaps: (String?) -> Unit,
     onLaunchRealMapsSplit: () -> Unit,
     onVoiceNavClick: () -> Unit = {},
+    onSearchBuiltInPlace: (String) -> Unit = {},
+    onStartBuiltInNavResult: (NavSearchResult) -> Unit = {},
+    onQuickBuiltInNavigateQuery: (String) -> Unit = {},
+    onStopBuiltInNav: () -> Unit = {},
     onWeatherClick: () -> Unit,
     onMediaPlayPause: () -> Unit,
     onMediaNext: () -> Unit,
@@ -1281,6 +1776,7 @@ private fun CoolwalkSplitDashboard(
                     LiveMapCard(
                         location = location,
                         activeNav = activeNav,
+                        builtInNavState = builtInNavState,
                         isNight = isNight,
                         mapEngineStyle = mapEngineStyle,
                         trafficEnabled = trafficEnabled,
@@ -1304,7 +1800,11 @@ private fun CoolwalkSplitDashboard(
                         onToggleFullscreen = onOpenFullscreenMap,
                         onLaunchGoogleMapsApp = onLaunchRealGoogleMaps,
                         onLaunchRealMapsSplit = onLaunchRealMapsSplit,
-                        onVoiceNavClick = onVoiceNavClick
+                        onVoiceNavClick = onVoiceNavClick,
+                        onSearchBuiltInPlace = onSearchBuiltInPlace,
+                        onStartBuiltInNavResult = onStartBuiltInNavResult,
+                        onQuickBuiltInNavigateQuery = onQuickBuiltInNavigateQuery,
+                        onStopBuiltInNav = onStopBuiltInNav
                     )
                 }
             }
@@ -1386,7 +1886,7 @@ private fun CoolwalkSplitDashboard(
             .fillMaxSize()
             .padding(12.dp)
     ) {
-        val gap = 12.dp
+        val gap = 16.dp
         if (isHorizontalSplit) {
             val availW = (maxWidth - gap).coerceAtLeast(160.dp)
             val fullH = maxHeight
@@ -1445,6 +1945,19 @@ private fun CoolwalkSplitDashboard(
                         cameraDistance = 16f * density
                     }
             )
+
+            // Center Seam Divider Line between the two windows ("滑動第一介面兩個視窗中間的線就可以往右滑動切換，無限迴圈")
+            val seamCenterX = (if (rightHandDrive) secondaryW else primaryW) + (gap / 2f)
+            DashboardSeamSwipeHandle(
+                pageIndicator = "1/2",
+                onDragDelta = onSeamDragDelta,
+                onDragEnd = onSeamDragEnd,
+                modifier = Modifier
+                    .zIndex(5f)
+                    .offset(x = seamCenterX - 16.dp, y = 0.dp)
+                    .width(32.dp)
+                    .height(fullH)
+            )
         } else {
             val availH = (maxHeight - gap).coerceAtLeast(160.dp)
             val fullW = maxWidth
@@ -1501,6 +2014,17 @@ private fun CoolwalkSplitDashboard(
                         alpha = mediaAlpha
                         cameraDistance = 16f * density
                     }
+            )
+
+            DashboardSeamSwipeHandle(
+                pageIndicator = "1/2",
+                onDragDelta = onSeamDragDelta,
+                onDragEnd = onSeamDragEnd,
+                modifier = Modifier
+                    .zIndex(5f)
+                    .offset(x = (fullW / 2f) - 45.dp, y = primaryH + (gap / 2f) - 16.dp)
+                    .width(90.dp)
+                    .height(32.dp)
             )
         }
     }
