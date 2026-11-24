@@ -478,6 +478,9 @@ fun DxCarRootScreen(
                 onChangeTouchpadSensitivity = { sens ->
                     app.preferences.update { it.copy(phoneTouchpadSensitivity = sens) }
                 },
+                onSelectLanguage = { lang ->
+                    app.preferences.update { it.copy(appLanguage = lang) }
+                },
                 onRequestRuntimePermissions = onRequestRuntimePermissions,
                 onReconnectBridge = { BluetoothCompanionService.forceReconnect(context) },
                 onSwitchToAiBoxMode = {

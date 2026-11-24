@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DX-Car Launcher</string>
+    <string name="notification_listener_label">DX-Car Launcher メディア・ナビ・着信/通知リスナー</string>
+    <string name="accessibility_service_label">DX-Car Launcher 常駐ドック・ジェスチャー支援</string>
+    <string name="accessibility_service_description">AI Box車載機でのフルスクリーン表示時の常駐ドック連動、ホーム/戻る、画面分割、ジェスチャー操作を提供します。</string>
+</resources>

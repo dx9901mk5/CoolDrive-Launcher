@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DX-Car Launcher</string>
+    <string name="notification_listener_label">DX-Car Launcher Media, Nav &amp; Call/Message Listener</string>
+    <string name="accessibility_service_label">DX-Car Launcher Persistent Dock &amp; Gesture Assist</string>
+    <string name="accessibility_service_description">Provides persistent floating Dock, Home/Back/Recents navigation, split-screen automation, and gesture controls for Car AI Box.</string>
+</resources>

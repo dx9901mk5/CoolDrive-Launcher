@@ -89,6 +89,7 @@ import com.dxcar.launcher.comms.ActiveNavBanner
 import com.dxcar.launcher.data.MapEngineStyle
 import com.dxcar.launcher.data.OfflineRegionRecord
 import com.dxcar.launcher.data.OfflineUpdatePolicy
+import com.dxcar.launcher.i18n.DxCarI18n.str
 import com.dxcar.launcher.theme.LocalDxCarColors
 import com.dxcar.launcher.ui.bouncyClickable
 import org.maplibre.android.camera.CameraPosition
@@ -348,8 +349,8 @@ fun LiveMapCard(
                             }
                             Text(
                                 text = when {
-                                    builtInNavState.isSearching -> "✨ 正在於內建地圖搜尋目的地…"
-                                    builtInNavState.isRouting -> "🗺️ 正在規劃內建地圖導航藍線…"
+                                    builtInNavState.isSearching -> str("✨ 正在於內建地圖搜尋目的地…", "✨ Searching destination on built-in map…", "✨ 内蔵マップで目的地を検索中…")
+                                    builtInNavState.isRouting -> str("🗺️ 正在規劃內建地圖導航藍線…", "🗺️ Calculating route on built-in map…", "🗺️ 内蔵マップでルートを計算中…")
                                     else -> "$distTxt · ${builtInNavState.currentInstructionZh}"
                                 },
                                 color = Color.White,
@@ -527,7 +528,7 @@ fun LiveMapCard(
                                         value = builtInQueryText,
                                         onValueChange = { builtInQueryText = it },
                                         singleLine = true,
-                                        placeholder = { Text("輸入目的地（直接於本啟動器內建地圖導航）…", fontSize = 12.sp) },
+                                        placeholder = { Text(str("輸入目的地（直接於本啟動器內建地圖導航）…", "Enter destination (navigate on built-in map)…", "目的地を入力（内蔵マップで案内）…"), fontSize = 12.sp) },
                                         shape = RoundedCornerShape(12.dp),
                                         modifier = Modifier.weight(1f)
                                     )
@@ -536,7 +537,7 @@ fun LiveMapCard(
                                         colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
-                                        Text("搜尋", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text(str("搜尋", "Search", "検索"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
                                     IconButton(onClick = onVoiceNavClick) {
                                         Icon(Icons.Rounded.Mic, contentDescription = "語音輸入", tint = Color(0xFFA78BFA))
@@ -566,7 +567,7 @@ fun LiveMapCard(
                                             Text(res.name, color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             Text(res.subtitle, color = colors.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         }
-                                        Text("開始導航 →", color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text(str("開始導航 →", "Start Nav →", "案内開始 →"), color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -589,10 +590,10 @@ fun LiveMapCard(
                             ) {
                                 Text(
                                     text = when (st) {
-                                        MapEngineStyle.GOOGLE_TRAFFIC_TILES -> "G標準"
-                                        MapEngineStyle.GOOGLE_SATELLITE_HYBRID -> "G衛星"
-                                        MapEngineStyle.OPENFREEMAP_VECTOR_3D -> "3D向量"
-                                        MapEngineStyle.OPENFREEMAP_DARK -> "深色向量"
+                                        MapEngineStyle.GOOGLE_TRAFFIC_TILES -> str("G標準", "Google", "標準")
+                                        MapEngineStyle.GOOGLE_SATELLITE_HYBRID -> str("G衛星", "Satellite", "衛星")
+                                        MapEngineStyle.OPENFREEMAP_VECTOR_3D -> str("3D向量", "3D Map", "3D地図")
+                                        MapEngineStyle.OPENFREEMAP_DARK -> str("深色向量", "Dark", "ダーク")
                                     },
                                     color = if (active) colors.onAccent else colors.primaryText,
                                     fontSize = 11.sp,

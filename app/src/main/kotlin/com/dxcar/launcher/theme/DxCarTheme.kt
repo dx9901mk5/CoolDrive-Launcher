@@ -8,10 +8,13 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import com.dxcar.launcher.data.LauncherStylePreset
+import com.dxcar.launcher.i18n.DxCarI18n
+import com.dxcar.launcher.i18n.LocalAppLanguage
 
 data class AccentPreset(
     val nameZh: String,
@@ -231,7 +234,12 @@ fun DxCarTheme(
         )
     }
 
-    CompositionLocalProvider(LocalDxCarColors provides animatedPalette) {
+    val activeLang by DxCarI18n.effectiveLanguage.collectAsState()
+
+    CompositionLocalProvider(
+        LocalDxCarColors provides animatedPalette,
+        LocalAppLanguage provides activeLang
+    ) {
         MaterialTheme(
             colorScheme = materialScheme,
             content = content

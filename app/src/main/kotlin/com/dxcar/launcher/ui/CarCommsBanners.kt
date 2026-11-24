@@ -66,6 +66,7 @@ import com.dxcar.launcher.comms.CallActionCommand
 import com.dxcar.launcher.comms.CallStatus
 import com.dxcar.launcher.comms.CarCallState
 import com.dxcar.launcher.comms.CarMessageItem
+import com.dxcar.launcher.i18n.DxCarI18n.str
 import com.dxcar.launcher.theme.LocalDxCarColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -421,7 +422,7 @@ fun IncomingMessageBanner(
                                         .bouncyClickable(pressedScale = 0.90f) { onQuickReply(item, reply) }
                                 ) {
                                     Text(
-                                        text = "回覆：$reply",
+                                        text = str("回覆：$reply", "Reply: $reply", "返信：$reply"),
                                         color = colors.primaryText,
                                         fontSize = 22.sp,
                                         fontWeight = FontWeight.Bold,

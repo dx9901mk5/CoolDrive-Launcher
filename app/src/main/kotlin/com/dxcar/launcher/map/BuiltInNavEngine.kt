@@ -2,6 +2,7 @@ package com.dxcar.launcher.map
 
 import android.location.Location
 import com.dxcar.launcher.comms.TtsAnnouncer
+import com.dxcar.launcher.i18n.DxCarI18n
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -186,8 +187,9 @@ class BuiltInNavEngine(private val ttsAnnouncer: TtsAnnouncer?) {
                 val right = biasLon + 0.55
                 val top = biasLat + 0.50
                 val bottom = biasLat - 0.50
+                val acceptLang = DxCarI18n.nominatimAcceptLanguage()
                 val nearUrl =
-                    "https://nominatim.openstreetmap.org/search?q=$encoded&format=jsonv2&accept-language=zh-TW&viewbox=$left,$top,$right,$bottom&bounded=1&limit=5"
+                    "https://nominatim.openstreetmap.org/search?q=$encoded&format=jsonv2&accept-language=$acceptLang&viewbox=$left,$top,$right,$bottom&bounded=1&limit=5"
                 val req = Request.Builder()
                     .url(nearUrl)
                     .header("User-Agent", "DX-Car-Launcher/1.5.3 (Android Car HeadUnit)")
@@ -203,8 +205,9 @@ class BuiltInNavEngine(private val ttsAnnouncer: TtsAnnouncer?) {
         // 2. Nominatim (zh-TW) nationwide / global search if local box had < 3 hits
         if (combined.size < 3) {
             runCatching {
+                val acceptLang = DxCarI18n.nominatimAcceptLanguage()
                 val wideUrl =
-                    "https://nominatim.openstreetmap.org/search?q=$encoded&format=jsonv2&accept-language=zh-TW&limit=6"
+                    "https://nominatim.openstreetmap.org/search?q=$encoded&format=jsonv2&accept-language=$acceptLang&limit=6"
                 val req = Request.Builder()
                     .url(wideUrl)
                     .header("User-Agent", "DX-Car-Launcher/1.5.3 (Android Car HeadUnit)")

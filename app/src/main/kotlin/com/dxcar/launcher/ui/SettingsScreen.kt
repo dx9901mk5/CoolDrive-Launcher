@@ -80,6 +80,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dxcar.launcher.BuildConfig
 import com.dxcar.launcher.comms.BridgeStatusState
+import com.dxcar.launcher.data.AppLanguage
 import com.dxcar.launcher.data.DockPositionMode
 import com.dxcar.launcher.data.GeminiVoiceMode
 import com.dxcar.launcher.data.HomeExperimentMode
@@ -88,7 +89,11 @@ import com.dxcar.launcher.data.LauncherConfig
 import com.dxcar.launcher.data.LauncherStylePreset
 import com.dxcar.launcher.data.MapEngineStyle
 import com.dxcar.launcher.data.OfflineUpdatePolicy
+import com.dxcar.launcher.data.SplitLaunchEngine
 import com.dxcar.launcher.data.ThemeMode
+import com.dxcar.launcher.i18n.DxCarI18n
+import com.dxcar.launcher.i18n.DxCarI18n.str
+import com.dxcar.launcher.i18n.LocalAppLanguage
 import com.dxcar.launcher.layout.CoolwalkLayoutSpec
 import com.dxcar.launcher.map.OfflineMapManager
 import com.dxcar.launcher.map.OfflineMapUiState
@@ -205,7 +210,7 @@ fun SettingsScreen(
                     Spacer(Modifier.width(4.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "DX-Car 車機啟動器設定",
+                            text = str("DX-Car 車機啟動器設定", "DX-Car 车机启动器设置", "DX-Car Launcher Settings", "DX-Car ランチャー設定"),
                             color = colors.primaryText,
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
@@ -213,7 +218,12 @@ fun SettingsScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "已依功能分類排列 · 點右上「權限需求」檢查授權與 60fps 開關",
+                            text = str(
+                                "已依功能分類排列 · 點右上「權限需求」檢查授權與 60fps 開關",
+                                "已按功能分类排列 · 点右上「权限需求」检查授权与 60fps 开关",
+                                "Categorized layout · Tap Permissions for grants & 60fps toggle",
+                                "機能別に分類 · 右上の「権限」から各種許可と 60fps を設定"
+                            ),
                             color = colors.secondaryText,
                             fontSize = 12.sp,
                             maxLines = 1,
@@ -253,7 +263,11 @@ fun SettingsScreen(
                             )
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                text = if (allPermsOk) "權限已就緒 ($grantedPerms/$totalPerms)" else "權限需求 ($grantedPerms/$totalPerms)",
+                                text = if (allPermsOk) {
+                                    str("權限已就緒 ($grantedPerms/$totalPerms)", "Permissions OK ($grantedPerms/$totalPerms)", "権限 OK ($grantedPerms/$totalPerms)")
+                                } else {
+                                    str("權限需求 ($grantedPerms/$totalPerms)", "Permissions ($grantedPerms/$totalPerms)", "権限設定 ($grantedPerms/$totalPerms)")
+                                },
                                 color = colors.primaryText,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
@@ -267,7 +281,7 @@ fun SettingsScreen(
                     ) {
                         Icon(Icons.Rounded.PhoneAndroid, contentDescription = null, modifier = Modifier.size(17.dp))
                         Spacer(Modifier.width(5.dp))
-                        Text("手機同步模式", fontSize = 13.sp, maxLines = 1)
+                        Text(str("手機同步模式", "Phone Mode", "スマホ連携モード"), fontSize = 13.sp, maxLines = 1)
                     }
                 }
             }
@@ -282,16 +296,73 @@ fun SettingsScreen(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // ==================== LANGUAGE SELECTOR (繁體中文 / 简体中文 / English / 日本語) ====================
+                val currentUiLang = LocalAppLanguage.current
+                Surface(
+                    color = colors.cardSurface,
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, colors.accent.copy(alpha = 0.45f), RoundedCornerShape(20.dp))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.padding(end = 12.dp)) {
+                            Text(
+                                text = str("🌐 介面語言 / UI Language", "🌐 界面语言 / UI Language", "🌐 UI Language / 介面語言", "🌐 表示言語 / UI Language"),
+                                color = colors.primaryText,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = str(
+                                    "支援繁體中文、简体中文、English、日本語（即時切換免重啟）",
+                                    "支持繁体中文、简体中文、English、日本語（实时切换无需重启）",
+                                    "Traditional / Simplified Chinese, English & Japanese (Instant)",
+                                    "繁體中文・簡体字・English・日本語に対応（即時切替）"
+                                ),
+                                color = colors.secondaryText,
+                                fontSize = 11.sp
+                            )
+                        }
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            AppLanguage.entries.forEach { langOption ->
+                                SelectablePill(
+                                    text = DxCarI18n.appLanguageLabel(langOption, currentUiLang),
+                                    selected = config.appLanguage == langOption,
+                                    onClick = { onUpdateConfig { it.copy(appLanguage = langOption) } }
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // ==================== CATEGORY 1: 首頁方案、離線地圖與視覺風格 ====================
                 CategoryHeaderBanner(
-                    categoryTitle = "分類一 · 首頁方案、離線地圖與視覺風格",
-                    hint = "選擇方案 A（含離線地圖下載與自動更新判斷）或方案 C（指定導航＋純音樂），並自訂日夜主題與分割比例"
+                    categoryTitle = str(
+                        "分類一 · 首頁方案、離線地圖與視覺風格",
+                        "Category 1 · Home Plan, Offline Maps & Visual Style",
+                        "カテゴリ 1 · ホームプラン・オフライン地図・外観"
+                    ),
+                    hint = str(
+                        "選擇方案 A（含離線地圖下載與自動更新判斷）或方案 C（指定導航＋純音樂），並自訂日夜主題與分割比例",
+                        "Choose Plan A (Offline Maps & Traffic) or Plan C (Custom Nav + Music), plus Theme & Split Ratio",
+                        "プラン A（オフライン地図＆渋滞）またはプラン C（指定ナビ＋音楽）、テーマと分割比率を設定"
+                    )
                 )
 
                 val cardPlanAndOffline: @Composable (Modifier) -> Unit = { mod ->
                     SettingsSectionCard(
                         icon = Icons.Rounded.Science,
-                        title = "首頁方案與離線地圖管理",
+                        title = str("首頁方案與離線地圖管理", "Home Plan & Offline Maps", "ホームプラン・オフライン地図"),
                         modifier = mod
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -328,7 +399,7 @@ fun SettingsScreen(
                                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                                             ) {
                                                 Text(
-                                                    text = mode.titleZh,
+                                                    text = DxCarI18n.experimentTitle(mode),
                                                     color = if (mode.isAvailable) colors.primaryText else colors.secondaryText,
                                                     fontSize = 14.sp,
                                                     fontWeight = FontWeight.Bold
@@ -344,12 +415,12 @@ fun SettingsScreen(
                                                         ) {
                                                             Icon(Icons.Rounded.Lock, contentDescription = null, tint = colors.secondaryText, modifier = Modifier.size(11.dp))
                                                             Spacer(Modifier.width(3.dp))
-                                                            Text("待 Root", color = colors.secondaryText, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                                            Text(str("待 Root", "Needs Root", "Root 待ち"), color = colors.secondaryText, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                                                         }
                                                     }
                                                 }
                                             }
-                                            Text(mode.descZh, color = colors.secondaryText, fontSize = 11.sp)
+                                            Text(DxCarI18n.experimentDesc(mode), color = colors.secondaryText, fontSize = 11.sp)
                                         }
                                         if (mode.isAvailable) {
                                             Spacer(Modifier.width(8.dp))
@@ -523,22 +594,16 @@ fun SettingsScreen(
                                             .background(swatch)
                                             .border(if (selected) 3.dp else 1.dp, if (selected) colors.primaryText else colors.cardBorder, CircleShape)
                                     )
-                                    Text(accent.nameZh, color = if (selected) colors.primaryText else colors.secondaryText, fontSize = 10.sp)
+                                    Text(DxCarI18n.accentName(idx, accent.nameZh), color = if (selected) colors.primaryText else colors.secondaryText, fontSize = 10.sp)
                                 }
                             }
                         }
 
-                        Text("白天／夜晚切換模式", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(str("白天／夜晚切換模式", "Day / Night Mode", "昼間 / 夜間モード"), color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(
-                                ThemeMode.AUTO_TIME to "依時間自動",
-                                ThemeMode.AUTO_SUNRISE_SUNSET to "GPS 日出日落",
-                                ThemeMode.FOLLOW_SYSTEM to "跟隨車機",
-                                ThemeMode.FORCE_DAY to "固定白天",
-                                ThemeMode.FORCE_NIGHT to "固定夜晚"
-                            ).forEach { (mode, label) ->
+                            ThemeMode.entries.forEach { mode ->
                                 SelectablePill(
-                                    text = label,
+                                    text = DxCarI18n.themeModeLabel(mode),
                                     selected = config.themeMode == mode,
                                     onClick = { onUpdateConfig { it.copy(themeMode = mode) } }
                                 )
@@ -576,19 +641,23 @@ fun SettingsScreen(
                             )
                         }
 
-                        Text("內建地圖圖層與路況", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(str("內建地圖圖層與路況", "Map Layers & Traffic", "地図レイヤー・交通状況"), color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             MapEngineStyle.entries.forEach { styleItem ->
                                 SelectablePill(
-                                    text = styleItem.labelZh,
+                                    text = DxCarI18n.mapEngineLabel(styleItem),
                                     selected = config.mapEngineStyle == styleItem,
                                     onClick = { onUpdateConfig { it.copy(mapEngineStyle = styleItem) } }
                                 )
                             }
                         }
                         SettingsToggleRow(
-                            title = "疊加 Google 即時路況圖層",
-                            subtitle = "顯示紅黃綠即時車流；可搭配「開啟分屏設定」測試 AOSP 原生可拖動分屏",
+                            title = str("疊加 Google 即時路況圖層", "Google Live Traffic Layer", "Google 交通状況レイヤー"),
+                            subtitle = str(
+                                "顯示紅黃綠即時車流；可搭配「開啟分屏設定」測試 AOSP 原生可拖動分屏",
+                                "Shows live traffic flow; pair with Split Setup to test draggable AOSP split-screen",
+                                "リアルタイム渋滞情報を表示（画面分割設定と併用可能）"
+                            ),
                             checked = config.mapTrafficEnabled,
                             onCheckedChange = { checked -> onUpdateConfig { it.copy(mapTrafficEnabled = checked) } }
                         )
@@ -616,9 +685,13 @@ fun SettingsScreen(
                                         Icon(Icons.Rounded.Speed, contentDescription = null, tint = colors.accent, modifier = Modifier.size(20.dp))
                                         Spacer(Modifier.width(6.dp))
                                         Column {
-                                            Text("60fps / 60Hz 高流暢度顯示模式", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                            Text(str("60fps / 60Hz 高流暢度顯示模式", "60fps / 60Hz High Refresh Mode", "60fps / 60Hz 高フレームレート表示"), color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                             Text(
-                                                text = refreshCap.statusBadgeZh,
+                                                text = if (refreshCap.supports60Hz) {
+                                                    str("✓ 可用（支援 ${refreshCap.maxSupportedHz}Hz · 目前 ${refreshCap.currentHz}Hz）", "✓ Supported (${refreshCap.maxSupportedHz}Hz max · ${refreshCap.currentHz}Hz now)", "✓ 利用可能（最大 ${refreshCap.maxSupportedHz}Hz · 現在 ${refreshCap.currentHz}Hz）")
+                                                } else {
+                                                    str("⚠️ 目前 ${refreshCap.currentHz}Hz（依車機盒韌體）", "⚠️ Currently ${refreshCap.currentHz}Hz (OEM dependent)", "⚠️ 現在 ${refreshCap.currentHz}Hz（端末依存）")
+                                                },
                                                 color = if (refreshCap.supports60Hz) colors.statusConnected else Color(0xFFF59E0B),
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Bold
@@ -631,34 +704,51 @@ fun SettingsScreen(
                                         colors = SwitchDefaults.colors(checkedThumbColor = colors.onAccent, checkedTrackColor = colors.accent)
                                     )
                                 }
-                                Text(refreshCap.detailHintZh, color = colors.secondaryText, fontSize = 11.sp)
+                                Text(
+                                    text = if (refreshCap.supports60Hz) {
+                                        str(
+                                            "偵測到此裝置螢幕支援 ${refreshCap.maxSupportedHz}Hz，開啟即可請求 60fps 高流暢度渲染！",
+                                            "Display supports ${refreshCap.maxSupportedHz}Hz; enable to request 60fps smooth rendering.",
+                                            "${refreshCap.maxSupportedHz}Hz 対応ディスプレイを検出。ON で 60fps 描画を要求します。"
+                                        )
+                                    } else {
+                                        str(
+                                            "未偵測到原生 60Hz（系統回報 ${refreshCap.currentHz}Hz）；開關仍可開啟以請求最高幀率，亦可進原廠設定檢查。",
+                                            "Native 60Hz not reported (${refreshCap.currentHz}Hz); toggle still requests max FPS or check OEM settings.",
+                                            "ネイティブ 60Hz 未検出（${refreshCap.currentHz}Hz）。ON で最大 FPS を要求、または純正設定を確認できます。"
+                                        )
+                                    },
+                                    color = colors.secondaryText,
+                                    fontSize = 11.sp
+                                )
                                 OutlinedButton(
                                     onClick = { SystemStatusMonitor.openAiBoxVendorSettings(context, preferDisplayFor60Fps = true) },
                                     shape = RoundedCornerShape(12.dp)
                                 ) {
                                     Icon(Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(15.dp))
                                     Spacer(Modifier.width(5.dp))
-                                    Text("開啟車機顯示／原廠設定檢查 60fps 選項", fontSize = 11.sp)
+                                    Text(str("開啟車機顯示／原廠設定檢查 60fps 選項", "Open Car / OEM Display Settings", "車載機・純正ディスプレイ設定を開く"), fontSize = 11.sp)
                                 }
                             }
                         }
 
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             OutlinedButton(onClick = onLaunchRealMapsSplitScreen, shape = RoundedCornerShape(12.dp)) {
-                                Text("測試 AOSP 分割G地圖", fontSize = 12.sp)
+                                Text(str("測試 AOSP 分割G地圖", "Test AOSP Split Maps", "AOSP 分割マップテスト"), fontSize = 12.sp)
                             }
                             Button(
                                 onClick = onOpenSplitShortcutCreator,
                                 colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text("分屏設定／讀取原車分屏", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(str("分屏設定／讀取原車分屏", "Split Setup / Import Stock", "画面分割設定・純正取込"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
                         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "首頁比例：${(config.primarySplitRatio * 100).roundToInt()}% / ${((1f - config.primarySplitRatio) * 100).roundToInt()}%",
+                                text = str("首頁比例：", "Home Ratio: ", "ホーム比率：") +
+                                    "${(config.primarySplitRatio * 100).roundToInt()}% / ${((1f - config.primarySplitRatio) * 100).roundToInt()}%",
                                 color = colors.primaryText,
                                 fontSize = 13.sp,
                                 modifier = Modifier.width(155.dp)
@@ -738,32 +828,32 @@ fun SettingsScreen(
                             }
                         }
 
-                        Text("駕駛座位置（左駕預設靠左 · 右駕預設靠右）", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(str("駕駛座位置（左駕預設靠左 · 右駕預設靠右）", "Driver Side (LHD Left · RHD Right)", "運転席側（左ハンドル・右ハンドル）"), color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             SelectablePill(
-                                text = "左駕模式（預設左側）",
+                                text = str("左駕模式（預設左側）", "LHD (Left Dock)", "左ハンドル（左ドック）"),
                                 selected = !config.rightHandDrive,
                                 onClick = { onUpdateConfig { it.copy(rightHandDrive = false) } }
                             )
                             SelectablePill(
-                                text = "右駕模式（預設右側）",
+                                text = str("右駕模式（預設右側）", "RHD (Right Dock)", "右ハンドル（右ドック）"),
                                 selected = config.rightHandDrive,
                                 onClick = { onUpdateConfig { it.copy(rightHandDrive = true) } }
                             )
                         }
 
-                        Text("Dock 擺放位置選擇（支援放置於上方！）", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(str("Dock 擺放位置選擇（支援放置於上方！）", "Dock Placement (Supports Top Bar!)", "ドック配置（上部バー対応！）"), color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf(
-                                DockPositionMode.DRIVER_SIDE to "預設跟隨左／右駕側邊",
-                                DockPositionMode.FORCE_TOP to "放置於上方（橫向）",
-                                DockPositionMode.FORCE_LEFT to "固定左側",
-                                DockPositionMode.FORCE_RIGHT to "固定右側",
-                                DockPositionMode.FORCE_BOTTOM to "放置於底部",
-                                DockPositionMode.AUTO_GOOGLE_DPI to "依 Google DPI 自動"
-                            ).forEach { (mode, label) ->
+                                DockPositionMode.DRIVER_SIDE,
+                                DockPositionMode.FORCE_TOP,
+                                DockPositionMode.FORCE_LEFT,
+                                DockPositionMode.FORCE_RIGHT,
+                                DockPositionMode.FORCE_BOTTOM,
+                                DockPositionMode.AUTO_GOOGLE_DPI
+                            ).forEach { mode ->
                                 SelectablePill(
-                                    text = label,
+                                    text = DxCarI18n.dockModeLabel(mode, config.rightHandDrive),
                                     selected = config.dockPositionMode == mode,
                                     onClick = { onUpdateConfig { it.copy(dockPositionMode = mode) } }
                                 )
@@ -997,38 +1087,64 @@ fun SettingsScreen(
                         }
 
                         SettingsToggleRow(
-                            title = "偵測到手機連上藍牙時，強制關閉再開啟 Wi-Fi（加速連入熱點）",
-                            subtitle = "一上車連上藍牙即自動重啟系統 Wi-Fi 立即掃描並連入手機熱點（預設開啟）",
+                            title = str(
+                                "偵測到手機連上藍牙時，強制關閉再開啟 Wi-Fi（加速連入熱點）",
+                                "检测到手机连上蓝牙时，强制关闭再开启 Wi-Fi（加速连入热点）",
+                                "Auto-Cycle Wi-Fi on Phone Bluetooth Connect (Fast Hotspot Join)",
+                                "スマホ Bluetooth 接続時に Wi-Fi を強制再起動（テザリング高速接続）"
+                            ),
+                            subtitle = str(
+                                "一上車連上藍牙即自動重啟系統 Wi-Fi 立即掃描並連入手機熱點（預設開啟）",
+                                "一上车连上蓝牙即自动重启系统 Wi-Fi 立即扫描并连入手机热点（默认开启）",
+                                "Automatically turns system Wi-Fi OFF then ON when phone Bluetooth connects (Default ON)",
+                                "乗車時の Bluetooth 接続でシステム Wi-Fi を再起動し、スマホのテザリングへ即座に接続（既定 ON）"
+                            ),
                             checked = config.autoCycleWifiOnBtConnect,
                             onCheckedChange = { checked -> onUpdateConfig { it.copy(autoCycleWifiOnBtConnect = checked) } }
                         )
 
                         SettingsToggleRow(
-                            title = "全螢幕導航／看影片時彈出頂部來電與訊息橫幅",
-                            subtitle = "支援接聽、掛斷、快速回覆與語音回覆",
+                            title = str(
+                                "全螢幕導航／看影片時彈出頂部來電與訊息橫幅",
+                                "Show Top Call & Message Banner in Fullscreen Apps",
+                                "フルスクリーン時に着信・通知バナーを上部に表示"
+                            ),
+                            subtitle = str(
+                                "支援接聽、掛斷、快速回覆與語音回覆",
+                                "Supports Answer, Decline, Quick Reply & Voice Reply",
+                                "応答・切断・クイック返信・音声返信に対応"
+                            ),
                             checked = config.globalCallMessageBannerEnabled,
                             onCheckedChange = { checked -> onUpdateConfig { it.copy(globalCallMessageBannerEnabled = checked) } }
                         )
 
                         SettingsToggleRow(
-                            title = "收到新訊息時自動繁中語音朗讀 (TTS)",
-                            subtitle = "自動壓低音樂音量播報寄件人與內容",
+                            title = str(
+                                "收到新訊息時自動語音朗讀 (TTS)",
+                                "Auto-Read New Messages (TTS)",
+                                "新着メッセージの自動音声読み上げ (TTS)"
+                            ),
+                            subtitle = str(
+                                "自動壓低音樂音量播報寄件人與內容",
+                                "Automatically ducks music volume to announce sender & message",
+                                "音楽の音量を自動で下げて送信者と内容を読み上げます"
+                            ),
                             checked = config.autoReadMessagesTts,
                             onCheckedChange = { checked -> onUpdateConfig { it.copy(autoReadMessagesTts = checked) } }
                         )
 
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = onTestWifiHotspotCycle, shape = RoundedCornerShape(12.dp)) {
-                                Text("📶 測試重啟 Wi-Fi 連熱點", fontSize = 12.sp)
+                                Text(str("📶 測試重啟 Wi-Fi 連熱點", "📶 Test Wi-Fi Cycle", "📶 Wi-Fi 再起動テスト"), fontSize = 12.sp)
                             }
                             OutlinedButton(onClick = onSimulateCall, shape = RoundedCornerShape(12.dp)) {
-                                Text("測試來電橫幅", fontSize = 12.sp)
+                                Text(str("測試來電橫幅", "Test Call Banner", "着信バナーテスト"), fontSize = 12.sp)
                             }
                             OutlinedButton(onClick = onSimulateMessage, shape = RoundedCornerShape(12.dp)) {
-                                Text("測試左上 2X 通知", fontSize = 12.sp)
+                                Text(str("測試左上 2X 通知", "Test 2X Alert", "2X 通知テスト"), fontSize = 12.sp)
                             }
                             TutorialPillButton(
-                                label = "教學",
+                                label = str("教學", "Guide", "ガイド"),
                                 onClick = { activeTutorial = CarSettingsTutorialTopic.PHONE_PAIRING }
                             )
                         }
@@ -1088,12 +1204,16 @@ fun SettingsScreen(
                 val cardUpdatesAndGithub: @Composable (Modifier) -> Unit = { mod ->
                     SettingsSectionCard(
                         icon = Icons.Rounded.CloudDownload,
-                        title = "App 自動更新與恢復預設",
+                        title = str("App 自動更新與恢復預設", "Auto Update & Reset", "自動アップデート・初期化"),
                         modifier = mod
                     ) {
                         SettingsToggleRow(
-                            title = "啟動時自動檢測並下載新版 APK",
-                            subtitle = "目前版本：v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})",
+                            title = str("啟動時自動檢測並下載新版 APK", "Auto-Check & Download Updates", "起動時に自動で更新を確認・取得"),
+                            subtitle = str(
+                                "目前版本：v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})",
+                                "Current: v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})",
+                                "現在: v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})"
+                            ),
                             checked = config.autoCheckAndDownloadUpdate,
                             onCheckedChange = { checked -> onUpdateConfig { it.copy(autoCheckAndDownloadUpdate = checked) } }
                         )
@@ -1112,7 +1232,10 @@ fun SettingsScreen(
                                 enabled = !updateState.checking && !updateState.downloading,
                                 shape = RoundedCornerShape(14.dp)
                             ) {
-                                Text(if (updateState.checking) "檢查中…" else "檢查更新")
+                                Text(
+                                    if (updateState.checking) str("檢查中…", "Checking…", "確認中…")
+                                    else str("檢查更新", "Check Updates", "更新を確認")
+                                )
                             }
                             if (updateState.hasUpdate || updateState.downloadedReady) {
                                 Button(
@@ -1123,9 +1246,9 @@ fun SettingsScreen(
                                 ) {
                                     Text(
                                         when {
-                                            updateState.downloadedReady -> "立即安裝 v${updateState.latestVersion}"
-                                            updateState.downloading -> "下載中 ${(updateState.progress * 100).toInt()}%"
-                                            else -> "下載更新"
+                                            updateState.downloadedReady -> str("立即安裝 v${updateState.latestVersion}", "Install v${updateState.latestVersion}", "今すぐインストール v${updateState.latestVersion}")
+                                            updateState.downloading -> str("下載中 ${(updateState.progress * 100).toInt()}%", "Downloading ${(updateState.progress * 100).toInt()}%", "ダウンロード中 ${(updateState.progress * 100).toInt()}%")
+                                            else -> str("下載更新", "Download Update", "更新をダウンロード")
                                         }
                                     )
                                 }
@@ -1191,7 +1314,11 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Rounded.RestartAlt, contentDescription = null, modifier = Modifier.size(17.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text(if (confirmResetPending) "再次點擊確認重置所有設定" else "恢復啟動器設定為預設值", fontSize = 12.sp)
+                            Text(
+                                if (confirmResetPending) str("再次點擊確認重置所有設定", "Tap again to confirm reset", "もう一度タップして初期化")
+                                else str("恢復啟動器設定為預設值", "Reset Launcher Defaults", "ランチャー設定を初期化"),
+                                fontSize = 12.sp
+                            )
                         }
                     }
                 }
@@ -1509,7 +1636,7 @@ private fun SettingsSectionCard(
 }
 
 @Composable
-private fun SelectablePill(
+internal fun SelectablePill(
     text: String,
     selected: Boolean,
     onClick: () -> Unit

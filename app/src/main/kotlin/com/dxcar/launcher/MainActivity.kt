@@ -22,6 +22,7 @@ import com.dxcar.launcher.comms.CarMessageItem
 import com.dxcar.launcher.data.SplitLaunchEngine
 import com.dxcar.launcher.data.SplitRatioPreset
 import com.dxcar.launcher.data.SplitScreenShortcut
+import com.dxcar.launcher.i18n.DxCarI18n
 import com.dxcar.launcher.system.PermissionHelper
 import com.dxcar.launcher.system.StockSplitScreenBridge
 import com.dxcar.launcher.system.SystemStatusMonitor
@@ -245,8 +246,16 @@ class MainActivity : ComponentActivity() {
         pendingVoiceReplyTarget = target
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.TRADITIONAL_CHINESE.toLanguageTag())
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "請說出要回覆給 ${target.sender} 的內容…")
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, DxCarI18n.speechLanguageTag())
+            putExtra(
+                RecognizerIntent.EXTRA_PROMPT,
+                DxCarI18n.tr(
+                    "請說出要回覆給 ${target.sender} 的內容…",
+                    "请说出要回复给 ${target.sender} 的内容…",
+                    "Speak your reply to ${target.sender}…",
+                    "${target.sender} さんへの返信を話してください…"
+                )
+            )
         }
         runCatching { voiceReplyLauncher.launch(intent) }
     }
@@ -271,7 +280,12 @@ class MainActivity : ComponentActivity() {
         runCatching {
             stockShortcutPickLauncher.launch(StockSplitScreenBridge.buildSystemShortcutPickerIntent())
         }.onFailure {
-            externalHudToast.value = "⚠️ 此車機系統未提供外部捷徑挑選清單"
+            externalHudToast.value = DxCarI18n.tr(
+                "⚠️ 此車機系統未提供外部捷徑挑選清單",
+                "⚠️ 此车机系统未提供外部快捷方式选择列表",
+                "⚠️ System shortcut picker is not available on this device",
+                "⚠️ この端末ではシステムショートカット選択を利用できません"
+            )
         }
     }
 

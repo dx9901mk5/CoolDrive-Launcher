@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DX-Car Launcher</string>
+    <string name="notification_listener_label">DX-Car Launcher 媒体、导航与来电消息监听</string>
+    <string name="accessibility_service_label">DX-Car Launcher 全局常驻 Dock 与多指手势辅助</string>
+    <string name="accessibility_service_description">提供 AI Box 车机全屏开启 YouTube／地图时的常驻 Dock 联动、返回首页、分屏窗口与全局手势控制。</string>
+</resources>

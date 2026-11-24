@@ -62,6 +62,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dxcar.launcher.data.SplitScreenShortcut
+import com.dxcar.launcher.i18n.DxCarI18n.str
 import com.dxcar.launcher.media.ActiveMediaState
 import com.dxcar.launcher.system.InstalledAppInfo
 import com.dxcar.launcher.theme.LocalDxCarColors
@@ -211,7 +212,11 @@ fun MediaControlCard(
                                 }
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    text = if (media.isRememberedLastApp) "上次：${media.appName}" else media.appName,
+                                    text = if (media.isRememberedLastApp) {
+                                        str("上次：${media.appName}", "Last: ${media.appName}", "前回：${media.appName}")
+                                    } else {
+                                        media.appName
+                                    },
                                     color = colors.primaryText,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold,

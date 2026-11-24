@@ -13,6 +13,15 @@ import kotlinx.serialization.json.Json
 import java.util.UUID
 
 @Serializable
+enum class AppLanguage(val code: String, val nativeLabel: String) {
+    SYSTEM("system", "跟隨系統 / Auto"),
+    ZH_TW("zh-TW", "繁體中文"),
+    ZH_CN("zh-CN", "简体中文"),
+    EN("en", "English"),
+    JA("ja", "日本語")
+}
+
+@Serializable
 enum class DeviceRole {
     AI_BOX_LAUNCHER,
     PHONE_COMPANION
@@ -178,6 +187,7 @@ enum class GestureAction {
 
 @Serializable
 data class LauncherConfig(
+    val appLanguage: AppLanguage = AppLanguage.SYSTEM,
     val deviceRole: DeviceRole = DeviceRole.AI_BOX_LAUNCHER,
     val roleUserPinned: Boolean = false,
     val dockPositionMode: DockPositionMode = DockPositionMode.DRIVER_SIDE,
@@ -333,7 +343,9 @@ class LauncherPreferences(context: Context) {
         encodeDefaults = true
     }
 
-    private val _config = MutableStateFlow(loadConfig())
+    private val _config = MutableStateFlow(loadConfig().also {
+        com.dxcar.launcher.i18n.DxCarI18n.setConfiguredLanguage(it.appLanguage)
+    })
     val config: StateFlow<LauncherConfig> = _config.asStateFlow()
 
     @Suppress("DEPRECATION")
@@ -397,6 +409,7 @@ class LauncherPreferences(context: Context) {
     fun update(transform: (LauncherConfig) -> LauncherConfig) {
         val next = transform(_config.value)
         _config.value = next
+        com.dxcar.launcher.i18n.DxCarI18n.setConfiguredLanguage(next.appLanguage)
         prefs.edit().putString(KEY_CONFIG_JSON, json.encodeToString(next)).apply()
     }
 

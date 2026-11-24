@@ -123,8 +123,12 @@ import com.dxcar.launcher.comms.BridgePacket
 import com.dxcar.launcher.comms.BridgeStatusState
 import com.dxcar.launcher.comms.PacketType
 import com.dxcar.launcher.comms.TouchpadAction
+import com.dxcar.launcher.data.AppLanguage
 import com.dxcar.launcher.data.DeviceFormFactor
 import com.dxcar.launcher.data.LauncherConfig
+import com.dxcar.launcher.i18n.DxCarI18n
+import com.dxcar.launcher.i18n.DxCarI18n.str
+import com.dxcar.launcher.i18n.LocalAppLanguage
 import com.dxcar.launcher.overlay.ExtraLargeTutorialModal
 import com.dxcar.launcher.system.InstalledAppInfo
 import com.dxcar.launcher.system.PairedBtDevice
@@ -195,6 +199,7 @@ fun PhoneCompanionScreen(
     onSetAllowedPackages: (List<String>) -> Unit = {},
     onToggleSyncAllApps: (Boolean) -> Unit,
     onChangeTouchpadSensitivity: (Float) -> Unit = {},
+    onSelectLanguage: (AppLanguage) -> Unit = {},
     onRequestRuntimePermissions: () -> Unit,
     onReconnectBridge: () -> Unit,
     onSwitchToAiBoxMode: () -> Unit
@@ -291,7 +296,7 @@ fun PhoneCompanionScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                         Text(
-                            text = "DX-Car 手機同步與遙控端",
+                            text = str("DX-Car 手機同步與遙控端", "DX-Car 手机同步与遥控端", "DX-Car Phone Companion", "DX-Car スマホ連携・リモコン"),
                             color = colors.primaryText,
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
@@ -299,15 +304,35 @@ fun PhoneCompanionScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "藍牙連上車機免持或開啟 Wi-Fi 熱點即自動連線（平時待機省電）",
+                            text = str(
+                                "藍牙連上車機免持或開啟 Wi-Fi 熱點即自動連線（平時待機省電）",
+                                "蓝牙连上车机免提或开启 Wi-Fi 热点即自动连接（平时待机省电）",
+                                "Auto-connects via Car Bluetooth or Wi-Fi Hotspot (Standby when idle)",
+                                "車載機 Bluetooth またはテザリング接続で自動同期（待機時は省電力）"
+                            ),
                             color = colors.secondaryText,
                             fontSize = 12.sp
                         )
                     }
                     TutorialPillButton(
-                        label = "教學",
+                        label = str("教學", "Guide", "ガイド"),
                         onClick = { showLargeTutorial = true }
                     )
+                }
+
+                // Compact 4-Language Selector Strip for Smartphone
+                val currentUiLang = LocalAppLanguage.current
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    AppLanguage.entries.forEach { langOpt ->
+                        SelectablePill(
+                            text = DxCarI18n.appLanguageLabel(langOpt, currentUiLang),
+                            selected = config.appLanguage == langOpt,
+                            onClick = { onSelectLanguage(langOpt) }
+                        )
+                    }
                 }
 
                 FlowRow(
@@ -340,7 +365,11 @@ fun PhoneCompanionScreen(
                             )
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                text = if (allPermsOk) "權限已就緒 ($grantedPerms/$totalPerms)" else "權限需求 ($grantedPerms/$totalPerms · 點此開啟)",
+                                text = if (allPermsOk) {
+                                    str("權限已就緒 ($grantedPerms/$totalPerms)", "Permissions OK ($grantedPerms/$totalPerms)", "権限 OK ($grantedPerms/$totalPerms)")
+                                } else {
+                                    str("權限需求 ($grantedPerms/$totalPerms · 點此開啟)", "Permissions ($grantedPerms/$totalPerms · Tap)", "権限設定 ($grantedPerms/$totalPerms · 開く)")
+                                },
                                 color = colors.primaryText,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
@@ -355,7 +384,7 @@ fun PhoneCompanionScreen(
                         ) {
                             Icon(Icons.Rounded.DirectionsCar, contentDescription = null, modifier = Modifier.size(17.dp))
                             Spacer(Modifier.width(5.dp))
-                            Text("切換車機模式", fontSize = 13.sp)
+                            Text(str("切換車機模式", "Switch to Car Mode", "車載モードへ切替"), fontSize = 13.sp)
                         }
                     }
                 }

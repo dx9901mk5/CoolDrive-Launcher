@@ -25,6 +25,8 @@ import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.dxcar.launcher.comms.BluetoothCompanionService
 import com.dxcar.launcher.comms.BridgeConnectionStatus
+import com.dxcar.launcher.i18n.DxCarI18n
+import com.dxcar.launcher.i18n.EffectiveLanguage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -186,11 +188,17 @@ class SystemStatusMonitor(private val context: Context) {
 
     private fun refreshClock() {
         val now = LocalDateTime.now()
+        val activeDateFmt = when (DxCarI18n.current()) {
+            EffectiveLanguage.ZH_TW -> DateTimeFormatter.ofPattern("M月d日 E", Locale.TAIWAN)
+            EffectiveLanguage.ZH_CN -> DateTimeFormatter.ofPattern("M月d日 E", Locale.SIMPLIFIED_CHINESE)
+            EffectiveLanguage.EN -> DateTimeFormatter.ofPattern("MMM d, E", Locale.US)
+            EffectiveLanguage.JA -> DateTimeFormatter.ofPattern("M月d日(E)", Locale.JAPAN)
+        }
         _status.value = _status.value.copy(
             now = now,
             time24h = now.format(time24Fmt),
             time12h = now.format(time12Fmt),
-            dateLabel = now.format(dateFmt)
+            dateLabel = now.format(activeDateFmt)
         )
     }
 

@@ -93,6 +93,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import com.dxcar.launcher.i18n.DxCarI18n.str
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -261,7 +262,7 @@ fun AppDrawerScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "應用程式",
+                        text = str("應用程式", "应用", "Apps", "アプリ"),
                         color = colors.primaryText,
                         fontSize = 22.sp,
                         fontWeight = FontWeight.Bold
@@ -269,6 +270,13 @@ fun AppDrawerScreen(
                     Spacer(Modifier.width(8.dp))
                     AppCategory.entries.forEach { cat ->
                         val selected = cat == selectedCategory
+                        val catLabel = when (cat) {
+                            AppCategory.ALL -> str("全部", "全部", "All", "すべて")
+                            AppCategory.NAVIGATION -> str("導航", "导航", "Nav", "ナビ")
+                            AppCategory.MEDIA -> str("影音", "影音", "Media", "メディア")
+                            AppCategory.COMMUNICATION -> str("通訊", "通讯", "Comms", "通話・連絡")
+                            AppCategory.SYSTEM -> str("系統", "系统", "System", "システム")
+                        }
                         Surface(
                             color = if (selected) colors.accent else colors.cardSurface,
                             shape = RoundedCornerShape(18.dp),
@@ -281,7 +289,7 @@ fun AppDrawerScreen(
                                 .bouncyClickable(pressedScale = 0.90f) { selectedCategory = cat }
                         ) {
                             Text(
-                                text = cat.labelZh,
+                                text = catLabel,
                                 color = if (selected) colors.onAccent else colors.secondaryText,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -325,7 +333,11 @@ fun AppDrawerScreen(
                             }
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                text = if (hasPendingUpdate) "設定 · 有更新" else "啟動器設定",
+                                text = if (hasPendingUpdate) {
+                                    str("設定 · 有更新", "设置 · 有更新", "Settings · Update", "設定 · 更新あり")
+                                } else {
+                                    str("啟動器設定", "启动器设置", "Settings", "ランチャー設定")
+                                },
                                 color = colors.primaryText,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold

@@ -6,6 +6,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import com.dxcar.launcher.i18n.DxCarI18n
 import java.util.Locale
 import java.util.UUID
 
@@ -41,12 +42,26 @@ class TtsAnnouncer(context: Context) {
 
     fun speakMessage(appName: String, sender: String, text: String) {
         val cleaned = text.take(180)
-        val spoken = "收到來自 $appName，$sender 的訊息：$cleaned"
+        val spoken = DxCarI18n.tr(
+            "收到來自 $appName，$sender 的訊息：$cleaned",
+            "收到来自 $appName，$sender 的消息：$cleaned",
+            "New message from $sender on $appName: $cleaned",
+            "$appName の $sender さんからのメッセージ：$cleaned"
+        )
         speak(spoken)
     }
 
     fun speak(text: String) {
         if (!ready || text.isBlank()) return
+        runCatching {
+            val targetLocale = DxCarI18n.currentLocale()
+            val res = tts?.setLanguage(targetLocale)
+            if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
+                if (targetLocale.language == "zh") {
+                    tts?.setLanguage(Locale.CHINESE)
+                }
+            }
+        }
         requestDuckFocus()
         runCatching {
             tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
