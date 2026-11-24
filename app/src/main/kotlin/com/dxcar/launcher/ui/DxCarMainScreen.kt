@@ -190,7 +190,59 @@ fun DxCarRootScreen(
     var showQuickControlCenter by remember { mutableStateOf(false) }
     var showNotificationCenter by remember { mutableStateOf(false) }
     var showSplitCreator by remember { mutableStateOf(false) }
+    var showSettingsPermissionsSheet by remember { mutableStateOf(false) }
+    var activeSettingsTutorial by remember { mutableStateOf<CarSettingsTutorialTopic?>(null) }
     var pickingShortcutSlotIndex by remember { mutableStateOf<Int?>(null) }
+
+    fun handleInAppBack(): Boolean {
+        return when {
+            activeSettingsTutorial != null -> {
+                activeSettingsTutorial = null
+                true
+            }
+            showSettingsPermissionsSheet -> {
+                showSettingsPermissionsSheet = false
+                true
+            }
+            showQuickControlCenter -> {
+                showQuickControlCenter = false
+                true
+            }
+            showNotificationCenter -> {
+                showNotificationCenter = false
+                true
+            }
+            showSplitCreator -> {
+                showSplitCreator = false
+                true
+            }
+            pickingShortcutSlotIndex != null -> {
+                pickingShortcutSlotIndex = null
+                true
+            }
+            destination != LauncherDestination.DASHBOARD_SPLIT -> {
+                destination = if (destination == LauncherDestination.SETTINGS) {
+                    LauncherDestination.APP_DRAWER
+                } else {
+                    LauncherDestination.DASHBOARD_SPLIT
+                }
+                true
+            }
+            else -> false
+        }
+    }
+
+    androidx.activity.compose.BackHandler(
+        enabled = activeSettingsTutorial != null ||
+            showSettingsPermissionsSheet ||
+            showQuickControlCenter ||
+            showNotificationCenter ||
+            showSplitCreator ||
+            pickingShortcutSlotIndex != null ||
+            destination != LauncherDestination.DASHBOARD_SPLIT
+    ) {
+        handleInAppBack()
+    }
     var latestMapCardRect by remember { mutableStateOf<Rect?>(null) }
     var gestureHudText by remember { mutableStateOf<String?>(null) }
     var permissionHealth by remember { mutableStateOf(PermissionHelper.check(context)) }
@@ -562,25 +614,12 @@ fun DxCarRootScreen(
                         onStartGeminiVoiceNav()
                     },
                     onBackClick = {
-                        when {
-                            showQuickControlCenter -> showQuickControlCenter = false
-                            showNotificationCenter -> showNotificationCenter = false
-                            showSplitCreator -> showSplitCreator = false
-                            pickingShortcutSlotIndex != null -> pickingShortcutSlotIndex = null
-                            destination != LauncherDestination.DASHBOARD_SPLIT -> {
-                                destination = if (destination == LauncherDestination.SETTINGS) {
-                                    LauncherDestination.APP_DRAWER
-                                } else {
-                                    LauncherDestination.DASHBOARD_SPLIT
-                                }
-                            }
-                            else -> {
-                                val acc = DxCarAccessibilityService.instance
-                                if (acc != null) {
-                                    acc.goBack()
-                                } else {
-                                    gestureHudText = "請點設定最上方「權限需求」開啟無障礙服務"
-                                }
+                        if (!handleInAppBack()) {
+                            val acc = DxCarAccessibilityService.instance
+                            if (acc != null) {
+                                acc.goBack()
+                            } else {
+                                gestureHudText = "請點設定最上方「權限需求」開啟無障礙服務"
                             }
                         }
                     },
@@ -1061,6 +1100,10 @@ fun DxCarRootScreen(
                                         BluetoothCompanionService.markStandby(context)
                                     }
                                 },
+                                showPermissionsSheet = showSettingsPermissionsSheet,
+                                onShowPermissionsSheetChange = { showSettingsPermissionsSheet = it },
+                                activeTutorial = activeSettingsTutorial,
+                                onActiveTutorialChange = { activeSettingsTutorial = it },
                                 onClose = { destination = LauncherDestination.APP_DRAWER }
                             )
                         }

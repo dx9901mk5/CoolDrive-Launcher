@@ -476,11 +476,29 @@ class PersistentDockOverlayService :
                                 onNotificationsClick = { bringDxCarToFront(MainActivity.EXTRA_OPEN_NOTIFICATIONS) },
                                 onBackClick = {
                                     interactionTick.value++
-                                    DxCarAccessibilityService.instance?.goBack()
+                                    val acc = DxCarAccessibilityService.instance
+                                    if (acc != null) {
+                                        acc.goBack()
+                                    } else {
+                                        android.widget.Toast.makeText(
+                                            this@PersistentDockOverlayService,
+                                            "請先至設定 → 權限需求開啟「DX-Car Launcher 無障礙服務」以使用系統返回",
+                                            android.widget.Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
                                 },
                                 onRecentsClick = {
                                     interactionTick.value++
-                                    DxCarAccessibilityService.instance?.openRecents()
+                                    val acc = DxCarAccessibilityService.instance
+                                    if (acc != null) {
+                                        acc.openRecents()
+                                    } else {
+                                        android.widget.Toast.makeText(
+                                            this@PersistentDockOverlayService,
+                                            "請先至設定 → 權限需求開啟「DX-Car Launcher 無障礙服務」以使用多工",
+                                            android.widget.Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
                                 },
                                 onToggle3DCursor = {
                                     val nowOn = Cursor3DStateHolder.toggle()

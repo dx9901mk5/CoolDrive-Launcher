@@ -54,6 +54,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -689,6 +690,8 @@ private fun BackRecentsComboButton(
     val colors = LocalDxCarColors.current
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
+    val currentOnBackClick by rememberUpdatedState(onBackClick)
+    val currentOnRecentsClick by rememberUpdatedState(onRecentsClick)
     var holdProgress by remember { mutableFloatStateOf(0f) }
     var isHolding by remember { mutableStateOf(false) }
 
@@ -736,7 +739,7 @@ private fun BackRecentsComboButton(
                                 isHolding = false
                                 holdProgress = 0f
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onRecentsClick()
+                                currentOnRecentsClick()
                                 break
                             }
                             delay(24L)
@@ -744,7 +747,7 @@ private fun BackRecentsComboButton(
                     }
 
                     val startPos = down.position
-                    val maxMoveSq = (size.width * 0.9f) * (size.width * 0.9f)
+                    val maxMoveSq = (size.width * 1.35f) * (size.width * 1.35f)
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Main)
                         val change = event.changes.firstOrNull { it.id == down.id } ?: event.changes.firstOrNull()
@@ -758,7 +761,7 @@ private fun BackRecentsComboButton(
                             cancelled = true
                             break
                         }
-                        if (change.changedToUpIgnoreConsumed()) {
+                        if (change.changedToUpIgnoreConsumed() || event.changes.all { !it.pressed }) {
                             change.consume()
                             break
                         }
@@ -768,7 +771,7 @@ private fun BackRecentsComboButton(
                     isHolding = false
                     holdProgress = 0f
                     if (!cancelled && !recentsTriggered) {
-                        onBackClick()
+                        currentOnBackClick()
                     }
                 }
             }

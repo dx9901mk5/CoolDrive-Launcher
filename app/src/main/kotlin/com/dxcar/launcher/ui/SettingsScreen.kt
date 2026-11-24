@@ -117,7 +117,7 @@ import java.time.ZoneId
 import java.util.Locale
 import kotlin.math.roundToInt
 
-private enum class CarSettingsTutorialTopic {
+enum class CarSettingsTutorialTopic {
     CURSOR_3D,
     PHONE_PAIRING,
     STOCK_DOCK_CONFLICT
@@ -164,14 +164,16 @@ fun SettingsScreen(
     onPurchasePro: () -> Unit = {},
     onRestorePurchases: () -> Unit = {},
     onSwitchToPhoneCompanion: () -> Unit,
+    showPermissionsSheet: Boolean = false,
+    onShowPermissionsSheetChange: (Boolean) -> Unit = {},
+    activeTutorial: CarSettingsTutorialTopic? = null,
+    onActiveTutorialChange: (CarSettingsTutorialTopic?) -> Unit = {},
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalDxCarColors.current
     val context = LocalContext.current
     var confirmResetPending by remember { mutableStateOf(false) }
-    var showPermissionsSheet by remember { mutableStateOf(false) }
-    var activeTutorial by remember { mutableStateOf<CarSettingsTutorialTopic?>(null) }
 
     val (grantedPerms, totalPerms) = remember(permissionHealth) { permissionHealth.summaryForCar() }
     val allPermsOk = grantedPerms == totalPerms
@@ -252,7 +254,7 @@ fun SettingsScreen(
                             )
                             .bouncyClickable {
                                 onRefreshPermissions()
-                                showPermissionsSheet = true
+                                onShowPermissionsSheetChange(true)
                             }
                     ) {
                         Row(
@@ -747,7 +749,7 @@ fun SettingsScreen(
                         icon = Icons.Rounded.DisplaySettings,
                         title = "Dock 位置（左／右／上方）與跨啟動器常駐",
                         headerTrailing = {
-                            TutorialPillButton(onClick = { activeTutorial = CarSettingsTutorialTopic.CURSOR_3D })
+                            TutorialPillButton(onClick = { onActiveTutorialChange(CarSettingsTutorialTopic.CURSOR_3D) })
                         },
                         modifier = mod
                     ) {
@@ -791,7 +793,7 @@ fun SettingsScreen(
                                         }
                                         TutorialPillButton(
                                             label = "教學",
-                                            onClick = { activeTutorial = CarSettingsTutorialTopic.STOCK_DOCK_CONFLICT }
+                                            onClick = { onActiveTutorialChange(CarSettingsTutorialTopic.STOCK_DOCK_CONFLICT) }
                                         )
                                     }
                                 }
@@ -911,7 +913,7 @@ fun SettingsScreen(
                                 }
                                 TutorialPillButton(
                                     label = "教學",
-                                    onClick = { activeTutorial = CarSettingsTutorialTopic.CURSOR_3D }
+                                    onClick = { onActiveTutorialChange(CarSettingsTutorialTopic.CURSOR_3D) }
                                 )
                             }
                         }
@@ -1017,7 +1019,7 @@ fun SettingsScreen(
                         icon = Icons.Rounded.NotificationsActive,
                         title = "手機來電／訊息同步與遠端觸控",
                         headerTrailing = {
-                            TutorialPillButton(onClick = { activeTutorial = CarSettingsTutorialTopic.PHONE_PAIRING })
+                            TutorialPillButton(onClick = { onActiveTutorialChange(CarSettingsTutorialTopic.PHONE_PAIRING) })
                         },
                         modifier = mod
                     ) {
@@ -1095,7 +1097,7 @@ fun SettingsScreen(
                             }
                             TutorialPillButton(
                                 label = str("教學", "Guide", "ガイド"),
-                                onClick = { activeTutorial = CarSettingsTutorialTopic.PHONE_PAIRING }
+                                onClick = { onActiveTutorialChange(CarSettingsTutorialTopic.PHONE_PAIRING) }
                             )
                         }
 
@@ -1351,7 +1353,7 @@ fun SettingsScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.74f))
-                    .clickable { showPermissionsSheet = false },
+                    .clickable { onShowPermissionsSheetChange(false) },
                 contentAlignment = Alignment.Center
             ) {
                 Surface(
@@ -1389,7 +1391,7 @@ fun SettingsScreen(
                                     Spacer(Modifier.width(4.dp))
                                     Text("重新檢查")
                                 }
-                                IconButton(onClick = { showPermissionsSheet = false }) {
+                                IconButton(onClick = { onShowPermissionsSheetChange(false) }) {
                                     Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.primaryText)
                                 }
                             }
@@ -1496,7 +1498,7 @@ fun SettingsScreen(
                     title = "🧊 Dock「3D 俯瞰」類滑鼠指標 · 操作教學",
                     steps = TUTORIAL_3D_CURSOR_STEPS,
                     highlightNote = "💡 提醒：請先點設定最上方「權限設定」確認【顯示在其他應用程式上層】與【無障礙輔助服務】皆已開啟。",
-                    onClose = { activeTutorial = null }
+                    onClose = { onActiveTutorialChange(null) }
                 )
             }
 
@@ -1510,7 +1512,7 @@ fun SettingsScreen(
                         "【遠端滑鼠觸控板】連線後手機畫面可直接當作車機滑鼠觸控板使用；點手機上的「車機滑鼠靈敏度設定」，車機畫面就會自動跳出系統指標速度設定頁！"
                     ),
                     highlightNote = "✓ 已修復 Wi-Fi 熱點頻繁斷開問題：現在通知推播與「推播測試通知」皆走背景高速通道，連線持續穩定不中斷！",
-                    onClose = { activeTutorial = null }
+                    onClose = { onActiveTutorialChange(null) }
                 )
             }
 
@@ -1525,9 +1527,9 @@ fun SettingsScreen(
                     actionButtonLabel = "立即前往車機盒設定頁面",
                     onActionClick = {
                         SystemStatusMonitor.openAiBoxVendorSettings(context, preferDisplayFor60Fps = false)
-                        activeTutorial = null
+                        onActiveTutorialChange(null)
                     },
-                    onClose = { activeTutorial = null }
+                    onClose = { onActiveTutorialChange(null) }
                 )
             }
 
