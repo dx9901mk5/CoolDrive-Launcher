@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -160,15 +161,15 @@ fun MediaControlCard(
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = if (isPrimary) 14.dp else 10.dp, vertical = 8.dp)
+                .padding(horizontal = if (isPrimary) 14.dp else 10.dp, vertical = 7.dp)
         ) {
-            val tightHeight = maxHeight < 430.dp
+            val tightHeight = maxHeight < 450.dp
             Column(
                 modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.SpaceBetween
+                verticalArrangement = Arrangement.spacedBy(if (tightHeight) 4.dp else 6.dp)
             ) {
                 // TOP UNIFIED SUB-SECTION: Local Weather Strip (Google App / Live GPS) + Player Header
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(if (tightHeight) 4.dp else 6.dp)) {
                     if (showWeatherStrip) {
                         IntegratedLocalWeatherBar(
                             weather = weather,
@@ -308,57 +309,49 @@ fun MediaControlCard(
                     }
                 }
 
-                // ENLARGED ALBUM-COVER HERO SECTION (Maximized square cover + Track info below!)
-                BoxWithConstraints(
-                    contentAlignment = Alignment.Center,
+                // ENLARGED ALBUM-COVER HERO SECTION (Full-width adaptive cover + protected Track info below!)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(vertical = 2.dp)
                 ) {
-                    val reservedTextH = 38f
-                    val coverSizeDp = min(maxWidth.value * 0.90f, maxHeight.value - reservedTextH)
-                        .coerceIn(68f, if (pureMusicMode || !showSixShortcuts) 310f else 248f)
-
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        AlbumCoverFrame(
-                            artBitmap = artBitmap,
-                            appIconBitmap = sourceIconBitmap,
-                            isRememberedResume = media.isRememberedLastApp,
-                            onTapCover = {
-                                if (media.isRememberedLastApp) onPlayPause() else onOpenMediaApp()
-                            },
-                            modifier = Modifier.size(coverSizeDp.dp)
-                        )
-                        Spacer(Modifier.height(if (tightHeight) 4.dp else 6.dp))
-                        Text(
-                            text = media.title,
-                            color = colors.primaryText,
-                            fontSize = if (isPrimary) 18.sp else 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
-                        )
-                        Text(
-                            text = media.artist,
-                            color = if (media.isRememberedLastApp) colors.accent else colors.secondaryText,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
-                        )
-                    }
+                    AlbumCoverFrame(
+                        artBitmap = artBitmap,
+                        appIconBitmap = sourceIconBitmap,
+                        isRememberedResume = media.isRememberedLastApp,
+                        onTapCover = {
+                            if (media.isRememberedLastApp) onPlayPause() else onOpenMediaApp()
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .heightIn(min = 56.dp)
+                    )
+                    Spacer(Modifier.height(if (tightHeight) 4.dp else 6.dp))
+                    Text(
+                        text = media.title,
+                        color = colors.primaryText,
+                        fontSize = if (isPrimary) 18.sp else if (tightHeight) 13.sp else 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+                    )
+                    Text(
+                        text = media.artist,
+                        color = if (media.isRememberedLastApp) colors.accent else colors.secondaryText,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+                    )
                 }
 
                 // PROGRESS + LIKE/FAVORITE + TRANSPORT + INTEGRATED 6 SHORTCUTS
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(if (tightHeight) 4.dp else 6.dp)) {
                     if (media.durationMs > 0L) {
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             LinearProgressIndicator(
@@ -575,11 +568,11 @@ private fun AlbumCoverFrame(
                         bitmap = appIconBitmap,
                         contentDescription = "上次播放器圖示",
                         modifier = Modifier
-                            .fillMaxSize(0.46f)
-                            .clip(RoundedCornerShape(18.dp))
+                            .size(58.dp)
+                            .clip(RoundedCornerShape(16.dp))
                     )
                     if (isRememberedResume) {
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(6.dp))
                         Surface(
                             color = colors.accent.copy(alpha = 0.20f),
                             shape = RoundedCornerShape(12.dp)
@@ -601,7 +594,7 @@ private fun AlbumCoverFrame(
                     imageVector = Icons.Rounded.Album,
                     contentDescription = null,
                     tint = colors.accent,
-                    modifier = Modifier.fillMaxSize(0.52f)
+                    modifier = Modifier.size(64.dp)
                 )
             }
         }
