@@ -173,10 +173,10 @@ object DxCarI18n {
             "プラン C：指定ナビアプリ＋大型アルバムアート音楽"
         )
         HomeExperimentMode.PLAN_D_ROOT_RESERVED -> str(
-            "方案 D：Root 特權進階模式（保留開發中）",
-            "方案 D：Root 特权进阶模式（保留开发中）",
-            "Plan D: Root Privilege Mode (Reserved)",
-            "プラン D：Root 特権モード（開発予定）"
+            "方案 B：Root 特權進階模式（預留給已 Root 車機）",
+            "方案 B：Root 特权进阶模式（预留给已 Root 车机）",
+            "Plan B: Root Privilege Mode (Reserved for Rooted Devices)",
+            "プラン B：Root 特権モード（Root 済み車載機向け予約）"
         )
     }
 
@@ -196,10 +196,10 @@ object DxCarI18n {
             "左側 70% に任意のナビアプリ、右側 30% に大型ジャケット・天気・6ショートカットを配置"
         )
         HomeExperimentMode.PLAN_D_ROOT_RESERVED -> str(
-            "需取得車機 Root (su) 權限後啟用全域真常駐 Dock 避讓與系統級雙視窗，敬請期待",
-            "需获取车机 Root (su) 权限后启用全局真常驻 Dock 避让与系统级双窗口，敬请期待",
-            "Requires Root (su) permission on AI Box for system-level Dock inset & dual windows",
-            "車載機の Root (su) 権限取得後にシステムレベルのドック回避と画面分割に対応予定"
+            "預留給已取得 Root (su) 權限的車機開發中；一般未 Root 車機可完整使用方案 A",
+            "预留给已获取 Root (su) 权限的车机开发中；一般未 Root 车机可完整使用方案 A",
+            "Reserved for already-rooted AI Box devices (su); non-rooted devices use Plan A normally",
+            "Root (su) 権限取得済みの車載機向けに予約中（通常端末はプラン A を利用可能）"
         )
     }
 

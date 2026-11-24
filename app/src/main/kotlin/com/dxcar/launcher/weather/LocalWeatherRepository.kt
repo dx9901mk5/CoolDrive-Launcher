@@ -130,21 +130,29 @@ class LocalWeatherRepository(private val context: Context) {
     }
 
     fun openGoogleWeatherApp(ctx: Context) {
-        val searchIntent = Intent(Intent.ACTION_WEB_SEARCH).apply {
-            setPackage(GOOGLE_APP_PACKAGE)
-            putExtra(SearchManager.QUERY, "當地天氣")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        val launchedGoogle = runCatching {
-            ctx.startActivity(searchIntent)
-            true
-        }.getOrDefault(false)
-
-        if (!launchedGoogle) {
-            val viewIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=%E7%95%B6%E5%9C%B0%E5%A4%A9%E6%B0%A3&hl=zh-TW")).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            runCatching { ctx.startActivity(viewIntent) }
+        val candidates = listOf(
+            // 1. Google App native Weather Frog / Weather page shortcut
+            Intent(Intent.ACTION_VIEW, Uri.parse("dynact://velour/weather/ProxyActivity")).apply {
+                setPackage(GOOGLE_APP_PACKAGE)
+            },
+            // 2. Standalone Google Weather app (if installed)
+            ctx.packageManager.getLaunchIntentForPackage("com.google.android.apps.weather"),
+            // 3. Google App Search Weather card
+            Intent(Intent.ACTION_WEB_SEARCH).apply {
+                setPackage(GOOGLE_APP_PACKAGE)
+                putExtra(SearchManager.QUERY, "weather")
+            },
+            // 4. Web fallback directly to Google Weather page
+            Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=weather"))
+        )
+        for (intent in candidates) {
+            if (intent == null) continue
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val ok = runCatching {
+                ctx.startActivity(intent)
+                true
+            }.getOrDefault(false)
+            if (ok) break
         }
         forceRefresh()
     }

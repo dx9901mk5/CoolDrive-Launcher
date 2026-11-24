@@ -83,11 +83,11 @@ enum class HomeExperimentMode(
         showInSettings = false
     ),
     PLAN_D_ROOT_RESERVED(
-        shortTitleZh = "方案 D（保留）",
-        titleZh = "方案 D：Root 特權進階模式（保留開發中）",
-        descZh = "需取得車機 Root (su) 權限後啟用全域真常駐 Dock 避讓與系統級雙視窗，敬請期待",
+        shortTitleZh = "方案 B（預留）",
+        titleZh = "方案 B：Root 特權進階模式（預留給已 Root 車機）",
+        descZh = "預留給已取得 Root (su) 權限的車機開發中；一般未 Root 車機可正常使用方案 A",
         isAvailable = false,
-        showInSettings = false
+        showInSettings = true
     );
 
     companion object {

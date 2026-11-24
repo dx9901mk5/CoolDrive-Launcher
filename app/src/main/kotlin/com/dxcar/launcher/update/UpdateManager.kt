@@ -59,6 +59,7 @@ class UpdateManager(private val context: Context) {
     val state: StateFlow<UpdateUiState> = _state.asStateFlow()
 
     suspend fun checkForUpdate(autoDownload: Boolean = false) = withContext(Dispatchers.IO) {
+        if (!BuildConfig.ENABLE_GITHUB_AUTO_UPDATE) return@withContext
         if (_state.value.checking || _state.value.downloading) return@withContext
         _state.value = _state.value.copy(checking = true, statusMessage = "正在檢查 GitHub 最新版本…")
         var shouldDownload = false
@@ -105,6 +106,7 @@ class UpdateManager(private val context: Context) {
     }
 
     suspend fun downloadAndInstall(autoLaunchInstaller: Boolean = true) = withContext(Dispatchers.IO) {
+        if (!BuildConfig.ENABLE_GITHUB_AUTO_UPDATE) return@withContext
         val url = _state.value.downloadUrl
         if (url.isBlank() || _state.value.downloading) return@withContext
         _state.value = _state.value.copy(

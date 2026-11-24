@@ -22,6 +22,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -1533,12 +1534,24 @@ private fun DashboardSeamSwipeHandle(
     pageIndicator: String,
     onDragDelta: (Float) -> Unit,
     onDragEnd: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalDxCarColors.current
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
+            .pointerInput(pageIndicator, onLongPress) {
+                if (onLongPress != null) {
+                    detectTapGestures(
+                        onLongPress = {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                            onLongPress()
+                        }
+                    )
+                }
+            }
             .pointerInput(pageIndicator) {
                 detectHorizontalDragGestures(
                     onHorizontalDrag = { change, dragAmount ->
@@ -1632,6 +1645,12 @@ private fun SecondEqualMapYoutubeDashboard(
 ) {
     val colors = LocalDxCarColors.current
     val cardShape = RoundedCornerShape(colors.cardCornerDp.dp)
+    var isMapFirst by remember { mutableStateOf(true) }
+    val swapAnim by animateFloatAsState(
+        targetValue = if (isMapFirst) 0f else 1f,
+        animationSpec = tween(durationMillis = 650, easing = CubicBezierEasing(0.32f, 0f, 0.18f, 1f)),
+        label = "page2Swap"
+    )
 
     BoxWithConstraints(
         modifier = Modifier
@@ -1642,12 +1661,14 @@ private fun SecondEqualMapYoutubeDashboard(
         if (isHorizontalSplit) {
             val halfPaneW = ((maxWidth - gap) / 2f).coerceAtLeast(140.dp)
             val fullH = maxHeight
+            val mapX = lerp(0.dp, halfPaneW + gap, swapAnim)
+            val ytX = lerp(halfPaneW + gap, 0.dp, swapAnim)
 
-            // Left 50% (1:1): Plan A Built-in Map
+            // 1:1 Plan A Built-in Map (stays continuously mounted while swapping Left <-> Right)
             Box(
                 modifier = Modifier
-                    .zIndex(1f)
-                    .offset(x = 0.dp, y = 0.dp)
+                    .zIndex(if (isMapFirst) 2f else 1f)
+                    .offset(x = mapX, y = 0.dp)
                     .width(halfPaneW)
                     .height(fullH)
                     .clip(cardShape)
@@ -1689,11 +1710,11 @@ private fun SecondEqualMapYoutubeDashboard(
                 )
             }
 
-            // Right 50% (1:1): Inline Playable YouTube Video Card (Non-Fullscreen!)
+            // 1:1 Inline Playable YouTube Video Card (Non-Fullscreen, swaps Left <-> Right smoothly)
             Box(
                 modifier = Modifier
-                    .zIndex(1f)
-                    .offset(x = halfPaneW + gap, y = 0.dp)
+                    .zIndex(if (isMapFirst) 1f else 2f)
+                    .offset(x = ytX, y = 0.dp)
                     .width(halfPaneW)
                     .height(fullH)
                     .clip(cardShape)
@@ -1702,11 +1723,12 @@ private fun SecondEqualMapYoutubeDashboard(
                 EmbeddedYoutubePlayerCard()
             }
 
-            // Center 1:1 Seam Divider Line (Swipe Right/Left -> Infinite Loop back to 第一介面!)
+            // Center 1:1 Seam Divider Line (Long-press to swap Left <-> Right; Drag to return to Page 1)
             DashboardSeamSwipeHandle(
                 pageIndicator = "2/2",
                 onDragDelta = onSeamDragDelta,
                 onDragEnd = onSeamDragEnd,
+                onLongPress = { isMapFirst = !isMapFirst },
                 modifier = Modifier
                     .zIndex(5f)
                     .offset(x = halfPaneW + (gap / 2f) - 16.dp, y = 0.dp)
@@ -2010,6 +2032,7 @@ private fun CoolwalkSplitDashboard(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .padding(top = 66.dp)
                         .zIndex(30f)
                         .clickable { onSwapPanes() }
                 )
