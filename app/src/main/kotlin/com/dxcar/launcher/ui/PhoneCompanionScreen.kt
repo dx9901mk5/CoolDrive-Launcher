@@ -17,6 +17,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,11 +34,14 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -59,16 +63,20 @@ import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
@@ -89,6 +97,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
@@ -117,6 +126,7 @@ import com.dxcar.launcher.comms.TouchpadAction
 import com.dxcar.launcher.data.DeviceFormFactor
 import com.dxcar.launcher.data.LauncherConfig
 import com.dxcar.launcher.overlay.ExtraLargeTutorialModal
+import com.dxcar.launcher.system.InstalledAppInfo
 import com.dxcar.launcher.system.PairedBtDevice
 import com.dxcar.launcher.system.PermissionHealth
 import com.dxcar.launcher.system.PermissionHelper
@@ -173,6 +183,7 @@ private fun triggerPhoneConfirmVibration(context: Context, view: View, heavy: Bo
 fun PhoneCompanionScreen(
     config: LauncherConfig,
     pairedDevices: List<PairedBtDevice>,
+    installedApps: List<InstalledAppInfo> = emptyList(),
     bridgeStatus: BridgeStatusState,
     permissionHealth: PermissionHealth,
     updateState: UpdateUiState,
@@ -181,6 +192,7 @@ fun PhoneCompanionScreen(
     onRefreshPairedDevices: () -> Unit,
     onSelectTargetDevice: (PairedBtDevice) -> Unit,
     onToggleAllowedPackage: (String) -> Unit,
+    onSetAllowedPackages: (List<String>) -> Unit = {},
     onToggleSyncAllApps: (Boolean) -> Unit,
     onChangeTouchpadSensitivity: (Float) -> Unit = {},
     onRequestRuntimePermissions: () -> Unit,
@@ -197,6 +209,8 @@ fun PhoneCompanionScreen(
     var showPermissionsSheet by remember { mutableStateOf(false) }
     var showLargeTutorial by remember { mutableStateOf(false) }
     var showFullscreenTouchpad by remember { mutableStateOf(false) }
+    var showInstalledAppPicker by remember { mutableStateOf(false) }
+    var appSearchQuery by remember { mutableStateOf("") }
 
     val allowModeSwitch = DeviceFormFactor.isTabletOrExpandedScreen(configuration)
     val isPhoneExclusive = DeviceFormFactor.isPhoneDevice(configuration)
@@ -231,19 +245,34 @@ fun PhoneCompanionScreen(
         }
     }
 
-    val knownApps = listOf(
-        "jp.naver.line.android" to "LINE",
-        "com.facebook.orca" to "Messenger",
-        "com.whatsapp" to "WhatsApp",
-        "org.telegram.messenger" to "Telegram",
-        "com.google.android.apps.messaging" to "Google 簡訊",
-        "com.samsung.android.messaging" to "三星簡訊",
-        "com.android.mms" to "系統簡訊",
-        "com.vivo.mms" to "vivo 簡訊",
-        "com.tencent.mm" to "WeChat",
-        "com.instagram.android" to "Instagram",
-        "com.discord" to "Discord"
+    val knownAppGroups: List<Pair<List<String>, String>> = listOf(
+        listOf("jp.naver.line.android", "com.linecorp.linelite") to "LINE",
+        listOf("com.facebook.orca") to "Messenger",
+        listOf("com.whatsapp", "com.whatsapp.w4b") to "WhatsApp",
+        listOf("org.telegram.messenger") to "Telegram",
+        listOf("com.google.android.apps.messaging") to "Google 簡訊",
+        listOf("com.samsung.android.messaging") to "三星簡訊",
+        listOf("com.android.mms", "com.coloros.mms", "com.oplus.mms", "com.miui.mms") to "系統簡訊",
+        listOf("com.vivo.mms", "com.sie.mms", "com.bbk.mms", "com.iqoo.mms") to "vivo 簡訊",
+        listOf("com.tencent.mm") to "WeChat",
+        listOf("com.instagram.android") to "Instagram",
+        listOf("com.instagram.barcelona") to "Threads",
+        listOf("com.discord") to "Discord",
+        listOf("com.google.android.gm") to "Gmail"
     )
+
+    fun togglePackageGroup(pkgs: List<String>) {
+        if (config.companionSyncAllApps) {
+            onToggleSyncAllApps(false)
+        }
+        val anyEnabled = pkgs.any { config.companionAllowedPackages.contains(it) }
+        val next = if (anyEnabled) {
+            config.companionAllowedPackages - pkgs.toSet()
+        } else {
+            (config.companionAllowedPackages + pkgs).distinct()
+        }
+        onSetAllowedPackages(next)
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(colors.canvasBackground)) {
         Column(
@@ -563,6 +592,111 @@ fun PhoneCompanionScreen(
                         }
                     }
 
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(colors.cardSurfaceElevated)
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                Text(
+                                    text = "選擇要攔截推送到車機的 App（預設已幫您打勾 ✓）",
+                                    color = colors.primaryText,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "點選下方任一項目即可勾選／取消；亦可從手機已安裝 App 挑選更多應用程式",
+                                    color = colors.secondaryText,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            knownAppGroups.forEach { (pkgs, label) ->
+                                val enabled = config.companionSyncAllApps || pkgs.any { config.companionAllowedPackages.contains(it) }
+                                Surface(
+                                    color = if (enabled) colors.accent else colors.cardSurface,
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier
+                                        .border(1.dp, if (enabled) colors.accent else colors.cardBorder, RoundedCornerShape(16.dp))
+                                        .clickable { togglePackageGroup(pkgs) }
+                                ) {
+                                    Text(
+                                        text = if (enabled) "✓ $label" else "☐ $label",
+                                        color = if (enabled) colors.onAccent else colors.primaryText,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Custom extra apps selected from installed apps beyond knownAppGroups
+                        val knownFlat = remember { knownAppGroups.flattenPairs() }
+                        val extraSelectedApps = remember(installedApps, config.companionAllowedPackages) {
+                            installedApps.filter {
+                                config.companionAllowedPackages.contains(it.packageName) && !knownFlat.contains(it.packageName)
+                            }
+                        }
+                        if (extraSelectedApps.isNotEmpty()) {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                extraSelectedApps.forEach { appInfo ->
+                                    Surface(
+                                        color = colors.accent,
+                                        shape = RoundedCornerShape(16.dp),
+                                        modifier = Modifier
+                                            .border(1.dp, colors.accent, RoundedCornerShape(16.dp))
+                                            .clickable {
+                                                if (config.companionSyncAllApps) onToggleSyncAllApps(false)
+                                                onToggleAllowedPackage(appInfo.packageName)
+                                            }
+                                    ) {
+                                        Text(
+                                            text = "✓ ${appInfo.label}",
+                                            color = colors.onAccent,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    onToggleSyncAllApps(false)
+                                    onSetAllowedPackages(
+                                        (config.companionAllowedPackages + LauncherConfig.DEFAULT_COMPANION_PACKAGES).distinct()
+                                    )
+                                },
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("✓ 恢復預設常用全打勾", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = { showInstalledAppPicker = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("勾選更多手機 App（共 ${installedApps.size} 款）", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -574,37 +708,14 @@ fun PhoneCompanionScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                            Text("同步手機所有 App 通知（不限清單）", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            Text("推薦開啟（已自動過濾系統與 Android Auto 常駐背景通知）", color = colors.secondaryText, fontSize = 11.sp)
+                            Text("無差別同步所有 App 通知（不限勾選清單）", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text("預設關閉（僅推送上方已打勾 App，避免相機／相簿備份通知干擾行車）", color = colors.secondaryText, fontSize = 11.sp)
                         }
                         Switch(
                             checked = config.companionSyncAllApps,
                             onCheckedChange = onToggleSyncAllApps,
                             colors = SwitchDefaults.colors(checkedThumbColor = colors.onAccent, checkedTrackColor = colors.accent)
                         )
-                    }
-
-                    if (!config.companionSyncAllApps) {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            knownApps.forEach { (pkg, label) ->
-                                val enabled = config.companionAllowedPackages.contains(pkg)
-                                Surface(
-                                    color = if (enabled) colors.accent else colors.cardSurfaceElevated,
-                                    shape = RoundedCornerShape(16.dp),
-                                    modifier = Modifier
-                                        .border(1.dp, if (enabled) colors.accent else colors.cardBorder, RoundedCornerShape(16.dp))
-                                        .clickable { onToggleAllowedPackage(pkg) }
-                                ) {
-                                    Text(
-                                        text = if (enabled) "✓ $label" else label,
-                                        color = if (enabled) colors.onAccent else colors.primaryText,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                                    )
-                                }
-                            }
-                        }
                     }
                 }
             }
@@ -776,16 +887,138 @@ fun PhoneCompanionScreen(
             }
         }
 
+        // INSTALLED PHONE APPS CHECKLIST PICKER MODAL ("手機端可攔截通知要可選，預設值可以先幫用戶打勾")
+        if (showInstalledAppPicker) {
+            val filteredApps = remember(installedApps, appSearchQuery, config.companionAllowedPackages) {
+                val q = appSearchQuery.trim().lowercase()
+                installedApps
+                    .filter { q.isBlank() || it.label.lowercase().contains(q) || it.packageName.lowercase().contains(q) }
+                    .sortedWith(
+                        compareByDescending<InstalledAppInfo> { config.companionAllowedPackages.contains(it.packageName) }
+                            .thenBy { it.label.lowercase() }
+                    )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.78f))
+                    .clickable { showInstalledAppPicker = false },
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    color = colors.cardSurface,
+                    shape = RoundedCornerShape(24.dp),
+                    shadowElevation = 24.dp,
+                    modifier = Modifier
+                        .fillMaxWidth(0.94f)
+                        .heightIn(max = 620.dp)
+                        .border(1.5.dp, colors.accent, RoundedCornerShape(24.dp))
+                        .clickable(enabled = false) {}
+                ) {
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("勾選要推送到車機的手機 App", color = colors.primaryText, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                                Text("目前已勾選 ${config.companionAllowedPackages.size} 項（預設已勾選常用通訊與簡訊）", color = colors.secondaryText, fontSize = 12.sp)
+                            }
+                            IconButton(onClick = { showInstalledAppPicker = false }) {
+                                Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.primaryText)
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = appSearchQuery,
+                            onValueChange = { appSearchQuery = it },
+                            singleLine = true,
+                            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.accent) },
+                            placeholder = { Text("搜尋手機 App 名稱…", fontSize = 13.sp) },
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    onToggleSyncAllApps(false)
+                                    val allPkgs = (installedApps.map { it.packageName } + LauncherConfig.DEFAULT_COMPANION_PACKAGES).distinct()
+                                    onSetAllowedPackages(allPkgs)
+                                },
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("全部打勾", fontSize = 12.sp)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    onToggleSyncAllApps(false)
+                                    onSetAllowedPackages(LauncherConfig.DEFAULT_COMPANION_PACKAGES)
+                                },
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("只勾選預設常用", fontSize = 12.sp)
+                            }
+                        }
+
+                        LazyColumn(
+                            modifier = Modifier.weight(1f, fill = false).fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(filteredApps, key = { it.packageName }) { appInfo ->
+                                val checked = config.companionAllowedPackages.contains(appInfo.packageName)
+                                val bmp = remember(appInfo.icon) { appInfo.icon.asImageBitmap() }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(if (checked) colors.accent.copy(alpha = 0.15f) else colors.cardSurfaceElevated)
+                                        .clickable {
+                                            if (config.companionSyncAllApps) onToggleSyncAllApps(false)
+                                            onToggleAllowedPackage(appInfo.packageName)
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                        Image(bitmap = bmp, contentDescription = appInfo.label, modifier = Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)))
+                                        Spacer(Modifier.width(10.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(appInfo.label, color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Text(appInfo.packageName, color = colors.secondaryText, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+                                    }
+                                    Checkbox(
+                                        checked = checked,
+                                        onCheckedChange = {
+                                            if (config.companionSyncAllApps) onToggleSyncAllApps(false)
+                                            onToggleAllowedPackage(appInfo.packageName)
+                                        },
+                                        colors = CheckboxDefaults.colors(checkedColor = colors.accent, checkmarkColor = colors.onAccent)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // EXTRA-LARGE FONT TUTORIAL MODAL
         if (showLargeTutorial) {
             ExtraLargeTutorialModal(
-                title = "📖 手機與車機連線＆全螢幕滑鼠 · 教學",
+                title = "📖 手機與車機連線＆多指滑鼠 · 教學",
                 steps = listOf(
                     "【重要】請先將「車機盒」與「手機」都更新到最新同一版本 APK！",
                     "點擊手機最上方【權限需求】按鈕，開啟「通知讀取權限」（若 vivo／三星／Pixel 顯示受限制設定，先點黃色提示去應用程式資訊右上角 ⋮ 點「允許受限制的設定」）、藍牙與忽略電池最佳化。",
                     "車機端同樣點設定最上方【權限需求】，開啟「顯示在其他應用程式上層」、「通知存取權」與「無障礙輔助服務」。",
-                    "連線方式超簡單：只要手機藍牙連上車機盒（能接電話的狀態），或手機開 Wi-Fi 熱點給車機連網，兩邊就會自動連上並顯示綠色「已連線同步中」！",
-                    "點擊下方【啟動全螢幕 OLED 車機滑鼠觸控板】，手機將進入純黑省電且「防止螢幕鎖定」的大面積滑鼠模式，點擊確認時手機會發出清脆震動回饋！"
+                    "常用通訊與簡訊 App 預設已自動幫您打勾 ✓，您也可隨時點擊「勾選更多手機 App」自由增減要推送到車機的應用程式！",
+                    "點擊【啟動全螢幕滑鼠觸控板】進入純黑 OLED 防鎖屏模式：支援「單指移動／輕點震動確定」、「雙指捏合張開＝車機地圖縮放」、「雙指上下滑＝車機 Google 地圖 3D 俯瞰」、「雙指輕點＝返回」、「三指上滑＝多工／下滑＝首頁」！"
                 ),
                 highlightNote = "💡 離開全螢幕觸控板後，手機即恢復正常休眠；下車斷開藍牙與熱點自動退回 0% 耗電待機模式！",
                 onClose = { showLargeTutorial = false }
@@ -941,10 +1174,12 @@ private fun FullscreenOledCarTouchpad(
     val localView = LocalView.current
     val scope = rememberCoroutineScope()
 
-    var touchPoint by remember { mutableStateOf<Offset?>(null) }
+    var activeTouchPoints by remember { mutableStateOf<List<Offset>>(emptyList()) }
     var clickBurstSeq by remember { mutableLongStateOf(0L) }
     var clickBurstPos by remember { mutableStateOf(Offset.Zero) }
-    var statusBanner by remember { mutableStateOf("單指滑動＝移動游標 · 輕點＝點擊確定（震動） · 長按＝車機長按") }
+    var statusBanner by remember {
+        mutableStateOf("單指＝游標／點擊震動 · 雙指捏合＝車機縮放 · 雙指上下＝3D俯瞰 · 三指＝多工／首頁")
+    }
 
     // Intercept system Back gesture to exit fullscreen touchpad cleanly
     BackHandler(onBack = onClose)
@@ -1131,17 +1366,28 @@ private fun FullscreenOledCarTouchpad(
                                 val down = awaitFirstDown(requireUnconsumed = false)
                                 val downPos = down.position
                                 val downTime = System.currentTimeMillis()
-                                touchPoint = downPos
-                                var lastPos = downPos
+                                activeTouchPoints = listOf(downPos)
+                                var lastSinglePos = downPos
                                 var movedAny = false
                                 var longPressed = false
+                                var maxFingers = 1
                                 var lastSendMs = 0L
                                 var accDx = 0f
                                 var accDy = 0f
 
+                                // 2-finger & 3-finger tracking anchors
+                                var twoInit = false
+                                var twoStepSpan = 0f
+                                var twoStepCx = 0f
+                                var twoStepCy = 0f
+                                var multiActionTriggered = false
+                                var threeStartCx = 0f
+                                var threeStartCy = 0f
+                                var threeInit = false
+
                                 val longPressJob = scope.launch {
                                     delay(560L)
-                                    if (!movedAny) {
+                                    if (!movedAny && maxFingers == 1) {
                                         longPressed = true
                                         triggerPhoneConfirmVibration(context, localView, heavy = true)
                                         clickBurstPos = downPos
@@ -1153,49 +1399,150 @@ private fun FullscreenOledCarTouchpad(
 
                                 while (true) {
                                     val ev = awaitPointerEvent(PointerEventPass.Main)
-                                    val ch = ev.changes.firstOrNull { it.id == down.id } ?: ev.changes.firstOrNull()
-                                    if (ch == null) break
+                                    val pressed = ev.changes.filter { it.pressed }
+                                    activeTouchPoints = pressed.map { it.position }
 
-                                    val cur = ch.position
-                                    touchPoint = cur
-
-                                    if (!movedAny && hypot(cur.x - downPos.x, cur.y - downPos.y) > 11f) {
-                                        movedAny = true
+                                    if (pressed.size > maxFingers) {
+                                        maxFingers = pressed.size
                                         longPressJob.cancel()
                                     }
 
-                                    if (movedAny) {
-                                        accDx += (cur.x - lastPos.x) * sensitivity * 1.55f
-                                        accDy += (cur.y - lastPos.y) * sensitivity * 1.55f
-                                        val now = System.currentTimeMillis()
-                                        if (now - lastSendMs >= 16L && (abs(accDx) >= 0.8f || abs(accDy) >= 0.8f)) {
-                                            sendTouchAction(TouchpadAction.MOVE, accDx, accDy)
-                                            accDx = 0f
-                                            accDy = 0f
-                                            lastSendMs = now
+                                    if (pressed.size >= 3) {
+                                        val cx = pressed.map { it.position.x }.average().toFloat()
+                                        val cy = pressed.map { it.position.y }.average().toFloat()
+                                        if (!threeInit) {
+                                            threeInit = true
+                                            threeStartCx = cx
+                                            threeStartCy = cy
+                                        } else if (!multiActionTriggered) {
+                                            val d3x = cx - threeStartCx
+                                            val d3y = cy - threeStartCy
+                                            if (abs(d3y) >= 85f && abs(d3y) > abs(d3x)) {
+                                                multiActionTriggered = true
+                                                triggerPhoneConfirmVibration(context, localView, heavy = true)
+                                                if (d3y < 0f) {
+                                                    statusBanner = "✓ 三指上滑 → 車機多工視窗"
+                                                    sendTouchAction(TouchpadAction.RECENTS)
+                                                } else {
+                                                    statusBanner = "✓ 三指下滑 → 返回車機首頁"
+                                                    sendTouchAction(TouchpadAction.HOME)
+                                                }
+                                            } else if (abs(d3x) >= 95f && abs(d3x) > abs(d3y)) {
+                                                multiActionTriggered = true
+                                                triggerPhoneConfirmVibration(context, localView, heavy = true)
+                                                statusBanner = "✓ 三指橫滑 → 車機首頁地圖↔媒體交換"
+                                                sendTouchAction(TouchpadAction.SWAP_HOME_PANES)
+                                            }
                                         }
-                                    }
-                                    lastPos = cur
+                                    } else if (pressed.size == 2 && maxFingers == 2) {
+                                        val p1 = pressed[0].position
+                                        val p2 = pressed[1].position
+                                        val span = hypot(p1.x - p2.x, p1.y - p2.y)
+                                        val cx = (p1.x + p2.x) * 0.5f
+                                        val cy = (p1.y + p2.y) * 0.5f
 
-                                    if (ch.changedToUpIgnoreConsumed()) {
-                                        ch.consume()
-                                        break
+                                        if (!twoInit) {
+                                            twoInit = true
+                                            twoStepSpan = span
+                                            twoStepCx = cx
+                                            twoStepCy = cy
+                                        } else {
+                                            val dSpan = span - twoStepSpan
+                                            val dCx = cx - twoStepCx
+                                            val dCy = cy - twoStepCy
+                                            val now = System.currentTimeMillis()
+                                            if (now - lastSendMs >= 320L) {
+                                                when {
+                                                    abs(dSpan) >= 58f && abs(dSpan) > abs(dCy) * 1.1f -> {
+                                                        multiActionTriggered = true
+                                                        twoStepSpan = span
+                                                        twoStepCx = cx
+                                                        twoStepCy = cy
+                                                        lastSendMs = now
+                                                        triggerPhoneConfirmVibration(context, localView, heavy = false)
+                                                        if (dSpan > 0f) {
+                                                            statusBanner = "🔍 雙指張開 → 車機地圖／畫面放大"
+                                                            sendTouchAction(TouchpadAction.TWO_FINGER_SPREAD_OUT)
+                                                        } else {
+                                                            statusBanner = "🔍 雙指捏合 → 車機地圖／畫面縮小"
+                                                            sendTouchAction(TouchpadAction.TWO_FINGER_PINCH_IN)
+                                                        }
+                                                    }
+                                                    abs(dCy) >= 64f && abs(dCy) > abs(dCx) * 1.15f -> {
+                                                        multiActionTriggered = true
+                                                        twoStepSpan = span
+                                                        twoStepCx = cx
+                                                        twoStepCy = cy
+                                                        lastSendMs = now
+                                                        triggerPhoneConfirmVibration(context, localView, heavy = false)
+                                                        if (dCy < 0f) {
+                                                            statusBanner = "🧊 雙指上推 → 車機 Google 地圖 3D 俯瞰"
+                                                            sendTouchAction(TouchpadAction.TWO_FINGER_DRAG_UP)
+                                                        } else {
+                                                            statusBanner = "🧊 雙指下拉 → 車機 Google 地圖回 2D／下拉"
+                                                            sendTouchAction(TouchpadAction.TWO_FINGER_DRAG_DOWN)
+                                                        }
+                                                    }
+                                                    abs(dCx) >= 72f && abs(dCx) > abs(dCy) * 1.15f -> {
+                                                        multiActionTriggered = true
+                                                        twoStepSpan = span
+                                                        twoStepCx = cx
+                                                        twoStepCy = cy
+                                                        lastSendMs = now
+                                                        triggerPhoneConfirmVibration(context, localView, heavy = false)
+                                                        if (dCx < 0f) {
+                                                            statusBanner = "⇄ 雙指左滑 → 車機雙指平移"
+                                                            sendTouchAction(TouchpadAction.TWO_FINGER_DRAG_LEFT)
+                                                        } else {
+                                                            statusBanner = "⇄ 雙指右滑 → 車機雙指平移"
+                                                            sendTouchAction(TouchpadAction.TWO_FINGER_DRAG_RIGHT)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else if (pressed.size == 1 && maxFingers == 1) {
+                                        val cur = pressed[0].position
+                                        if (!movedAny && hypot(cur.x - downPos.x, cur.y - downPos.y) > 11f) {
+                                            movedAny = true
+                                            longPressJob.cancel()
+                                        }
+                                        if (movedAny) {
+                                            accDx += (cur.x - lastSinglePos.x) * sensitivity * 1.55f
+                                            accDy += (cur.y - lastSinglePos.y) * sensitivity * 1.55f
+                                            val now = System.currentTimeMillis()
+                                            if (now - lastSendMs >= 16L && (abs(accDx) >= 0.8f || abs(accDy) >= 0.8f)) {
+                                                sendTouchAction(TouchpadAction.MOVE, accDx, accDy)
+                                                accDx = 0f
+                                                accDy = 0f
+                                                lastSendMs = now
+                                            }
+                                        }
+                                        lastSinglePos = cur
                                     }
-                                    ch.consume()
+
+                                    ev.changes.forEach { it.consume() }
+                                    if (pressed.isEmpty()) break
                                 }
 
                                 longPressJob.cancel()
-                                touchPoint = null
+                                activeTouchPoints = emptyList()
+                                val elapsed = System.currentTimeMillis() - downTime
 
-                                if (movedAny && (abs(accDx) >= 0.5f || abs(accDy) >= 0.5f)) {
-                                    sendTouchAction(TouchpadAction.MOVE, accDx, accDy)
-                                } else if (!movedAny && !longPressed && (System.currentTimeMillis() - downTime) < 550L) {
-                                    // TAP TO CONFIRM -> CRISP PHONE VIBRATION!
+                                if (maxFingers == 1) {
+                                    if (movedAny && (abs(accDx) >= 0.5f || abs(accDy) >= 0.5f)) {
+                                        sendTouchAction(TouchpadAction.MOVE, accDx, accDy)
+                                    } else if (!movedAny && !longPressed && elapsed < 550L) {
+                                        triggerPhoneConfirmVibration(context, localView, heavy = false)
+                                        clickBurstPos = downPos
+                                        clickBurstSeq++
+                                        statusBanner = "✓ 已點擊確定"
+                                        sendTouchAction(TouchpadAction.CLICK)
+                                    }
+                                } else if (maxFingers == 2 && !multiActionTriggered && elapsed < 420L) {
                                     triggerPhoneConfirmVibration(context, localView, heavy = false)
-                                    clickBurstPos = downPos
-                                    clickBurstSeq++
-                                    statusBanner = "✓ 已點擊確定"
-                                    sendTouchAction(TouchpadAction.CLICK)
+                                    statusBanner = "← 雙指輕點 → 車機返回"
+                                    sendTouchAction(TouchpadAction.BACK)
                                 }
                             }
                         }
@@ -1203,7 +1550,8 @@ private fun FullscreenOledCarTouchpad(
                     // Dim low-luminance OLED watermark in the center
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.TouchApp,
@@ -1212,7 +1560,7 @@ private fun FullscreenOledCarTouchpad(
                             modifier = Modifier.size(54.dp)
                         )
                         Text(
-                            text = "OLED 全螢幕車機觸控板",
+                            text = "OLED 全螢幕多指車機觸控板",
                             color = Color(0xFF334155),
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold
@@ -1224,16 +1572,27 @@ private fun FullscreenOledCarTouchpad(
                         )
                     }
 
-                    // Transient touch-follow glow & confirm-click ripple (zero static burn-in!)
+                    // Transient single & multi-finger touch-follow glow & confirm-click ripple (zero static burn-in!)
                     Canvas(modifier = Modifier.fillMaxSize()) {
-                        touchPoint?.let { pt ->
+                        if (activeTouchPoints.size >= 2) {
+                            for (i in 0 until activeTouchPoints.size - 1) {
+                                drawLine(
+                                    color = Color(0xFFA78BFA).copy(alpha = 0.45f),
+                                    start = activeTouchPoints[i],
+                                    end = activeTouchPoints[i + 1],
+                                    strokeWidth = 2.5.dp.toPx()
+                                )
+                            }
+                        }
+                        val multiColor = if (activeTouchPoints.size >= 2) Color(0xFFA78BFA) else oledAccent
+                        activeTouchPoints.forEach { pt ->
                             drawCircle(
-                                color = oledAccent.copy(alpha = 0.18f),
+                                color = multiColor.copy(alpha = 0.20f),
                                 radius = 32.dp.toPx(),
                                 center = pt
                             )
                             drawCircle(
-                                color = oledAccent.copy(alpha = 0.55f),
+                                color = multiColor.copy(alpha = 0.60f),
                                 radius = 12.dp.toPx(),
                                 center = pt
                             )
@@ -1446,3 +1805,6 @@ private fun CompanionPermButton(
         )
     }
 }
+
+private fun List<Pair<List<String>, String>>.flattenPairs(): Set<String> =
+    flatMap { it.first }.toSet()

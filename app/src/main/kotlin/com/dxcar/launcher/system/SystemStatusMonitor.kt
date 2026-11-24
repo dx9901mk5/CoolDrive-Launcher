@@ -11,7 +11,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.hardware.display.DisplayManager
 import android.media.AudioDeviceInfo
+import android.view.Display
 import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.Network
@@ -40,6 +42,15 @@ data class PairedBtDevice(
     val name: String,
     val address: String,
     val isConnected: Boolean
+)
+
+data class DisplayRefreshCapability(
+    val currentHz: Int,
+    val maxSupportedHz: Int,
+    val supports60Hz: Boolean,
+    val hasVendorSettingsApp: Boolean,
+    val statusBadgeZh: String,
+    val detailHintZh: String
 )
 
 data class SystemStatus(
@@ -427,6 +438,59 @@ class SystemStatusMonitor(private val context: Context) {
     }
 
     companion object {
+        private val VENDOR_SETTINGS_PACKAGES = listOf(
+            "com.carletter.car",
+            "com.autochips.settings",
+            "com.ts.MainUI",
+            "com.szchoiceway.settings",
+            "com.ottocast.settings",
+            "com.suding.speedplay.settings",
+            "com.zjinnova.zlink",
+            "com.baony.avm",
+            "com.anker.car"
+        )
+
+        /**
+         * Inspects whether the Car Head Unit / AI Box currently outputs or supports 60Hz / 60fps.
+         * Always returns a clear capability diagnosis even when OEM 60Hz settings cannot be detected!
+         */
+        fun inspectRefreshRateCapability(context: Context): DisplayRefreshCapability {
+            val dm = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+            val defaultDisplay = dm?.getDisplay(Display.DEFAULT_DISPLAY)
+            val curHz = (defaultDisplay?.refreshRate ?: 60f).toInt().coerceAtLeast(1)
+            val maxHz = defaultDisplay?.supportedModes
+                ?.maxOfOrNull { it.refreshRate.toInt() }
+                ?.coerceAtLeast(curHz)
+                ?: curHz
+
+            val pm = context.packageManager
+            val hasVendorApp = VENDOR_SETTINGS_PACKAGES.any { pkg ->
+                runCatching { pm.getLaunchIntentForPackage(pkg) != null }.getOrDefault(false)
+            }
+            val supports60 = maxHz >= 58 || curHz >= 58
+
+            val badge = when {
+                supports60 -> "✓ 可用（支援 ${maxHz}Hz · 目前 ${curHz}Hz）"
+                hasVendorApp -> "⚠️ 目前 ${curHz}Hz · 可進原廠設定檢查高幀率"
+                else -> "⚠️ 未偵測到原生 60Hz（目前系統回報 ${curHz}Hz）"
+            }
+            val detail = when {
+                supports60 ->
+                    "偵測到此裝置螢幕支援 ${maxHz}Hz（目前實際更新率 ${curHz}Hz），開啟開關即可強制以 60fps 高流暢度渲染！"
+                hasVendorApp ->
+                    "目前螢幕回報為 ${curHz}Hz（可能受 CarPlay 通道預設幀率限制）；開啟開關會強制請求最高幀率，亦可點下方進入車機原廠設定開啟 60fps。"
+                else ->
+                    "未偵測到車機原廠獨立 60Hz 設定（系統回報固定 ${curHz}Hz）；開關仍可開啟以強制請求 App 最高渲染幀率，實際上限依車機盒韌體而定。"
+            }
+            return DisplayRefreshCapability(
+                currentHz = curHz,
+                maxSupportedHz = maxHz,
+                supports60Hz = supports60,
+                hasVendorSettingsApp = hasVendorApp,
+                statusBadgeZh = badge,
+                detailHintZh = detail
+            )
+        }
         fun openWifiSettings(context: Context) {
             val intents = listOf(
                 Intent(Settings.ACTION_WIFI_SETTINGS),

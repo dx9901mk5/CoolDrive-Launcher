@@ -31,6 +31,9 @@ object RemoteTouchpadController {
     private val _cursorState = MutableStateFlow(RemoteCursorState())
     val cursorState: StateFlow<RemoteCursorState> = _cursorState.asStateFlow()
 
+    private val _swapHomePanesSeq = MutableStateFlow(0L)
+    val swapHomePanesSeq: StateFlow<Long> = _swapHomePanesSeq.asStateFlow()
+
     private var initializedCenter = false
 
     fun onTouchpadPacket(context: Context, packet: BridgePacket) {
@@ -113,6 +116,88 @@ object RemoteTouchpadController {
                 mainHandler.post {
                     DxCarAccessibilityService.instance?.dispatchScrollSwipe(cur.xPx, cur.yPx, scrollUp = false)
                 }
+            }
+
+            TouchpadAction.TWO_FINGER_PINCH_IN -> {
+                val cur = _cursorState.value
+                _cursorState.value = cur.copy(visible = true, lastActiveMs = now)
+                mainHandler.post {
+                    DxCarAccessibilityService.instance?.dispatchTwoFingerPinch(
+                        zoomIn = false,
+                        anchorX = cur.xPx,
+                        anchorY = cur.yPx
+                    )
+                }
+            }
+
+            TouchpadAction.TWO_FINGER_SPREAD_OUT -> {
+                val cur = _cursorState.value
+                _cursorState.value = cur.copy(visible = true, lastActiveMs = now)
+                mainHandler.post {
+                    DxCarAccessibilityService.instance?.dispatchTwoFingerPinch(
+                        zoomIn = true,
+                        anchorX = cur.xPx,
+                        anchorY = cur.yPx
+                    )
+                }
+            }
+
+            TouchpadAction.TWO_FINGER_DRAG_UP -> {
+                val cur = _cursorState.value
+                _cursorState.value = cur.copy(visible = true, lastActiveMs = now)
+                mainHandler.post {
+                    DxCarAccessibilityService.instance?.dispatchTwoFingerTilt(
+                        tiltUpTo3D = true,
+                        anchorX = cur.xPx,
+                        anchorY = cur.yPx
+                    )
+                }
+            }
+
+            TouchpadAction.TWO_FINGER_DRAG_DOWN -> {
+                val cur = _cursorState.value
+                _cursorState.value = cur.copy(visible = true, lastActiveMs = now)
+                mainHandler.post {
+                    DxCarAccessibilityService.instance?.dispatchTwoFingerTilt(
+                        tiltUpTo3D = false,
+                        anchorX = cur.xPx,
+                        anchorY = cur.yPx
+                    )
+                }
+            }
+
+            TouchpadAction.TWO_FINGER_DRAG_LEFT -> {
+                val cur = _cursorState.value
+                _cursorState.value = cur.copy(visible = true, lastActiveMs = now)
+                mainHandler.post {
+                    DxCarAccessibilityService.instance?.dispatchTwoFingerHorizontalDrag(
+                        dragLeft = true,
+                        anchorX = cur.xPx,
+                        anchorY = cur.yPx
+                    )
+                }
+            }
+
+            TouchpadAction.TWO_FINGER_DRAG_RIGHT -> {
+                val cur = _cursorState.value
+                _cursorState.value = cur.copy(visible = true, lastActiveMs = now)
+                mainHandler.post {
+                    DxCarAccessibilityService.instance?.dispatchTwoFingerHorizontalDrag(
+                        dragLeft = false,
+                        anchorX = cur.xPx,
+                        anchorY = cur.yPx
+                    )
+                }
+            }
+
+            TouchpadAction.RECENTS -> {
+                mainHandler.post {
+                    DxCarAccessibilityService.instance?.openRecents()
+                }
+            }
+
+            TouchpadAction.SWAP_HOME_PANES -> {
+                _swapHomePanesSeq.value = _swapHomePanesSeq.value + 1L
             }
 
             TouchpadAction.BACK -> {

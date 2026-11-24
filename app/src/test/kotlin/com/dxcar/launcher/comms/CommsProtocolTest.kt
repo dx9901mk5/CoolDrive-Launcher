@@ -1,5 +1,7 @@
 package com.dxcar.launcher.comms
 
+import com.dxcar.launcher.map.OfflineMapManager
+import com.dxcar.launcher.voice.GeminiVoiceNavController
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -66,5 +68,30 @@ class CommsProtocolTest {
         )
         val decodedSettings = json.decodeFromString<BridgePacket>(json.encodeToString(settingsPkt))
         assertEquals(TouchpadAction.OPEN_POINTER_SPEED_SETTINGS, decodedSettings.touchAction)
+
+        val multiPkt = BridgePacket(
+            type = PacketType.TOUCHPAD_EVENT,
+            touchAction = TouchpadAction.TWO_FINGER_PINCH_IN
+        )
+        val decodedMulti = json.decodeFromString<BridgePacket>(json.encodeToString(multiPkt))
+        assertEquals(TouchpadAction.TWO_FINGER_PINCH_IN, decodedMulti.touchAction)
+    }
+
+    @Test
+    fun `offline location detector resolves current local region and entire country`() {
+        val taichung = OfflineMapManager.describeDetectedLocation(24.1477, 120.6736)
+        assertEquals("tw_central", taichung.localRegionId)
+        assertEquals("TW", taichung.countryCode)
+        assertEquals(7, taichung.totalCountryZones)
+
+        val tokyo = OfflineMapManager.describeDetectedLocation(35.6762, 139.6503)
+        assertEquals("JP", tokyo.countryCode)
+    }
+
+    @Test
+    fun `gemini mandarin voice parser extracts clean navigation destination`() {
+        assertEquals("台中高鐵站", GeminiVoiceNavController.extractDestinationFromMandarin("請幫我導航到台中高鐵站"))
+        assertEquals("台北101", GeminiVoiceNavController.extractDestinationFromMandarin("Gemini 帶我去台北101怎麼走"))
+        assertEquals("加油站", GeminiVoiceNavController.extractDestinationFromMandarin("幫我找附近的加油站"))
     }
 }

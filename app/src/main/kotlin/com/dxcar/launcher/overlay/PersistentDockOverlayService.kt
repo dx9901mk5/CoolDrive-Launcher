@@ -243,13 +243,13 @@ class PersistentDockOverlayService :
                 val tick by interactionTick.collectAsState()
                 val metrics by metricsFlow.collectAsState()
 
-                LaunchedEffect(collapsed, pinnedOpen, tick, config.overlayAutoCollapseEnabled, config.overlayAutoRetractSeconds) {
+                LaunchedEffect(collapsed, pinnedOpen, tick, config.overlayAutoCollapseEnabled, config.overlayAutoRetractMs) {
                     if (!collapsed &&
                         config.overlayAutoCollapseEnabled &&
                         !pinnedOpen &&
-                        config.overlayAutoRetractSeconds > 0
+                        config.overlayAutoRetractMs > 0L
                     ) {
-                        delay(config.overlayAutoRetractSeconds * 1_000L)
+                        delay(config.overlayAutoRetractMs)
                         isCollapsed.value = true
                     }
                 }
@@ -488,6 +488,12 @@ class PersistentDockOverlayService :
                                         isCollapsed.value = true
                                     }
                                 },
+                                onVoiceNavClick = {
+                                    if (config.overlayAutoCollapseEnabled && !pinnedOpen) {
+                                        isCollapsed.value = true
+                                    }
+                                    bringDxCarToFront(MainActivity.EXTRA_START_VOICE_NAV)
+                                },
                                 onCollapseOverlay = {
                                     isPinnedOpen.value = false
                                     isCollapsed.value = true
@@ -680,9 +686,30 @@ class PersistentDockOverlayService :
                     accentIndex = config.accentColorIndex,
                     stylePreset = config.stylePreset
                 ) {
+                    val collapsed by isCollapsed.collectAsState()
+                    val metrics by metricsFlow.collectAsState()
+                    val spec = remember(metrics, config.dockPositionMode, config.rightHandDrive) {
+                        CoolwalkLayoutEngine.compute(
+                            metrics = metrics,
+                            dockMode = config.dockPositionMode,
+                            rightHandDrive = config.rightHandDrive,
+                            customPrimaryRatio = config.primarySplitRatio
+                        )
+                    }
+                    val startPad = if (!collapsed && spec.dockPlacement == ResolvedDockPlacement.LEFT) {
+                        (spec.dockThicknessDp + 12).dp
+                    } else {
+                        16.dp
+                    }
+                    val topPad = if (!collapsed && spec.dockPlacement == ResolvedDockPlacement.TOP) {
+                        (spec.dockThicknessDp + 10).dp
+                    } else {
+                        12.dp
+                    }
                     Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(top = 12.dp, start = 16.dp, end = 16.dp)
+                        horizontalAlignment = Alignment.Start,
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.padding(top = topPad, start = startPad, end = 16.dp)
                     ) {
                         IncomingCallBanner(
                             callState = callState,
@@ -705,7 +732,7 @@ class PersistentDockOverlayService :
         val params = createOverlayParams(
             width = WindowManager.LayoutParams.WRAP_CONTENT,
             height = WindowManager.LayoutParams.WRAP_CONTENT,
-            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            gravity = Gravity.TOP or Gravity.START
         )
         bannerView = view
         bannerParams = params

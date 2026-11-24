@@ -10,20 +10,30 @@ import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.dxcar.launcher.comms.BluetoothCompanionService
 import com.dxcar.launcher.comms.CarMessageItem
+import com.dxcar.launcher.data.SplitLaunchEngine
+import com.dxcar.launcher.data.SplitRatioPreset
+import com.dxcar.launcher.data.SplitScreenShortcut
 import com.dxcar.launcher.system.PermissionHelper
+import com.dxcar.launcher.system.StockSplitScreenBridge
 import com.dxcar.launcher.system.SystemStatusMonitor
 import com.dxcar.launcher.ui.DxCarRootScreen
+import com.dxcar.launcher.voice.GeminiVoiceNavController
 import java.util.Locale
+import java.util.UUID
 
 class MainActivity : ComponentActivity() {
 
     private val externalNavCommand = mutableStateOf<String?>(null)
+    private val externalHudToast = mutableStateOf<String?>(null)
     private var pendingVoiceReplyTarget: CarMessageItem? = null
 
     private val permissionLauncher = registerForActivityResult(
@@ -64,6 +74,58 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val voiceNavLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val spoken = result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+                ?.trim()
+            if (!spoken.isNullOrBlank()) {
+                GeminiVoiceNavController.handleSpokenNavigationTranscript(this, spoken) { msg ->
+                    externalHudToast.value = msg
+                }
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private val stockShortcutConfigLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            val data = result.data!!
+            val shortcutIntent = data.getParcelableExtra<Intent>(Intent.EXTRA_SHORTCUT_INTENT)
+            val name = data.getStringExtra(Intent.EXTRA_SHORTCUT_NAME)?.trim().orEmpty()
+                .ifBlank { "原車系統捷徑" }
+            if (shortcutIntent != null) {
+                val uriStr = shortcutIntent.toUri(Intent.URI_INTENT_SCHEME)
+                val pkg = shortcutIntent.`package` ?: shortcutIntent.component?.packageName
+                    ?: "com.google.android.apps.maps"
+                val sc = SplitScreenShortcut(
+                    id = UUID.randomUUID().toString().take(8),
+                    leftPackage = pkg,
+                    rightPackage = pkg,
+                    ratio = SplitRatioPreset.R_5_5,
+                    engine = SplitLaunchEngine.STOCK_LAUNCHER_SHORTCUT,
+                    label = name,
+                    stockIntentUri = uriStr
+                )
+                (application as DxCarApp).preferences.addSplitShortcut(sc)
+                externalHudToast.value = "✓ 已成功匯入原車捷徑：$name"
+            }
+        }
+    }
+
+    private val stockShortcutPickLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            runCatching { stockShortcutConfigLauncher.launch(result.data!!) }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -84,13 +146,21 @@ class MainActivity : ComponentActivity() {
 
         val app = application as DxCarApp
         setContent {
+            val liveCfg by app.preferences.config.collectAsState()
+            LaunchedEffect(liveCfg.prefer60FpsEnabled) {
+                applyPreferredRefreshRate(liveCfg.prefer60FpsEnabled)
+            }
             DxCarRootScreen(
                 app = app,
                 externalNavCommand = externalNavCommand.value,
+                externalHudMessage = externalHudToast.value,
                 onExternalNavConsumed = { externalNavCommand.value = null },
+                onExternalHudConsumed = { externalHudToast.value = null },
                 onRequestRuntimePermissions = ::requestNeededRuntimePermissions,
                 onRequestSetDefaultHome = ::requestSetDefaultHomeLauncher,
-                onStartVoiceReply = ::launchVoiceReply
+                onStartVoiceReply = ::launchVoiceReply,
+                onStartGeminiVoiceNav = ::launchGeminiVoiceNavigation,
+                onPickStockSystemShortcut = ::launchStockSystemShortcutPicker
             )
         }
     }
@@ -129,7 +199,11 @@ class MainActivity : ComponentActivity() {
     private fun handleIncomingIntent(intent: Intent?) {
         val action = intent?.getStringExtra(EXTRA_ACTION)
         if (!action.isNullOrBlank()) {
-            externalNavCommand.value = action
+            if (action == EXTRA_START_VOICE_NAV) {
+                launchGeminiVoiceNavigation()
+            } else {
+                externalNavCommand.value = action
+            }
         }
     }
 
@@ -177,6 +251,30 @@ class MainActivity : ComponentActivity() {
         runCatching { voiceReplyLauncher.launch(intent) }
     }
 
+    private fun launchGeminiVoiceNavigation() {
+        val app = application as DxCarApp
+        val mode = app.preferences.config.value.geminiVoiceMode
+        val speechIntent = GeminiVoiceNavController.buildSpeechRecognizerIntentOrOpenGemini(
+            context = this,
+            mode = mode,
+            onStatusToast = { msg -> externalHudToast.value = msg }
+        )
+        if (speechIntent != null) {
+            runCatching { voiceNavLauncher.launch(speechIntent) }
+                .onFailure {
+                    GeminiVoiceNavController.launchGeminiVoiceAssistantDirect(this, null)
+                }
+        }
+    }
+
+    private fun launchStockSystemShortcutPicker() {
+        runCatching {
+            stockShortcutPickLauncher.launch(StockSplitScreenBridge.buildSystemShortcutPickerIntent())
+        }.onFailure {
+            externalHudToast.value = "⚠️ 此車機系統未提供外部捷徑挑選清單"
+        }
+    }
+
     private fun applyPreferredRefreshRate(prefer60Fps: Boolean) {
         runCatching {
             val lp = window.attributes
@@ -211,5 +309,6 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_OPEN_QUICK_PANEL = "open_quick_panel"
         const val EXTRA_OPEN_NOTIFICATIONS = "open_notifications"
         const val EXTRA_OPEN_SETTINGS = "open_settings"
+        const val EXTRA_START_VOICE_NAV = "start_voice_nav"
     }
 }

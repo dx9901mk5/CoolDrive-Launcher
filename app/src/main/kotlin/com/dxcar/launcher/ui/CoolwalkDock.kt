@@ -36,6 +36,7 @@ import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Map
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Phone
@@ -125,6 +126,7 @@ fun CoolwalkDock(
     is3DCursorActive: Boolean = false,
     onWifiLongClick: () -> Unit = onWifiClick,
     onToggle3DCursor: (() -> Unit)? = null,
+    onVoiceNavClick: (() -> Unit)? = null,
     onCollapseOverlay: (() -> Unit)? = null,
     onTogglePinOverlay: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -149,6 +151,14 @@ fun CoolwalkDock(
                     onBackClick = onBackClick,
                     onRecentsClick = onRecentsClick
                 )
+                if (onVoiceNavClick != null) {
+                    SmallDockUtilityIcon(
+                        icon = Icons.Rounded.Mic,
+                        contentDescription = "Gemini 語音輸入導航",
+                        tint = Color(0xFFA78BFA),
+                        onClick = onVoiceNavClick
+                    )
+                }
                 if (onToggle3DCursor != null) {
                     SmallDockUtilityIcon(
                         icon = Icons.Rounded.ViewInAr,
@@ -329,6 +339,14 @@ fun CoolwalkDock(
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        if (onVoiceNavClick != null) {
+                            SmallDockUtilityIcon(
+                                icon = Icons.Rounded.Mic,
+                                contentDescription = "Gemini 語音輸入導航",
+                                tint = Color(0xFFA78BFA),
+                                onClick = onVoiceNavClick
+                            )
+                        }
                         if (onToggle3DCursor != null) {
                             SmallDockUtilityIcon(
                                 icon = Icons.Rounded.ViewInAr,

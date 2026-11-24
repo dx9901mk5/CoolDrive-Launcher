@@ -177,10 +177,14 @@ class BoxNotificationListenerService : NotificationListenerService() {
         }
 
         if (!cfg.companionSyncAllApps && !cfg.companionAllowedPackages.contains(pkg)) return
-        // Skip noisy OS & Android Auto background status shells when syncing all apps
+        // Skip noisy OS, camera processing, backup progress & Android Auto background status shells when syncing all apps
         if (cfg.companionSyncAllApps && (
                 pkg == "android" ||
                     pkg == "com.android.systemui" ||
+                    pkg == "com.android.camera" ||
+                    pkg == "com.vivo.camera" ||
+                    pkg == "com.google.android.apps.photos" ||
+                    pkg == "com.android.providers.downloads" ||
                     pkg == "com.google.android.projection.gearhead"
                 )
         ) return

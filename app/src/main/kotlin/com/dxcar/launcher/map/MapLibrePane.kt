@@ -36,6 +36,7 @@ import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Layers
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Navigation
 import androidx.compose.material.icons.rounded.OpenInFull
@@ -127,6 +128,7 @@ fun LiveMapCard(
     onToggleFullscreen: () -> Unit,
     onLaunchGoogleMapsApp: (String?) -> Unit,
     onLaunchRealMapsSplit: () -> Unit = {},
+    onVoiceNavClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = LocalDxCarColors.current
@@ -394,9 +396,15 @@ fun LiveMapCard(
                                 onClick = onLaunchRealMapsSplit
                             )
                             MapChipButton(
+                                icon = Icons.Rounded.Mic,
+                                label = "✨ Gemini 語音導航",
+                                highlight = true,
+                                onClick = onVoiceNavClick
+                            )
+                            MapChipButton(
                                 icon = Icons.Rounded.Navigation,
                                 label = "G地圖",
-                                highlight = true,
+                                highlight = false,
                                 onClick = { onLaunchGoogleMapsApp(null) }
                             )
                         }
@@ -809,6 +817,34 @@ fun LiveMapCard(
                             ) {
                                 Text("取消", fontSize = 11.sp)
                             }
+                        }
+                    }
+
+                    // Smart GPS Current-Region & Entire-Country One-Tap Batch Download Buttons!
+                    val detectedLoc = remember(location.latitude, location.longitude) {
+                        OfflineMapManager.describeDetectedLocation(location.latitude, location.longitude)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { onDownloadOfflineRegion(OfflineMapManager.TOKEN_AUTO_LOCAL_REGION) },
+                            enabled = offlineState.downloadingRegionId == null,
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("📍 下載所在區域（${detectedLoc.localRegionTitleZh}）", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = { onDownloadOfflineRegion(OfflineMapManager.TOKEN_AUTO_ENTIRE_COUNTRY) },
+                            enabled = offlineState.downloadingRegionId == null,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E), contentColor = Color.White),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("🌏 全下載所在國家（${detectedLoc.countryTitleZh}）", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 

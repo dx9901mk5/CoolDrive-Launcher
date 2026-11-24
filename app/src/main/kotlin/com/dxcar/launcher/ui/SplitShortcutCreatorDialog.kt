@@ -70,6 +70,8 @@ import com.dxcar.launcher.data.SplitScreenShortcut
 import com.dxcar.launcher.system.AppCategory
 import com.dxcar.launcher.system.InstalledAppInfo
 import com.dxcar.launcher.system.PermissionHelper
+import com.dxcar.launcher.system.StockSplitScanResult
+import com.dxcar.launcher.system.StockSplitScreenBridge
 import com.dxcar.launcher.theme.LocalDxCarColors
 import java.util.UUID
 
@@ -141,6 +143,7 @@ fun SplitShortcutCreatorDialog(
     apps: List<InstalledAppInfo>,
     onSaveShortcut: (SplitScreenShortcut) -> Unit,
     onTestLaunchShortcut: ((SplitScreenShortcut) -> Unit)? = null,
+    onPickSystemShortcut: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val colors = LocalDxCarColors.current
@@ -153,6 +156,7 @@ fun SplitShortcutCreatorDialog(
     var rightApp by remember { mutableStateOf<InstalledAppInfo?>(null) }
     var pickingSide by remember { mutableStateOf<String?>(null) }
     var pickerCategory by remember { mutableStateOf(AppCategory.ALL) }
+    var stockScanResult by remember { mutableStateOf<StockSplitScanResult?>(null) }
 
     val animatedLeftWeight by animateFloatAsState(
         targetValue = selectedRatio.leftWeight,
@@ -311,6 +315,91 @@ fun SplitShortcutCreatorDialog(
                             )
                             IconButton(onClick = onDismiss) {
                                 Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.primaryText)
+                            }
+                        }
+
+                        // STOCK LAUNCHER SPLIT-SCREEN SCANNER & IMPORTER ("讀取原車啟動器已創立好的分割視窗")
+                        Surface(
+                            color = colors.accent.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.2.dp, colors.accent.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "📥 讀取／匯入原車啟動器已創立好的分割視窗",
+                                    color = colors.primaryText,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = stockScanResult?.detailReportZh
+                                        ?: "可自動掃描原車桌面／系統已儲存的分屏組合（設為預設桌面後亦可讀取系統已釘選 App Pair），或直接挑選原車系統捷徑匯入！",
+                                    color = colors.secondaryText,
+                                    fontSize = 12.sp
+                                )
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            stockScanResult = StockSplitScreenBridge.scanStockSplitShortcuts(context, apps)
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text("🔍 掃描原車已建立分屏", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    if (onPickSystemShortcut != null) {
+                                        OutlinedButton(
+                                            onClick = onPickSystemShortcut,
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Text("📂 挑選原車系統分屏捷徑", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                                stockScanResult?.discoveredShortcuts?.forEach { sc ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(colors.cardSurfaceElevated)
+                                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = "⊞ ${sc.label}",
+                                            color = colors.primaryText,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            if (onTestLaunchShortcut != null) {
+                                                OutlinedButton(
+                                                    onClick = { onTestLaunchShortcut(sc) },
+                                                    shape = RoundedCornerShape(10.dp)
+                                                ) {
+                                                    Text("直接開啟", fontSize = 11.sp)
+                                                }
+                                            }
+                                            Button(
+                                                onClick = { onSaveShortcut(sc) },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E), contentColor = Color.White),
+                                                shape = RoundedCornerShape(10.dp)
+                                            ) {
+                                                Text("匯入儲存", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
 

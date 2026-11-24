@@ -102,7 +102,14 @@ enum class SplitRatioPreset(val label: String, val leftWeight: Float) {
 @Serializable
 enum class SplitLaunchEngine(val labelZh: String) {
     NATIVE_SPLIT_SCREEN("AOSP 系統原生可拖動分屏（推薦）"),
+    STOCK_LAUNCHER_SHORTCUT("原車啟動器已建立分屏捷徑"),
     FREEFORM_EXACT_RATIO("Freeform 自由雙視窗")
+}
+
+@Serializable
+enum class GeminiVoiceMode(val labelZh: String) {
+    SMART_AUTO("智慧雙通：語音辨識直達導航 ＋ Gemini 語意解析（推薦）"),
+    GEMINI_APP_DIRECT("直接喚起 Google Gemini 語音助理 App")
 }
 
 @Serializable
@@ -112,7 +119,10 @@ data class SplitScreenShortcut(
     val rightPackage: String,
     val ratio: SplitRatioPreset = SplitRatioPreset.R_7_3,
     val engine: SplitLaunchEngine = SplitLaunchEngine.NATIVE_SPLIT_SCREEN,
-    val label: String = ""
+    val label: String = "",
+    val stockIntentUri: String = "",
+    val stockShortcutPackage: String = "",
+    val stockShortcutId: String = ""
 )
 
 @Serializable
@@ -194,12 +204,15 @@ data class LauncherConfig(
     val persistentOverlayDockEnabled: Boolean = true,
     val overlayDockOnOtherLaunchers: Boolean = true,
     val overlayAutoCollapseEnabled: Boolean = true,
-    val overlayAutoRetractSeconds: Int = 4,
+    val overlayAutoRetractSeconds: Int = 2,
+    val overlayAutoRetractMs: Long = 1500L,
     val overlayHandleThicknessDp: Int = 26,
     val overlayHandlePositionPercent: Float = 0.50f,
     val launchAppsAvoidDockFreeform: Boolean = false,
     val globalCallMessageBannerEnabled: Boolean = true,
     val autoReadMessagesTts: Boolean = false,
+    val geminiVoiceMode: GeminiVoiceMode = GeminiVoiceMode.SMART_AUTO,
+    val geminiApiKey: String = "",
     val multiFingerGesturesEnabled: Boolean = false,
     val twoFingerVerticalAction: GestureAction = GestureAction.BRIGHTNESS_AND_VOLUME,
     val twoFingerHorizontalAction: GestureAction = GestureAction.MEDIA_PREV_NEXT,
@@ -225,7 +238,7 @@ data class LauncherConfig(
     val companionTargetDeviceAddress: String = "",
     val companionTargetDeviceName: String = "",
     val companionAutoConnect: Boolean = true,
-    val companionSyncAllApps: Boolean = true,
+    val companionSyncAllApps: Boolean = false,
     val companionAllowedPackages: List<String> = DEFAULT_COMPANION_PACKAGES,
     val quickReplies: List<String> = DEFAULT_QUICK_REPLIES,
     val lastKnownLat: Double = 25.0330,
@@ -242,19 +255,28 @@ data class LauncherConfig(
 
         val DEFAULT_COMPANION_PACKAGES = listOf(
             "jp.naver.line.android",
+            "com.linecorp.linelite",
             "com.facebook.orca",
             "com.whatsapp",
+            "com.whatsapp.w4b",
             "org.telegram.messenger",
             "com.google.android.apps.messaging",
             "com.samsung.android.messaging",
             "com.android.mms",
             "com.vivo.mms",
+            "com.sie.mms",
             "com.bbk.mms",
+            "com.iqoo.mms",
             "com.coloros.mms",
+            "com.oplus.mms",
             "com.miui.mms",
             "com.tencent.mm",
             "com.instagram.android",
-            "com.discord"
+            "com.instagram.barcelona",
+            "com.discord",
+            "com.google.android.gm",
+            "com.microsoft.teams",
+            "com.Slack"
         )
 
         val DEFAULT_QUICK_REPLIES = listOf(
@@ -320,10 +342,11 @@ class LauncherPreferences(context: Context) {
             prefs.edit()
                 .putBoolean(KEY_MIGRATED_V140, true)
                 .putBoolean(KEY_MIGRATED_V150, true)
+                .putBoolean(KEY_MIGRATED_V152, true)
                 .apply()
             return LauncherConfig()
         }
-        val decoded = runCatching { json.decodeFromString<LauncherConfig>(raw) }
+        var decoded = runCatching { json.decodeFromString<LauncherConfig>(raw) }
             .getOrElse { LauncherConfig() }
 
         if (!prefs.getBoolean(KEY_MIGRATED_V150, false)) {
@@ -337,18 +360,35 @@ class LauncherPreferences(context: Context) {
             } else {
                 decoded.dockPositionMode
             }
-            val migrated = decoded.copy(
+            decoded = decoded.copy(
                 homeExperimentMode = safeMode,
                 dockPositionMode = safeDock,
                 multiFingerGesturesEnabled = false,
                 overlayHandleThicknessDp = decoded.overlayHandleThicknessDp.coerceAtLeast(26)
             )
             prefs.edit()
-                .putString(KEY_CONFIG_JSON, json.encodeToString(migrated))
+                .putString(KEY_CONFIG_JSON, json.encodeToString(decoded))
                 .putBoolean(KEY_MIGRATED_V140, true)
                 .putBoolean(KEY_MIGRATED_V150, true)
                 .apply()
-            return migrated
+        }
+
+        if (!prefs.getBoolean(KEY_MIGRATED_V152, false)) {
+            val nextRetractMs = when (decoded.overlayAutoRetractSeconds) {
+                0 -> 0L
+                7 -> 5000L
+                else -> 1500L
+            }
+            val seededPackages = (decoded.companionAllowedPackages + LauncherConfig.DEFAULT_COMPANION_PACKAGES).distinct()
+            decoded = decoded.copy(
+                overlayAutoRetractMs = nextRetractMs,
+                companionSyncAllApps = false,
+                companionAllowedPackages = seededPackages
+            )
+            prefs.edit()
+                .putString(KEY_CONFIG_JSON, json.encodeToString(decoded))
+                .putBoolean(KEY_MIGRATED_V152, true)
+                .apply()
         }
         return decoded
     }
@@ -498,5 +538,6 @@ class LauncherPreferences(context: Context) {
         private const val KEY_CONFIG_JSON = "config_json_v1"
         private const val KEY_MIGRATED_V140 = "migrated_v140_defaults"
         private const val KEY_MIGRATED_V150 = "migrated_v150_defaults"
+        private const val KEY_MIGRATED_V152 = "migrated_v152_defaults"
     }
 }

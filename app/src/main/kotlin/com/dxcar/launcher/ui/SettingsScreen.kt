@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bluetooth
@@ -33,9 +34,9 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.DisplaySettings
-import androidx.compose.material.icons.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PhoneAndroid
@@ -54,6 +55,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
@@ -79,6 +81,7 @@ import androidx.compose.ui.unit.sp
 import com.dxcar.launcher.BuildConfig
 import com.dxcar.launcher.comms.BridgeStatusState
 import com.dxcar.launcher.data.DockPositionMode
+import com.dxcar.launcher.data.GeminiVoiceMode
 import com.dxcar.launcher.data.HomeExperimentMode
 import com.dxcar.launcher.data.HomeMapDisplayMode
 import com.dxcar.launcher.data.LauncherConfig
@@ -87,6 +90,7 @@ import com.dxcar.launcher.data.MapEngineStyle
 import com.dxcar.launcher.data.OfflineUpdatePolicy
 import com.dxcar.launcher.data.ThemeMode
 import com.dxcar.launcher.layout.CoolwalkLayoutSpec
+import com.dxcar.launcher.map.OfflineMapManager
 import com.dxcar.launcher.map.OfflineMapUiState
 import com.dxcar.launcher.map.OfflineRegionPreset
 import com.dxcar.launcher.overlay.ExtraLargeTutorialModal
@@ -133,6 +137,8 @@ fun SettingsScreen(
     offlineState: OfflineMapUiState = OfflineMapUiState(),
     offlinePresets: List<OfflineRegionPreset> = emptyList(),
     onDownloadOfflineRegion: (String) -> Unit = {},
+    onCancelOfflineDownload: () -> Unit = {},
+    onStartVoiceNavigation: () -> Unit = {},
     onUpdateConfig: ((LauncherConfig) -> LauncherConfig) -> Unit,
     onRequestSetDefaultHome: () -> Unit,
     onSwitchToLauncher: (HomeLauncherInfo) -> Unit,
@@ -391,7 +397,10 @@ fun SettingsScreen(
                             )
                         }
 
-                        // Plan A Offline Map Download & Update Cycle Quick Controls
+                        // Plan A Offline Map Download & Update Cycle Quick Controls ("依據所在區域，或是所在國家，可以全下載")
+                        val detectedLoc = remember(config.lastKnownLat, config.lastKnownLon) {
+                            OfflineMapManager.describeDetectedLocation(config.lastKnownLat, config.lastKnownLon)
+                        }
                         Surface(
                             color = colors.cardSurfaceElevated,
                             shape = RoundedCornerShape(16.dp),
@@ -399,7 +408,7 @@ fun SettingsScreen(
                         ) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(
-                                    text = "方案 A 離線地圖 · 更新提醒週期與快速下載（已快取 ${config.offlineRegions.size} 區）",
+                                    text = "方案 A 離線地圖 · 所在區域／所在國家全下載（已快取 ${config.offlineRegions.size} 區）",
                                     color = colors.primaryText,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold
@@ -416,8 +425,45 @@ fun SettingsScreen(
                                 if (offlineState.statusMessage.isNotBlank()) {
                                     Text(offlineState.statusMessage, color = colors.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                 }
+                                if (offlineState.downloadingRegionId != null) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        LinearProgressIndicator(
+                                            progress = { offlineState.progress },
+                                            color = colors.accent,
+                                            trackColor = colors.cardBorder,
+                                            modifier = Modifier.weight(1f).height(7.dp).clip(RoundedCornerShape(4.dp))
+                                        )
+                                        OutlinedButton(onClick = onCancelOfflineDownload, shape = RoundedCornerShape(10.dp)) {
+                                            Text("取消", fontSize = 11.sp)
+                                        }
+                                    }
+                                }
+                                // Smart Current-Region & Entire-Country One-Tap Download Buttons!
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Button(
+                                        onClick = { onDownloadOfflineRegion(OfflineMapManager.TOKEN_AUTO_LOCAL_REGION) },
+                                        enabled = offlineState.downloadingRegionId == null,
+                                        colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text("📍 下載所在區域（${detectedLoc.localRegionTitleZh}）", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    Button(
+                                        onClick = { onDownloadOfflineRegion(OfflineMapManager.TOKEN_AUTO_ENTIRE_COUNTRY) },
+                                        enabled = offlineState.downloadingRegionId == null,
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E), contentColor = Color.White),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text("🌏 全下載所在國家（${detectedLoc.countryTitleZh}）", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                // Full Regional List (no .take(4) truncation!)
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    offlinePresets.take(4).forEach { preset ->
+                                    offlinePresets.forEach { preset ->
                                         val downloaded = config.offlineRegions.any { it.regionId == preset.id }
                                         OutlinedButton(
                                             onClick = { onDownloadOfflineRegion(preset.id) },
@@ -425,7 +471,7 @@ fun SettingsScreen(
                                             shape = RoundedCornerShape(12.dp)
                                         ) {
                                             Text(
-                                                text = if (downloaded) "↻ 更新 ${preset.titleZh}" else "⬇ 下載 ${preset.titleZh}",
+                                                text = if (downloaded) "✓ 更新 ${preset.titleZh}" else "⬇ 下載 ${preset.titleZh}",
                                                 fontSize = 11.sp
                                             )
                                         }
@@ -545,12 +591,67 @@ fun SettingsScreen(
                             checked = config.mapTrafficEnabled,
                             onCheckedChange = { checked -> onUpdateConfig { it.copy(mapTrafficEnabled = checked) } }
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // ALWAYS-VISIBLE 60FPS / 60HZ SWITCH + LIVE HARDWARE CAPABILITY PROMPT!
+                        val refreshCap = remember(config.prefer60FpsEnabled) {
+                            SystemStatusMonitor.inspectRefreshRateCapability(context)
+                        }
+                        Surface(
+                            color = colors.accent.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.2.dp, colors.accent.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                        Icon(Icons.Rounded.Speed, contentDescription = null, tint = colors.accent, modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Column {
+                                            Text("60fps / 60Hz 高流暢度顯示模式", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                text = refreshCap.statusBadgeZh,
+                                                color = if (refreshCap.supports60Hz) colors.statusConnected else Color(0xFFF59E0B),
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                    Switch(
+                                        checked = config.prefer60FpsEnabled,
+                                        onCheckedChange = { checked -> onUpdateConfig { it.copy(prefer60FpsEnabled = checked) } },
+                                        colors = SwitchDefaults.colors(checkedThumbColor = colors.onAccent, checkedTrackColor = colors.accent)
+                                    )
+                                }
+                                Text(refreshCap.detailHintZh, color = colors.secondaryText, fontSize = 11.sp)
+                                OutlinedButton(
+                                    onClick = { SystemStatusMonitor.openAiBoxVendorSettings(context, preferDisplayFor60Fps = true) },
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("開啟車機顯示／原廠設定檢查 60fps 選項", fontSize = 11.sp)
+                                }
+                            }
+                        }
+
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             OutlinedButton(onClick = onLaunchRealMapsSplitScreen, shape = RoundedCornerShape(12.dp)) {
                                 Text("測試 AOSP 分割G地圖", fontSize = 12.sp)
                             }
-                            OutlinedButton(onClick = onOpenSplitShortcutCreator, shape = RoundedCornerShape(12.dp)) {
-                                Text("分屏捷徑製作器", fontSize = 12.sp)
+                            Button(
+                                onClick = onOpenSplitShortcutCreator,
+                                colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("分屏設定／讀取原車分屏", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
@@ -692,11 +793,16 @@ fun SettingsScreen(
 
                             if (config.overlayAutoCollapseEnabled) {
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    listOf(3 to "3 秒收回", 4 to "4 秒收回", 7 to "7 秒收回", 0 to "手動收回").forEach { (sec, label) ->
+                                    listOf(
+                                        1500L to "1.5 秒收回（預設）",
+                                        3000L to "3 秒收回",
+                                        5000L to "5 秒收回",
+                                        0L to "手動收回"
+                                    ).forEach { (ms, label) ->
                                         SelectablePill(
                                             text = label,
-                                            selected = config.overlayAutoRetractSeconds == sec,
-                                            onClick = { onUpdateConfig { it.copy(overlayAutoRetractSeconds = sec) } }
+                                            selected = config.overlayAutoRetractMs == ms,
+                                            onClick = { onUpdateConfig { it.copy(overlayAutoRetractMs = ms) } }
                                         )
                                     }
                                 }
@@ -908,12 +1014,62 @@ fun SettingsScreen(
                                 Text("測試來電橫幅", fontSize = 12.sp)
                             }
                             OutlinedButton(onClick = onSimulateMessage, shape = RoundedCornerShape(12.dp)) {
-                                Text("測試 LINE 訊息", fontSize = 12.sp)
+                                Text("測試左上 2X 通知", fontSize = 12.sp)
                             }
                             TutorialPillButton(
                                 label = "教學",
                                 onClick = { activeTutorial = CarSettingsTutorialTopic.PHONE_PAIRING }
                             )
+                        }
+
+                        // GEMINI VOICE NAVIGATION SETTINGS ("啟動器的按鈕導航可否接受語音輸入，走gemini?")
+                        Surface(
+                            color = colors.cardSurfaceElevated,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, Color(0xFFA78BFA).copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                        Icon(Icons.Rounded.Mic, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("✨ Gemini 語音輸入導航（Dock 與地圖一鍵呼叫）", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    Button(
+                                        onClick = onStartVoiceNavigation,
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED), contentColor = Color.White),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text("🎙️ 測試語音導航", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    GeminiVoiceMode.entries.forEach { gm ->
+                                        SelectablePill(
+                                            text = gm.labelZh,
+                                            selected = config.geminiVoiceMode == gm,
+                                            onClick = { onUpdateConfig { it.copy(geminiVoiceMode = gm) } }
+                                        )
+                                    }
+                                }
+                                OutlinedTextField(
+                                    value = config.geminiApiKey,
+                                    onValueChange = { key -> onUpdateConfig { it.copy(geminiApiKey = key.trim()) } },
+                                    singleLine = true,
+                                    label = { Text("選填 Gemini API Key（不填亦可免 Key 語音導航／喚起 Gemini App）", fontSize = 11.sp) },
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
                     }
                 }
@@ -1085,7 +1241,10 @@ fun SettingsScreen(
                             }
                         }
 
-                        // 60FPS High Frame Rate Switch + Jump to Factory AI Box Settings!
+                        // 60FPS / 60Hz High Frame Rate Switch + Hardware Capability Status Badge!
+                        val sheetRefreshCap = remember(config.prefer60FpsEnabled) {
+                            SystemStatusMonitor.inspectRefreshRateCapability(context)
+                        }
                         Surface(
                             color = colors.accent.copy(alpha = 0.14f),
                             shape = RoundedCornerShape(16.dp),
@@ -1106,17 +1265,20 @@ fun SettingsScreen(
                                         Icon(Icons.Rounded.Speed, contentDescription = null, tint = colors.accent, modifier = Modifier.size(22.dp))
                                         Spacer(Modifier.width(8.dp))
                                         Column {
-                                            Text("開啟 60fps 畫面高幀率模式", color = colors.primaryText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                                            Text("啟用啟動器 60Hz 高更新率渲染；若車機原廠設定有提供 60fps 開關，可點下方按鈕進入開啟", color = colors.secondaryText, fontSize = 12.sp)
+                                            Text("開啟 60fps / 60Hz 畫面高幀率模式", color = colors.primaryText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                text = sheetRefreshCap.statusBadgeZh,
+                                                color = if (sheetRefreshCap.supports60Hz) colors.statusConnected else Color(0xFFF59E0B),
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text(sheetRefreshCap.detailHintZh, color = colors.secondaryText, fontSize = 11.sp)
                                         }
                                     }
                                     Switch(
                                         checked = config.prefer60FpsEnabled,
                                         onCheckedChange = { checked ->
                                             onUpdateConfig { it.copy(prefer60FpsEnabled = checked) }
-                                            if (checked) {
-                                                SystemStatusMonitor.openAiBoxVendorSettings(context, preferDisplayFor60Fps = true)
-                                            }
                                         },
                                         colors = SwitchDefaults.colors(checkedThumbColor = colors.onAccent, checkedTrackColor = colors.accent)
                                     )
@@ -1284,7 +1446,7 @@ fun TutorialPillButton(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Rounded.HelpOutline, contentDescription = null, tint = colors.onAccent, modifier = Modifier.size(16.dp))
+            Icon(Icons.AutoMirrored.Rounded.HelpOutline, contentDescription = null, tint = colors.onAccent, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(4.dp))
             Text(label, color = colors.onAccent, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
         }

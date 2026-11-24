@@ -31,10 +31,16 @@
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
 
-    <!-- Launcher App Query -->
+    <!-- Launcher App Query & Stock Car Launcher Workspace/Split-Screen Provider Read -->
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="com.android.launcher.permission.READ_SETTINGS" />
+    <uses-permission android:name="com.android.launcher3.permission.READ_SETTINGS" />
+    <uses-permission android:name="com.google.android.launcher.permission.READ_SETTINGS" />
+    <uses-permission android:name="com.carletter.launcher.permission.READ_SETTINGS" />
+    <uses-permission android:name="com.autochips.launcher.permission.READ_SETTINGS" />
 
     <!-- Persistent AA Dock Overlay & Global Call/Message Banners -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />

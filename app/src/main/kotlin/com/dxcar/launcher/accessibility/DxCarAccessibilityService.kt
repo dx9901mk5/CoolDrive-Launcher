@@ -118,14 +118,26 @@ class DxCarAccessibilityService : AccessibilityService() {
         return isSystemInSplitScreenNow()
     }
 
-    private fun findAndClickSplitNode(): Boolean {
-        val roots = buildList {
-            rootInActiveWindow?.let { add(it) }
-            runCatching { windows }.getOrNull()?.forEach { w -> w.root?.let { add(it) } }
+    private fun collectNonSelfRoots(): List<AccessibilityNodeInfo> {
+        val selfPkg = packageName
+        return buildList {
+            runCatching { windows }.getOrNull()?.forEach { w ->
+                val r = w.root ?: return@forEach
+                if (r.packageName?.toString() != selfPkg) {
+                    add(r)
+                }
+            }
+            rootInActiveWindow?.let { r ->
+                if (r.packageName?.toString() != selfPkg) add(r)
+            }
         }
+    }
+
+    private fun findAndClickSplitNode(): Boolean {
+        val roots = collectNonSelfRoots()
         val splitKeywords = listOf(
-            "分割畫面", "分割螢幕", "分屏", "左右分屏", "開啟分屏",
-            "split screen", "split top", "split left", "enter split"
+            "分割畫面", "分割螢幕", "分屏", "左右分屏", "開啟分屏", "雙屏", "雙視窗",
+            "split screen", "split top", "split left", "enter split", "multi window"
         )
         for (root in roots) {
             val found = searchNodeRecursive(root) { node ->
@@ -133,7 +145,7 @@ class DxCarAccessibilityService : AccessibilityService() {
                 val desc = node.contentDescription?.toString()?.lowercase().orEmpty()
                 val id = node.viewIdResourceName?.lowercase().orEmpty()
                 splitKeywords.any { kw -> text.contains(kw) || desc.contains(kw) } ||
-                    id.contains("split")
+                    id.contains("split") || id.contains("multi_window") || id.contains("dock_top")
             }
             if (found != null && performClickUpHierarchy(found)) {
                 return true
@@ -143,13 +155,26 @@ class DxCarAccessibilityService : AccessibilityService() {
     }
 
     private fun findAndClickRecentsTaskHeaderIcon(): Boolean {
-        val root = rootInActiveWindow ?: return false
-        val iconNode = searchNodeRecursive(root) { node ->
-            val id = node.viewIdResourceName?.lowercase().orEmpty()
-            (id.contains("icon") || id.contains("task_icon") || id.contains("app_icon")) &&
-                node.isClickable
+        val dm = resources.displayMetrics
+        val screenH = dm.heightPixels
+        for (root in collectNonSelfRoots()) {
+            val iconNode = searchNodeRecursive(root) { node ->
+                val id = node.viewIdResourceName?.lowercase().orEmpty()
+                val cls = node.className?.toString()?.lowercase().orEmpty()
+                val r = Rect()
+                node.getBoundsInScreen(r)
+                val isSmallHeaderIcon = r.width() in 28..180 && r.height() in 28..180 &&
+                    r.top in 20..(screenH * 0.45f).toInt()
+                val matchesId = id.contains("icon") || id.contains("task_icon") ||
+                    id.contains("app_icon") || id.contains("title_icon") || id.contains("menu")
+                (matchesId && (node.isClickable || isSmallHeaderIcon)) ||
+                    (isSmallHeaderIcon && node.isClickable && cls.contains("image"))
+            }
+            if (iconNode != null && performClickUpHierarchy(iconNode)) {
+                return true
+            }
         }
-        return if (iconNode != null) performClickUpHierarchy(iconNode) else false
+        return false
     }
 
     private fun searchNodeRecursive(
@@ -309,6 +334,47 @@ class DxCarAccessibilityService : AccessibilityService() {
         val p2 = Path().apply {
             moveTo(rightStart, cy)
             lineTo(rightEnd, cy)
+        }
+
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(p1, 0L, 300L))
+            .addStroke(GestureDescription.StrokeDescription(p2, 0L, 300L))
+            .build()
+
+        return dispatchWithCallback(gesture, onDone)
+    }
+
+    /**
+     * Simulates a 2-finger parallel horizontal drag centered around [anchorX, anchorY]
+     * (triggered by 2-finger horizontal drag on the Smartphone Remote Touchpad).
+     */
+    fun dispatchTwoFingerHorizontalDrag(
+        dragLeft: Boolean,
+        anchorX: Float? = null,
+        anchorY: Float? = null,
+        onDone: ((Boolean) -> Unit)? = null
+    ): Boolean {
+        val dm = resources.displayMetrics
+        val w = dm.widthPixels.toFloat().coerceAtLeast(400f)
+        val h = dm.heightPixels.toFloat().coerceAtLeast(300f)
+
+        val cx = (anchorX ?: (w * 0.50f)).coerceIn(w * 0.25f, w * 0.75f)
+        val cy = (anchorY ?: (h * 0.50f)).coerceIn(h * 0.25f, h * 0.75f)
+        val halfSpanY = (h * 0.06f).coerceIn(28f, 75f)
+        val travelX = (w * 0.22f).coerceIn(110f, 260f)
+
+        val y1 = (cy - halfSpanY).coerceAtLeast(16f)
+        val y2 = (cy + halfSpanY).coerceAtMost(h - 16f)
+        val startX = if (dragLeft) (cx + travelX * 0.5f).coerceAtMost(w - 20f) else (cx - travelX * 0.5f).coerceAtLeast(20f)
+        val endX = if (dragLeft) (cx - travelX * 0.5f).coerceAtLeast(20f) else (cx + travelX * 0.5f).coerceAtMost(w - 20f)
+
+        val p1 = Path().apply {
+            moveTo(startX, y1)
+            lineTo(endX, y1)
+        }
+        val p2 = Path().apply {
+            moveTo(startX, y2)
+            lineTo(endX, y2)
         }
 
         val gesture = GestureDescription.Builder()

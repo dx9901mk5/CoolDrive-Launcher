@@ -118,10 +118,14 @@ enum class LauncherDestination {
 fun DxCarRootScreen(
     app: DxCarApp,
     externalNavCommand: String?,
+    externalHudMessage: String? = null,
     onExternalNavConsumed: () -> Unit,
+    onExternalHudConsumed: () -> Unit = {},
     onRequestRuntimePermissions: () -> Unit,
     onRequestSetDefaultHome: () -> Unit,
-    onStartVoiceReply: (CarMessageItem) -> Unit
+    onStartVoiceReply: (CarMessageItem) -> Unit,
+    onStartGeminiVoiceNav: () -> Unit = {},
+    onPickStockSystemShortcut: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
@@ -145,6 +149,7 @@ fun DxCarRootScreen(
     val cursor3DActive by Cursor3DStateHolder.active.collectAsState()
     val cursor3DTutorial by Cursor3DStateHolder.showTutorial.collectAsState()
     val remoteCursor by RemoteTouchpadController.cursorState.collectAsState()
+    val remoteSwapSeq by RemoteTouchpadController.swapHomePanesSeq.collectAsState()
 
     // Auto-detect Smartphone vs AI Box Car Head Unit on first launch when not pinned by user
     LaunchedEffect(configuration.screenWidthDp, configuration.screenHeightDp, config.roleUserPinned) {
@@ -182,8 +187,22 @@ fun DxCarRootScreen(
 
     LaunchedEffect(gestureHudText) {
         if (gestureHudText != null) {
-            delay(1_800L)
+            delay(2_400L)
             gestureHudText = null
+        }
+    }
+
+    LaunchedEffect(externalHudMessage) {
+        if (!externalHudMessage.isNullOrBlank()) {
+            gestureHudText = externalHudMessage
+            onExternalHudConsumed()
+        }
+    }
+
+    LaunchedEffect(remoteSwapSeq) {
+        if (remoteSwapSeq > 0L) {
+            isMapPrimary = !isMapPrimary
+            gestureHudText = "⇄ 已從手機多指觸控切換首頁分欄"
         }
     }
 
@@ -395,6 +414,7 @@ fun DxCarRootScreen(
             PhoneCompanionScreen(
                 config = config,
                 pairedDevices = pairedBtDevices,
+                installedApps = installedApps,
                 bridgeStatus = bridgeStatus,
                 permissionHealth = permissionHealth,
                 updateState = updateState,
@@ -427,6 +447,9 @@ fun DxCarRootScreen(
                         if (next.contains(pkg)) next.remove(pkg) else next.add(pkg)
                         current.copy(companionAllowedPackages = next)
                     }
+                },
+                onSetAllowedPackages = { pkgList ->
+                    app.preferences.update { it.copy(companionAllowedPackages = pkgList.distinct()) }
                 },
                 onToggleSyncAllApps = { checked ->
                     app.preferences.update { it.copy(companionSyncAllApps = checked) }
@@ -492,6 +515,7 @@ fun DxCarRootScreen(
                     onClockClick = { showQuickControlCenter = !showQuickControlCenter },
                     onNotificationsClick = { showNotificationCenter = !showNotificationCenter },
                     onToggle3DCursor = ::toggle3DPointerGlobal,
+                    onVoiceNavClick = onStartGeminiVoiceNav,
                     onBackClick = {
                         when {
                             showQuickControlCenter -> showQuickControlCenter = false
@@ -640,6 +664,7 @@ fun DxCarRootScreen(
                                 onLaunchRealMapsSplit = {
                                     SplitSidePanelActivity.launchWithRealGoogleMaps(context)
                                 },
+                                onVoiceNavClick = onStartGeminiVoiceNav,
                                 onWeatherClick = { app.weatherRepository.openGoogleWeatherApp(context) },
                                 onMediaPlayPause = { app.mediaControlBridge.togglePlayPause() },
                                 onMediaNext = { app.mediaControlBridge.skipNext() },
@@ -713,7 +738,8 @@ fun DxCarRootScreen(
                                     },
                                     onLaunchRealMapsSplit = {
                                         SplitSidePanelActivity.launchWithRealGoogleMaps(context)
-                                    }
+                                    },
+                                    onVoiceNavClick = onStartGeminiVoiceNav
                                 )
                             }
                         }
@@ -793,6 +819,8 @@ fun DxCarRootScreen(
                                         style = config.mapEngineStyle
                                     )
                                 },
+                                onCancelOfflineDownload = { app.offlineMapManager.cancelCurrentDownload() },
+                                onStartVoiceNavigation = onStartGeminiVoiceNav,
                                 onUpdateConfig = { transform -> app.preferences.update(transform) },
                                 onRequestSetDefaultHome = {
                                     onRequestSetDefaultHome()
@@ -961,13 +989,23 @@ fun DxCarRootScreen(
                 }
             }
 
-            // INCOMING CALL & MESSAGE BANNERS
+            // INCOMING CALL & MESSAGE BANNERS (Top-Left Corner + 2X Extra-Large Font + Left/Right Touch Swipe Dismiss!)
+            val bannerStartPad = if (showHomeDockNow && layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT) {
+                (layoutSpec.dockThicknessDp + 14).dp
+            } else {
+                16.dp
+            }
+            val bannerTopPad = if (showHomeDockNow && layoutSpec.dockPlacement == ResolvedDockPlacement.TOP) {
+                (layoutSpec.dockThicknessDp + 12).dp
+            } else {
+                14.dp
+            }
             Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalAlignment = Alignment.Start,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = if (layoutSpec.dockPlacement == ResolvedDockPlacement.TOP) 82.dp else 14.dp, start = 20.dp, end = 20.dp)
+                    .align(Alignment.TopStart)
+                    .padding(top = bannerTopPad, start = bannerStartPad, end = 20.dp)
             ) {
                 IncomingCallBanner(
                     callState = activeCall,
@@ -1082,6 +1120,7 @@ fun DxCarRootScreen(
                         gestureHudText = "✓ 創建分屏捷徑成功：${shortcut.label} (${shortcut.ratio.label})"
                     },
                     onTestLaunchShortcut = ::dispatchSplitShortcutWithDockOffsets,
+                    onPickSystemShortcut = onPickStockSystemShortcut,
                     onDismiss = { showSplitCreator = false }
                 )
             }
@@ -1149,6 +1188,7 @@ private fun CoolwalkSplitDashboard(
     onOpenFullscreenMap: () -> Unit,
     onLaunchRealGoogleMaps: (String?) -> Unit,
     onLaunchRealMapsSplit: () -> Unit,
+    onVoiceNavClick: () -> Unit = {},
     onWeatherClick: () -> Unit,
     onMediaPlayPause: () -> Unit,
     onMediaNext: () -> Unit,
@@ -1263,7 +1303,8 @@ private fun CoolwalkSplitDashboard(
                         onSwapRequested = onSwapPanes,
                         onToggleFullscreen = onOpenFullscreenMap,
                         onLaunchGoogleMapsApp = onLaunchRealGoogleMaps,
-                        onLaunchRealMapsSplit = onLaunchRealMapsSplit
+                        onLaunchRealMapsSplit = onLaunchRealMapsSplit,
+                        onVoiceNavClick = onVoiceNavClick
                     )
                 }
             }

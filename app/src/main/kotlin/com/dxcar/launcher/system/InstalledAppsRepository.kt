@@ -370,6 +370,18 @@ class InstalledAppsRepository(private val context: Context) {
         dockOffsetBottomPx: Int = 0
     ) {
         scope.launch(Dispatchers.Main) {
+            if (shortcut.engine == SplitLaunchEngine.STOCK_LAUNCHER_SHORTCUT ||
+                shortcut.stockIntentUri.isNotBlank() ||
+                shortcut.stockShortcutId.isNotBlank()
+            ) {
+                val stockLaunched = StockSplitScreenBridge.launchStockSplitShortcut(context, shortcut)
+                if (stockLaunched) {
+                    recordRecent(shortcut.leftPackage)
+                    recordRecent(shortcut.rightPackage)
+                    return@launch
+                }
+            }
+
             if (shortcut.engine == SplitLaunchEngine.FREEFORM_EXACT_RATIO) {
                 val availW = (screenWidthPx - dockOffsetLeftPx - dockOffsetRightPx).coerceAtLeast(400)
                 val availH = (screenHeightPx - dockOffsetTopPx - dockOffsetBottomPx).coerceAtLeast(300)
@@ -393,15 +405,18 @@ class InstalledAppsRepository(private val context: Context) {
     suspend fun launchAospDraggableSplitPair(leftPackage: String, rightPackage: String) {
         val acc = DxCarAccessibilityService.instance
 
-        // Stage 1: Try direct AOSP WINDOWING_MODE_SPLIT_SCREEN_PRIMARY (3)
-        val stage1PrimaryStarted = tryLaunchInAospSplitStage(leftPackage, primaryStage = true)
-        if (stage1PrimaryStarted) {
-            delay(480L)
-            if (acc?.isSystemInSplitScreenNow() == true) {
-                tryLaunchInAospSplitStage(rightPackage, primaryStage = false)
-                recordRecent(leftPackage)
-                recordRecent(rightPackage)
-                return
+        // Stage 1: Direct AOSP WINDOWING_MODE_SPLIT_SCREEN_PRIMARY (3) works on Android 9/10/11 (API <= 30).
+        // On Android 12L/13/14+ (API >= 31), WMShell StageCoordinator deprecated mode 3/4, so we skip straight to Stage 2.
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.R) {
+            val stage1PrimaryStarted = tryLaunchInAospSplitStage(leftPackage, primaryStage = true)
+            if (stage1PrimaryStarted) {
+                delay(480L)
+                if (acc?.isSystemInSplitScreenNow() == true) {
+                    tryLaunchInAospSplitStage(rightPackage, primaryStage = false)
+                    recordRecent(leftPackage)
+                    recordRecent(rightPackage)
+                    return
+                }
             }
         }
 
@@ -423,20 +438,23 @@ class InstalledAppsRepository(private val context: Context) {
         }
 
         // Wait until leftPackage genuinely becomes the foreground window (never split CATEGORY_HOME!)
-        val deadline = System.currentTimeMillis() + 2_000L
+        val deadline = System.currentTimeMillis() + 2_200L
         while (System.currentTimeMillis() < deadline) {
             if (DxCarAccessibilityService.foregroundPackage.value == leftPackage) break
             delay(80L)
         }
-        delay(280L)
+        delay(320L)
 
         // Trigger AOSP Split-Screen (GlobalAction first, then AOSP Recents Split-Screen button fallback)
         acc.enterAospSplitScreenFromCurrentApp()
-        delay(380L)
+        delay(420L)
 
-        // Fill secondary stage with rightPackage
-        val rightLaunched = tryLaunchInAospSplitStage(rightPackage, primaryStage = false) ||
+        // Fill secondary stage cleanly via FLAG_ACTIVITY_LAUNCH_ADJACENT (avoid mode 4 on API 31+ which cancels WMShell split!)
+        val rightLaunched = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.R) {
+            tryLaunchInAospSplitStage(rightPackage, primaryStage = false) || launchPackageAdjacent(rightPackage)
+        } else {
             launchPackageAdjacent(rightPackage)
+        }
         if (!rightLaunched) {
             launchAppFullscreen(rightPackage, forceFullscreenWindowMode = false)
         }
