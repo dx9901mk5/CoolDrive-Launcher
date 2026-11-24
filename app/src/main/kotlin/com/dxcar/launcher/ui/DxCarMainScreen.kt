@@ -595,35 +595,18 @@ fun DxCarRootScreen(
             }
 
             val stageContent: @Composable (Modifier) -> Unit = { stageMod ->
-                AnimatedContent(
-                    targetState = destination,
-                    transitionSpec = {
-                        when (targetState) {
-                            LauncherDestination.APP_DRAWER ->
-                                (slideInVertically(
-                                    animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow),
-                                    initialOffsetY = { it / 6 }
-                                ) + scaleIn(initialScale = 0.95f, animationSpec = tween(220)) + fadeIn(tween(200))) togetherWith
-                                    (scaleOut(targetScale = 0.96f, animationSpec = tween(160)) + fadeOut(tween(150)))
+                Box(modifier = stageMod) {
+                    // Keep DASHBOARD_SPLIT permanently mounted so Page 2 YouTube & MapView
+                    // NEVER reload when opening App Drawer / Settings or pressing Dock Home!
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(if (destination == LauncherDestination.DASHBOARD_SPLIT) 1f else 0f)
+                    ) {
+                        val startLatFallback = if (location.latitude != 0.0) location.latitude else config.lastKnownLat
+                        val startLonFallback = if (location.longitude != 0.0) location.longitude else config.lastKnownLon
 
-                            LauncherDestination.SETTINGS ->
-                                (scaleIn(initialScale = 0.94f, animationSpec = tween(240)) + fadeIn(tween(200))) togetherWith
-                                    (scaleOut(targetScale = 0.96f, animationSpec = tween(160)) + fadeOut(tween(150)))
-
-                            else ->
-                                (scaleIn(initialScale = 0.97f, animationSpec = tween(220)) + fadeIn(tween(200))) togetherWith
-                                    (scaleOut(targetScale = 0.97f, animationSpec = tween(160)) + fadeOut(tween(150)))
-                        }
-                    },
-                    label = "stageTransition",
-                    modifier = stageMod
-                ) { targetDest ->
-                    when (targetDest) {
-                        LauncherDestination.DASHBOARD_SPLIT -> {
-                            val startLatFallback = if (location.latitude != 0.0) location.latitude else config.lastKnownLat
-                            val startLonFallback = if (location.longitude != 0.0) location.longitude else config.lastKnownLon
-
-                            InfiniteLoopTwoPageDashboard(
+                        InfiniteLoopTwoPageDashboard(
                                 currentPage = currentDashboardPage,
                                 onPageChanged = { nextPage ->
                                     currentDashboardPage = nextPage
@@ -839,7 +822,26 @@ fun DxCarRootScreen(
                                     )
                                 }
                             )
-                        }
+                    }
+
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = destination != LauncherDestination.DASHBOARD_SPLIT,
+                        enter = scaleIn(initialScale = 0.96f, animationSpec = tween(220)) + fadeIn(tween(180)),
+                        exit = scaleOut(targetScale = 0.97f, animationSpec = tween(160)) + fadeOut(tween(150)),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(2f)
+                            .background(colors.canvasBackground)
+                    ) {
+                        AnimatedContent(
+                            targetState = destination,
+                            label = "overlayStageTransition",
+                            modifier = Modifier.fillMaxSize()
+                        ) { targetDest ->
+                            when (targetDest) {
+                                LauncherDestination.DASHBOARD_SPLIT -> {
+                                    Box(Modifier.fillMaxSize())
+                                }
 
                         LauncherDestination.FULLSCREEN_MAP -> {
                             val startLatFallback = if (location.latitude != 0.0) location.latitude else config.lastKnownLat
@@ -1060,6 +1062,8 @@ fun DxCarRootScreen(
                                 },
                                 onClose = { destination = LauncherDestination.APP_DRAWER }
                             )
+                        }
+                    }
                         }
                     }
                 }
