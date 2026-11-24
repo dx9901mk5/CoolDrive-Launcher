@@ -89,6 +89,8 @@ class SystemStatusMonitor(private val context: Context) {
     private val dateFmt = DateTimeFormatter.ofPattern("M月d日 E", Locale.TRADITIONAL_CHINESE)
 
     private var started = false
+    private var hasInitializedBtCheck = false
+    private var lastBtConnected = false
     private val activeAclDevices = LinkedHashMap<String, String>()
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
@@ -229,6 +231,8 @@ class SystemStatusMonitor(private val context: Context) {
     fun refreshBluetoothState() {
         val adapter = bluetoothManager?.adapter
         if (adapter == null) {
+            hasInitializedBtCheck = true
+            lastBtConnected = false
             _status.value = _status.value.copy(
                 bluetoothEnabled = false,
                 bluetoothConnected = false,
@@ -239,6 +243,8 @@ class SystemStatusMonitor(private val context: Context) {
 
         val enabled = runCatching { adapter.isEnabled }.getOrDefault(false)
         if (!enabled) {
+            hasInitializedBtCheck = true
+            lastBtConnected = false
             _status.value = _status.value.copy(
                 bluetoothEnabled = false,
                 bluetoothConnected = false,
@@ -254,6 +260,8 @@ class SystemStatusMonitor(private val context: Context) {
             ) == PackageManager.PERMISSION_GRANTED
 
         if (!hasBtPermission) {
+            hasInitializedBtCheck = true
+            lastBtConnected = false
             _status.value = _status.value.copy(
                 bluetoothEnabled = true,
                 bluetoothConnected = false,
@@ -343,11 +351,20 @@ class SystemStatusMonitor(private val context: Context) {
             }
         }
 
+        val prevConnected = lastBtConnected
+        val firstRun = !hasInitializedBtCheck
+        hasInitializedBtCheck = true
+        lastBtConnected = connected
+
         _status.value = _status.value.copy(
             bluetoothEnabled = true,
             bluetoothConnected = connected,
             connectedBtName = connectedName
         )
+
+        if (connected && ((!prevConnected && !firstRun) || (firstRun && !_status.value.wifiConnected))) {
+            WifiHotspotFastRestarter.onPhoneBluetoothConnected(context, connectedName)
+        }
     }
 
     @SuppressLint("MissingPermission")

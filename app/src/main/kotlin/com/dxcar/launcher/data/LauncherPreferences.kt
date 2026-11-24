@@ -238,6 +238,7 @@ data class LauncherConfig(
     val companionTargetDeviceAddress: String = "",
     val companionTargetDeviceName: String = "",
     val companionAutoConnect: Boolean = true,
+    val autoCycleWifiOnBtConnect: Boolean = true,
     val companionSyncAllApps: Boolean = false,
     val companionAllowedPackages: List<String> = DEFAULT_COMPANION_PACKAGES,
     val quickReplies: List<String> = DEFAULT_QUICK_REPLIES,

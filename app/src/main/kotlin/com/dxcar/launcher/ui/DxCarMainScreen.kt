@@ -108,6 +108,7 @@ import com.dxcar.launcher.overlay.RemoteCarMousePointerOverlay
 import com.dxcar.launcher.system.InstalledAppInfo
 import com.dxcar.launcher.system.PermissionHelper
 import com.dxcar.launcher.system.SystemStatusMonitor
+import com.dxcar.launcher.system.WifiHotspotFastRestarter
 import com.dxcar.launcher.theme.DayNightEngine
 import com.dxcar.launcher.theme.DxCarTheme
 import com.dxcar.launcher.theme.LocalDxCarColors
@@ -160,6 +161,7 @@ fun DxCarRootScreen(
     val cursor3DTutorial by Cursor3DStateHolder.showTutorial.collectAsState()
     val remoteCursor by RemoteTouchpadController.cursorState.collectAsState()
     val remoteSwapSeq by RemoteTouchpadController.swapHomePanesSeq.collectAsState()
+    val wifiCycleEvent by WifiHotspotFastRestarter.statusEvent.collectAsState()
 
     // Auto-detect Smartphone vs AI Box Car Head Unit on first launch when not pinned by user
     LaunchedEffect(configuration.screenWidthDp, configuration.screenHeightDp, config.roleUserPinned) {
@@ -208,6 +210,13 @@ fun DxCarRootScreen(
         if (!externalHudMessage.isNullOrBlank()) {
             gestureHudText = externalHudMessage
             onExternalHudConsumed()
+        }
+    }
+
+    LaunchedEffect(wifiCycleEvent) {
+        if (!wifiCycleEvent.isNullOrBlank()) {
+            gestureHudText = wifiCycleEvent
+            WifiHotspotFastRestarter.consumeStatusEvent()
         }
     }
 
@@ -959,6 +968,9 @@ fun DxCarRootScreen(
                                 onStartVoiceNavigation = {
                                     destination = LauncherDestination.DASHBOARD_SPLIT
                                     onStartGeminiVoiceNav()
+                                },
+                                onTestWifiHotspotCycle = {
+                                    WifiHotspotFastRestarter.forceCycleSystemWifi(context, "手動測試")
                                 },
                                 onUpdateConfig = { transform -> app.preferences.update(transform) },
                                 onRequestSetDefaultHome = {

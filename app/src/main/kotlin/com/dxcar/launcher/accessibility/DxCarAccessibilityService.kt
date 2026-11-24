@@ -209,6 +209,59 @@ class DxCarAccessibilityService : AccessibilityService() {
         return false
     }
 
+    /**
+     * Finds and clicks the master Wi-Fi Switch inside `Settings.Panel.ACTION_WIFI` or `ACTION_WIFI_SETTINGS`
+     * so Android 10–15 AI Boxes that block `WifiManager.setWifiEnabled` can still automatically cycle Wi-Fi OFF -> ON!
+     */
+    fun clickWifiMasterSwitchInSettings(expectCurrentlyChecked: Boolean): Boolean {
+        val roots = collectNonSelfRoots().filter { r ->
+            val pkg = r.packageName?.toString()?.lowercase().orEmpty()
+            pkg.contains("settings") || pkg.contains("systemui") || pkg.contains("wifi") || pkg.contains("car")
+        }.ifEmpty { collectNonSelfRoots() }
+
+        val wifiWords = listOf("wi-fi", "wifi", "wlan", "無線網路", "使用 wi-fi", "開啟")
+
+        for (root in roots) {
+            // 1. Prefer an explicit checkable Switch matching expected state near a Wi-Fi label or main_switch_bar
+            val matchedSwitch = searchNodeRecursive(root) { node ->
+                val id = node.viewIdResourceName?.lowercase().orEmpty()
+                val cls = node.className?.toString()?.lowercase().orEmpty()
+                val isSwitchLike = node.isCheckable || cls.contains("switch") || cls.contains("toggle") ||
+                    id.contains("switch_widget") || id.contains("switch_bar") || id.contains("main_switch")
+                if (!isSwitchLike) return@searchNodeRecursive false
+                if (node.isCheckable && node.isChecked != expectCurrentlyChecked) return@searchNodeRecursive false
+
+                val selfText = "${node.text ?: ""} ${node.contentDescription ?: ""}".lowercase()
+                val parentText = buildString {
+                    val p = node.parent
+                    if (p != null) {
+                        append(p.text ?: "").append(' ').append(p.contentDescription ?: "")
+                        for (i in 0 until p.childCount.coerceAtMost(6)) {
+                            val c = runCatching { p.getChild(i) }.getOrNull() ?: continue
+                            append(' ').append(c.text ?: "").append(' ').append(c.contentDescription ?: "")
+                        }
+                    }
+                }.lowercase()
+
+                id.contains("switch_bar") || id.contains("main_switch") ||
+                    wifiWords.any { kw -> selfText.contains(kw) || parentText.contains(kw) }
+            }
+            if (matchedSwitch != null && performClickUpHierarchy(matchedSwitch)) {
+                return true
+            }
+
+            // 2. Fallback: topmost checkable Switch inside the Wi-Fi Panel / Wi-Fi Settings window
+            val topSwitch = searchNodeRecursive(root) { node ->
+                val cls = node.className?.toString()?.lowercase().orEmpty()
+                node.isCheckable && node.isChecked == expectCurrentlyChecked && cls.contains("switch")
+            }
+            if (topSwitch != null && performClickUpHierarchy(topSwitch)) {
+                return true
+            }
+        }
+        return false
+    }
+
     // ==================== SINGLE-TOUCH / REMOTE MOUSE / 3D GESTURE INJECTION ====================
 
     fun dispatchSingleTap(x: Float, y: Float, onDone: ((Boolean) -> Unit)? = null): Boolean {

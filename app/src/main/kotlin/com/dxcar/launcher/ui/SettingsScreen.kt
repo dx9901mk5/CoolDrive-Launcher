@@ -139,6 +139,7 @@ fun SettingsScreen(
     onDownloadOfflineRegion: (String) -> Unit = {},
     onCancelOfflineDownload: () -> Unit = {},
     onStartVoiceNavigation: () -> Unit = {},
+    onTestWifiHotspotCycle: () -> Unit = {},
     onUpdateConfig: ((LauncherConfig) -> LauncherConfig) -> Unit,
     onRequestSetDefaultHome: () -> Unit,
     onSwitchToLauncher: (HomeLauncherInfo) -> Unit,
@@ -996,6 +997,13 @@ fun SettingsScreen(
                         }
 
                         SettingsToggleRow(
+                            title = "偵測到手機連上藍牙時，強制關閉再開啟 Wi-Fi（加速連入熱點）",
+                            subtitle = "一上車連上藍牙即自動重啟系統 Wi-Fi 立即掃描並連入手機熱點（預設開啟）",
+                            checked = config.autoCycleWifiOnBtConnect,
+                            onCheckedChange = { checked -> onUpdateConfig { it.copy(autoCycleWifiOnBtConnect = checked) } }
+                        )
+
+                        SettingsToggleRow(
                             title = "全螢幕導航／看影片時彈出頂部來電與訊息橫幅",
                             subtitle = "支援接聽、掛斷、快速回覆與語音回覆",
                             checked = config.globalCallMessageBannerEnabled,
@@ -1010,6 +1018,9 @@ fun SettingsScreen(
                         )
 
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = onTestWifiHotspotCycle, shape = RoundedCornerShape(12.dp)) {
+                                Text("📶 測試重啟 Wi-Fi 連熱點", fontSize = 12.sp)
+                            }
                             OutlinedButton(onClick = onSimulateCall, shape = RoundedCornerShape(12.dp)) {
                                 Text("測試來電橫幅", fontSize = 12.sp)
                             }
