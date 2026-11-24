@@ -12,8 +12,20 @@ android {
     applicationId = "com.dxcar.launcher"
     minSdk = 28
     targetSdk = 35
-    versionCode = 19
-    versionName = "1.6.0"
+    versionCode = 20
+    versionName = "1.6.1"
+  }
+
+  flavorDimensions += "channel"
+  productFlavors {
+    create("direct") {
+      dimension = "channel"
+      buildConfigField("boolean", "ENABLE_GITHUB_AUTO_UPDATE", "true")
+    }
+    create("play") {
+      dimension = "channel"
+      buildConfigField("boolean", "ENABLE_GITHUB_AUTO_UPDATE", "false")
+    }
   }
 
   signingConfigs {

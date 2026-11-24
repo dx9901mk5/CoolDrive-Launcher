@@ -1157,6 +1157,70 @@ fun SettingsScreen(
                         title = str("七天試用買斷、GitHub 主頁與恢復預設", "Trial, Pro Unlock, GitHub & Reset", "トライアル・買い切り・GitHub・初期化"),
                         modifier = mod
                     ) {
+                        if (BuildConfig.ENABLE_GITHUB_AUTO_UPDATE) {
+                            SettingsToggleRow(
+                                title = str("啟動時自動檢測並下載新版 APK", "Auto-Check & Download Updates", "起動時に自動で更新を確認・取得"),
+                                subtitle = str(
+                                    "目前版本：v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})",
+                                    "Current: v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})",
+                                    "現在: v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})"
+                                ),
+                                checked = config.autoCheckAndDownloadUpdate,
+                                onCheckedChange = { checked -> onUpdateConfig { it.copy(autoCheckAndDownloadUpdate = checked) } }
+                            )
+                            if (updateState.statusMessage.isNotBlank()) {
+                                Text(
+                                    text = updateState.statusMessage,
+                                    color = if (updateState.hasUpdate || updateState.downloadedReady) colors.accent else colors.secondaryText,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = onCheckUpdateNow,
+                                    enabled = !updateState.checking && !updateState.downloading,
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Text(
+                                        if (updateState.checking) str("檢查中…", "Checking…", "確認中…")
+                                        else str("檢查更新", "Check Updates", "更新を確認")
+                                    )
+                                }
+                                if (updateState.hasUpdate || updateState.downloadedReady) {
+                                    Button(
+                                        onClick = onDownloadOrInstallUpdate,
+                                        enabled = !updateState.downloading,
+                                        colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                        shape = RoundedCornerShape(14.dp)
+                                    ) {
+                                        Text(
+                                            when {
+                                                updateState.downloadedReady -> str("立即安裝 v${updateState.latestVersion}", "Install v${updateState.latestVersion}", "今すぐインストール v${updateState.latestVersion}")
+                                                updateState.downloading -> str("下載中 ${(updateState.progress * 100).toInt()}%", "Downloading ${(updateState.progress * 100).toInt()}%", "ダウンロード中 ${(updateState.progress * 100).toInt()}%")
+                                                else -> str("下載更新", "Download Update", "更新をダウンロード")
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                            if (updateState.downloading) {
+                                if (updateState.totalBytes > 0L) {
+                                    LinearProgressIndicator(
+                                        progress = { updateState.progress },
+                                        color = colors.accent,
+                                        trackColor = colors.cardBorder,
+                                        modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp))
+                                    )
+                                } else {
+                                    LinearProgressIndicator(
+                                        color = colors.accent,
+                                        trackColor = colors.cardBorder,
+                                        modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp))
+                                    )
+                                }
+                            }
+                        }
+
                         Surface(
                             color = colors.cardSurfaceElevated,
                             shape = RoundedCornerShape(16.dp),

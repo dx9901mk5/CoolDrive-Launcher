@@ -279,6 +279,13 @@ fun DxCarRootScreen(
         app.billingTrialManager.refreshTrialClock()
     }
 
+    LaunchedEffect(config.autoCheckAndDownloadUpdate) {
+        if (com.dxcar.launcher.BuildConfig.ENABLE_GITHUB_AUTO_UPDATE && config.autoCheckAndDownloadUpdate) {
+            delay(2_500L)
+            app.updateManager.checkForUpdate(autoDownload = true)
+        }
+    }
+
     val dm = context.resources.displayMetrics
     val screenMetrics = remember(configuration.screenWidthDp, configuration.screenHeightDp, configuration.densityDpi, dm.widthPixels, dm.heightPixels) {
         ScreenMetrics(
@@ -439,8 +446,20 @@ fun DxCarRootScreen(
                 permissionHealth = permissionHealth,
                 updateState = updateState,
                 billingState = billingState,
-                onCheckUpdate = { },
-                onDownloadOrInstallUpdate = { },
+                onCheckUpdate = {
+                    if (com.dxcar.launcher.BuildConfig.ENABLE_GITHUB_AUTO_UPDATE) {
+                        scope.launch { app.updateManager.checkForUpdate(autoDownload = false) }
+                    }
+                },
+                onDownloadOrInstallUpdate = {
+                    if (com.dxcar.launcher.BuildConfig.ENABLE_GITHUB_AUTO_UPDATE) {
+                        if (updateState.downloadedReady) {
+                            app.updateManager.installDownloadedApk()
+                        } else {
+                            scope.launch { app.updateManager.downloadAndInstall(autoLaunchInstaller = true) }
+                        }
+                    }
+                },
                 onPurchasePro = {
                     (context as? android.app.Activity)?.let { act ->
                         app.billingTrialManager.launchPurchaseFlow(act)
@@ -1005,8 +1024,22 @@ fun DxCarRootScreen(
                                 onRequestRuntimePermissions = onRequestRuntimePermissions,
                                 onSimulateCall = { app.notificationCenter.triggerSimulatedCall() },
                                 onSimulateMessage = { app.notificationCenter.triggerSimulatedMessage() },
-                                onCheckUpdateNow = { },
-                                onDownloadOrInstallUpdate = { },
+                                onCheckUpdateNow = {
+                                    if (com.dxcar.launcher.BuildConfig.ENABLE_GITHUB_AUTO_UPDATE) {
+                                        scope.launch {
+                                            app.updateManager.checkForUpdate(autoDownload = config.autoCheckAndDownloadUpdate)
+                                        }
+                                    }
+                                },
+                                onDownloadOrInstallUpdate = {
+                                    if (com.dxcar.launcher.BuildConfig.ENABLE_GITHUB_AUTO_UPDATE) {
+                                        if (updateState.downloadedReady) {
+                                            app.updateManager.installDownloadedApk()
+                                        } else {
+                                            scope.launch { app.updateManager.downloadAndInstall(autoLaunchInstaller = true) }
+                                        }
+                                    }
+                                },
                                 onPurchasePro = {
                                     (context as? android.app.Activity)?.let { act ->
                                         app.billingTrialManager.launchPurchaseFlow(act)
@@ -1077,6 +1110,72 @@ fun DxCarRootScreen(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(Icons.Rounded.Apps, contentDescription = "展開 App 選單", tint = colors.primaryText, modifier = Modifier.size(26.dp))
+                    }
+                }
+            }
+
+            // AUTO-UPDATE BANNER (GitHub direct flavor only)
+            AnimatedVisibility(
+                visible = com.dxcar.launcher.BuildConfig.ENABLE_GITHUB_AUTO_UPDATE &&
+                    (updateState.downloading || updateState.downloadedReady) &&
+                    destination == LauncherDestination.DASHBOARD_SPLIT,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) 84.dp else 16.dp)
+            ) {
+                Surface(
+                    color = colors.accent,
+                    shape = RoundedCornerShape(22.dp),
+                    shadowElevation = 10.dp,
+                    modifier = Modifier.bouncyClickable(pressedScale = 0.93f) {
+                        if (updateState.downloadedReady) {
+                            app.updateManager.installDownloadedApk()
+                        }
+                    }
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.CloudDownload, contentDescription = null, tint = colors.onAccent)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = if (updateState.downloadedReady) {
+                                    com.dxcar.launcher.i18n.DxCarI18n.str(
+                                        "新版本 v${updateState.latestVersion} 已下載完成 · 點擊立即安裝",
+                                        "新版本 v${updateState.latestVersion} 已下载完成 · 点击立即安装",
+                                        "v${updateState.latestVersion} ready · Tap to install",
+                                        "v${updateState.latestVersion} 準備完了 · タップして更新"
+                                    )
+                                } else {
+                                    updateState.statusMessage.ifBlank {
+                                        com.dxcar.launcher.i18n.DxCarI18n.str("正在下載更新…", "正在下载更新…", "Downloading update…", "更新をダウンロード中…")
+                                    }
+                                },
+                                color = colors.onAccent,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        if (updateState.downloading) {
+                            if (updateState.totalBytes > 0L) {
+                                LinearProgressIndicator(
+                                    progress = { updateState.progress },
+                                    color = colors.onAccent,
+                                    trackColor = colors.onAccent.copy(alpha = 0.28f),
+                                    modifier = Modifier.width(240.dp).height(5.dp).clip(RoundedCornerShape(3.dp))
+                                )
+                            } else {
+                                LinearProgressIndicator(
+                                    color = colors.onAccent,
+                                    trackColor = colors.onAccent.copy(alpha = 0.28f),
+                                    modifier = Modifier.width(240.dp).height(5.dp).clip(RoundedCornerShape(3.dp))
+                                )
+                            }
+                        }
                     }
                 }
             }

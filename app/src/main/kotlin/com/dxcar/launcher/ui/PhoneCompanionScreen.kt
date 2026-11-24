@@ -844,6 +844,60 @@ fun PhoneCompanionScreen(
                             }
                         }
                     }
+                    if (BuildConfig.ENABLE_GITHUB_AUTO_UPDATE) {
+                        if (updateState.statusMessage.isNotBlank()) {
+                            Text(
+                                text = updateState.statusMessage,
+                                color = if (updateState.hasUpdate || updateState.downloadedReady) colors.accent else colors.secondaryText,
+                                fontSize = 12.sp
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = onCheckUpdate,
+                                enabled = !updateState.checking && !updateState.downloading,
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Text(
+                                    if (updateState.checking) str("檢查中…", "Checking…", "確認中…")
+                                    else str("檢查 GitHub 更新", "Check Updates", "更新を確認")
+                                )
+                            }
+                            if (updateState.hasUpdate || updateState.downloadedReady || updateState.downloading) {
+                                Button(
+                                    onClick = onDownloadOrInstallUpdate,
+                                    enabled = !updateState.downloading,
+                                    colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Text(
+                                        when {
+                                            updateState.downloadedReady -> str("立即安裝 v${updateState.latestVersion}", "Install v${updateState.latestVersion}", "今すぐインストール v${updateState.latestVersion}")
+                                            updateState.downloading -> str("下載中 ${(updateState.progress * 100).toInt()}%", "Downloading ${(updateState.progress * 100).toInt()}%", "ダウンロード中 ${(updateState.progress * 100).toInt()}%")
+                                            else -> str("下載更新 v${updateState.latestVersion}", "Download v${updateState.latestVersion}", "更新 v${updateState.latestVersion}")
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        if (updateState.downloading) {
+                            if (updateState.totalBytes > 0L) {
+                                LinearProgressIndicator(
+                                    progress = { updateState.progress },
+                                    color = colors.accent,
+                                    trackColor = colors.cardBorder,
+                                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp))
+                                )
+                            } else {
+                                LinearProgressIndicator(
+                                    color = colors.accent,
+                                    trackColor = colors.cardBorder,
+                                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp))
+                                )
+                            }
+                        }
+                    }
+
                     OutlinedButton(
                         onClick = {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(com.dxcar.launcher.update.UpdateManager.GITHUB_URL))
