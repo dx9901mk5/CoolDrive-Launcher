@@ -1,5 +1,22 @@
 package com.dxcar.launcher.ui
 
+import android.app.Activity
+import android.content.Context
+import android.os.Build
+import android.os.VibrationAttributes
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.view.HapticFeedbackConstants
+import android.view.View
+import android.view.WindowManager
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,11 +29,14 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -25,6 +45,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.BluetoothConnected
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -35,7 +56,9 @@ import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Mouse
 import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.TouchApp
@@ -54,7 +77,9 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -62,18 +87,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -97,15 +126,48 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.abs
 import kotlin.math.hypot
 
 /**
- * Categorized Smartphone Companion Screen:
- * - Top bar houses compact "🛡️ 權限設定 (X/3)" pill button -> opens Phone Permissions sheet!
- * - Prominent "📖 教學" button opens Extra-Large Font (26sp/22sp) setup & troubleshooting guide.
- * - Phone-Exclusive Feature ("限定給手機"): Live Car Mouse Touchpad + button that pops up the
- *   Pointer Speed / Mouse Sensitivity settings directly on the Car AI Box screen!
+ * Fires a crisp, unmistakable hardware motor click vibration on the smartphone
+ * (uses VibratorManager + USAGE_HARDWARE_FEEDBACK so it works reliably on vivo / Samsung / Pixel / Xiaomi
+ * even when system touch-sound haptics are muted!).
  */
+private fun triggerPhoneConfirmVibration(context: Context, view: View, heavy: Boolean = false) {
+    runCatching {
+        @Suppress("DEPRECATION")
+        view.performHapticFeedback(
+            if (heavy) HapticFeedbackConstants.LONG_PRESS else HapticFeedbackConstants.KEYBOARD_TAP,
+            HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+        )
+    }
+    runCatching {
+        val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+            vm?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        }
+        if (vibrator?.hasVibrator() == true) {
+            val effect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                VibrationEffect.createPredefined(
+                    if (heavy) VibrationEffect.EFFECT_HEAVY_CLICK else VibrationEffect.EFFECT_CLICK
+                )
+            } else {
+                VibrationEffect.createOneShot(if (heavy) 48L else 28L, if (heavy) 230 else 190)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val attrs = VibrationAttributes.createForUsage(VibrationAttributes.USAGE_HARDWARE_FEEDBACK)
+                vibrator.vibrate(effect, attrs)
+            } else {
+                vibrator.vibrate(effect)
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PhoneCompanionScreen(
@@ -134,12 +196,14 @@ fun PhoneCompanionScreen(
     var touchpadTip by remember { mutableStateOf("") }
     var showPermissionsSheet by remember { mutableStateOf(false) }
     var showLargeTutorial by remember { mutableStateOf(false) }
+    var showFullscreenTouchpad by remember { mutableStateOf(false) }
 
     val allowModeSwitch = DeviceFormFactor.isTabletOrExpandedScreen(configuration)
     val isPhoneExclusive = DeviceFormFactor.isPhoneDevice(configuration)
     val listenerAlive = bridgeStatus.isListenerBound || BoxNotificationListenerService.instance != null
     val (grantedPerms, totalPerms) = remember(permissionHealth) { permissionHealth.summaryForPhone() }
     val allPermsOk = grantedPerms == totalPerms
+    val isConnected = bridgeStatus.status == BridgeConnectionStatus.CONNECTED
 
     DisposableEffect(lifecycleOwner) {
         val obs = LifecycleEventObserver { _, event ->
@@ -150,6 +214,21 @@ fun PhoneCompanionScreen(
         }
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
+    fun requestCarPointerSpeedSettings() {
+        val ok = BluetoothCompanionService.sendPacketFromPhone(
+            BridgePacket(
+                type = PacketType.TOUCHPAD_EVENT,
+                id = UUID.randomUUID().toString(),
+                touchAction = TouchpadAction.OPEN_POINTER_SPEED_SETTINGS
+            )
+        )
+        touchpadTip = if (ok) {
+            "✓ 已送出指令！車機螢幕已跳出「滑鼠／指標速度（靈敏度）」設定頁"
+        } else {
+            "⚠️ 尚未連上車機，請確認上方顯示「已連線同步中」"
+        }
     }
 
     val knownApps = listOf(
@@ -202,7 +281,6 @@ fun PhoneCompanionScreen(
                     )
                 }
 
-                // Compact Top Bar: Permissions Pill Button + Optional Tablet/Foldable Mode Switch
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -260,7 +338,6 @@ fun PhoneCompanionScreen(
                 hint = "連上車機藍牙或開啟手機熱點自動直連；無須手動輸入 IP"
             )
 
-            val isConnected = bridgeStatus.status == BridgeConnectionStatus.CONNECTED
             Surface(
                 color = colors.cardSurface,
                 shape = RoundedCornerShape(22.dp),
@@ -381,7 +458,7 @@ fun PhoneCompanionScreen(
                                 testSentTip = if (ok) {
                                     "✓ 已送出測試通知至車機！請看車機上方橫幅或鈴鐺"
                                 } else {
-                                    "⏳ 已排入傳送佇列並喚醒連線：請確認車機已安裝開啟 v1.5.0+ 且連上同一藍牙或熱點"
+                                    "⏳ 已排入傳送佇列並喚醒連線：請確認車機已安裝開啟新版且連上同一藍牙或熱點"
                                 }
                             },
                             shape = RoundedCornerShape(14.dp)
@@ -402,31 +479,19 @@ fun PhoneCompanionScreen(
                 }
             }
 
-            // ==================== CATEGORY 2: 手機限定 — 操控車機的滑鼠觸控板 ====================
+            // ==================== CATEGORY 2: 手機限定 — 全螢幕純黑 OLED 滑鼠觸控板啟動器 ====================
             if (isPhoneExclusive) {
                 PhoneCategoryLabel(
                     title = "分類二 · 車機遠端滑鼠觸控板（手機專屬）",
-                    hint = "在下方觸控區滑動即可操控車機畫面滑鼠游標、輕點＝左鍵點擊；點「車機滑鼠靈敏度設定」會直接在車機跳出系統設定畫面"
+                    hint = "點擊下方執行按鈕展開「全螢幕純黑 OLED 防鎖屏觸控板」（支援點擊清脆震動回饋與車機滑鼠靈敏度設定）"
                 )
 
-                PhoneRemoteCarTouchpadCard(
+                PhoneTouchpadLauncherCard(
                     sensitivity = config.phoneTouchpadSensitivity,
                     touchpadTip = touchpadTip,
+                    onLaunchFullscreenTouchpad = { showFullscreenTouchpad = true },
                     onSensitivityChange = onChangeTouchpadSensitivity,
-                    onOpenCarPointerSpeedSettings = {
-                        val ok = BluetoothCompanionService.sendPacketFromPhone(
-                            BridgePacket(
-                                type = PacketType.TOUCHPAD_EVENT,
-                                id = UUID.randomUUID().toString(),
-                                touchAction = TouchpadAction.OPEN_POINTER_SPEED_SETTINGS
-                            )
-                        )
-                        touchpadTip = if (ok) {
-                            "✓ 已傳送指令！車機螢幕已跳出「滑鼠／指標速度（靈敏度）」設定頁"
-                        } else {
-                            "⚠️ 尚未連上車機，請先確認上方顯示「已連線同步中」"
-                        }
-                    }
+                    onOpenCarPointerSpeedSettings = ::requestCarPointerSpeedSettings
                 )
             }
 
@@ -637,7 +702,7 @@ fun PhoneCompanionScreen(
             }
         }
 
-        // DEDICATED PHONE PERMISSIONS SHEET (Opened via Top Compact Permissions Button!)
+        // DEDICATED PHONE PERMISSIONS SHEET
         if (showPermissionsSheet) {
             Box(
                 modifier = Modifier
@@ -711,19 +776,35 @@ fun PhoneCompanionScreen(
             }
         }
 
-        // EXTRA-LARGE FONT TUTORIAL MODAL ("教學說明也是做一個按鈕，內容文字要特大")
+        // EXTRA-LARGE FONT TUTORIAL MODAL
         if (showLargeTutorial) {
             ExtraLargeTutorialModal(
-                title = "📖 手機與車機連線＆遠端滑鼠 · 教學",
+                title = "📖 手機與車機連線＆全螢幕滑鼠 · 教學",
                 steps = listOf(
                     "【重要】請先將「車機盒」與「手機」都更新到最新同一版本 APK！",
                     "點擊手機最上方【權限需求】按鈕，開啟「通知讀取權限」（若 vivo／三星／Pixel 顯示受限制設定，先點黃色提示去應用程式資訊右上角 ⋮ 點「允許受限制的設定」）、藍牙與忽略電池最佳化。",
                     "車機端同樣點設定最上方【權限需求】，開啟「顯示在其他應用程式上層」、「通知存取權」與「無障礙輔助服務」。",
                     "連線方式超簡單：只要手機藍牙連上車機盒（能接電話的狀態），或手機開 Wi-Fi 熱點給車機連網，兩邊就會自動連上並顯示綠色「已連線同步中」！",
-                    "連上後，在手機滑動「車機遠端滑鼠觸控板」即可操控車機游標；按「車機滑鼠靈敏度設定」，車機螢幕就會自動跳出系統滑鼠速度設定畫面！"
+                    "點擊下方【啟動全螢幕 OLED 車機滑鼠觸控板】，手機將進入純黑省電且「防止螢幕鎖定」的大面積滑鼠模式，點擊確認時手機會發出清脆震動回饋！"
                 ),
-                highlightNote = "💡 省電設計：下車斷開藍牙與熱點後，手機會自動退回 0% 耗電待機模式；下次發動上車即自動喚醒連線！",
+                highlightNote = "💡 離開全螢幕觸控板後，手機即恢復正常休眠；下車斷開藍牙與熱點自動退回 0% 耗電待機模式！",
                 onClose = { showLargeTutorial = false }
+            )
+        }
+
+        // FULLSCREEN PURE-BLACK OLED KEEP-SCREEN-ON TOUCHPAD MODE!
+        AnimatedVisibility(
+            visible = showFullscreenTouchpad,
+            enter = fadeIn(tween(180)),
+            exit = fadeOut(tween(140))
+        ) {
+            FullscreenOledCarTouchpad(
+                isConnected = isConnected,
+                peerName = bridgeStatus.peerName,
+                sensitivity = config.phoneTouchpadSensitivity,
+                onSensitivityChange = onChangeTouchpadSensitivity,
+                onOpenCarPointerSpeedSettings = ::requestCarPointerSpeedSettings,
+                onClose = { showFullscreenTouchpad = false }
             )
         }
     }
@@ -741,17 +822,168 @@ private fun PhoneCategoryLabel(title: String, hint: String) {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * Clean Launcher Card on the main Phone Companion scroll screen:
+ * Houses the big execution button to open the Fullscreen Pure-Black OLED Touchpad + Car Pointer Speed Settings button.
+ */
 @Composable
-private fun PhoneRemoteCarTouchpadCard(
+private fun PhoneTouchpadLauncherCard(
     sensitivity: Float,
     touchpadTip: String,
+    onLaunchFullscreenTouchpad: () -> Unit,
     onSensitivityChange: (Float) -> Unit,
     onOpenCarPointerSpeedSettings: () -> Unit
 ) {
     val colors = LocalDxCarColors.current
-    val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
+    val localView = LocalView.current
+
+    Surface(
+        color = colors.cardSurface,
+        shape = RoundedCornerShape(22.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.4.dp, colors.accent.copy(alpha = 0.65f), RoundedCornerShape(22.dp))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Mouse, contentDescription = null, tint = colors.accent, modifier = Modifier.size(24.dp))
+                Spacer(Modifier.width(8.dp))
+                Column {
+                    Text("操控車機滑鼠觸控板", color = colors.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("點擊下方執行鈕進入「全螢幕純黑 OLED 防鎖屏觸控模式」", color = colors.secondaryText, fontSize = 12.sp)
+                }
+            }
+
+            // BIG EXECUTION BUTTON -> Opens Fullscreen Pure-Black OLED Keep-Screen-On Touchpad!
+            Button(
+                onClick = {
+                    triggerPhoneConfirmVibration(context, localView, heavy = false)
+                    onLaunchFullscreenTouchpad()
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Black,
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(62.dp)
+                    .border(1.8.dp, colors.accent, RoundedCornerShape(18.dp))
+            ) {
+                Icon(Icons.Rounded.OpenInFull, contentDescription = null, tint = colors.accent, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = "啟動全螢幕滑鼠觸控板（OLED 純黑 · 防鎖屏）",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+
+            OutlinedButton(
+                onClick = {
+                    triggerPhoneConfirmVibration(context, localView, heavy = false)
+                    onOpenCarPointerSpeedSettings()
+                },
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("開啟車機系統「滑鼠靈敏度」設定（車機跳出畫面）", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+
+            if (touchpadTip.isNotBlank()) {
+                Text(touchpadTip, color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "移速倍率：${String.format(Locale.US, "%.1fx", sensitivity)}",
+                    color = colors.primaryText,
+                    fontSize = 12.sp,
+                    modifier = Modifier.width(105.dp)
+                )
+                Slider(
+                    value = sensitivity,
+                    onValueChange = { onSensitivityChange(it.coerceIn(0.6f, 3.0f)) },
+                    valueRange = 0.6f..3.0f,
+                    colors = SliderDefaults.colors(thumbColor = colors.accent, activeTrackColor = colors.accent),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Dedicated Fullscreen Pure-Black (#000000) OLED Car Mouse Touchpad:
+ * - Keeps smartphone screen awake (FLAG_KEEP_SCREEN_ON + keepScreenOn = true) until closed.
+ * - True #000000 pure black canvas for zero OLED power draw & zero night glare.
+ * - Crisp hardware motor vibration on every tap-confirm, left-click button, long-press & car action!
+ */
+@Composable
+private fun FullscreenOledCarTouchpad(
+    isConnected: Boolean,
+    peerName: String,
+    sensitivity: Float,
+    onSensitivityChange: (Float) -> Unit,
+    onOpenCarPointerSpeedSettings: () -> Unit,
+    onClose: () -> Unit
+) {
+    val context = LocalContext.current
+    val localView = LocalView.current
     val scope = rememberCoroutineScope()
+
+    var touchPoint by remember { mutableStateOf<Offset?>(null) }
+    var clickBurstSeq by remember { mutableLongStateOf(0L) }
+    var clickBurstPos by remember { mutableStateOf(Offset.Zero) }
+    var statusBanner by remember { mutableStateOf("單指滑動＝移動游標 · 輕點＝點擊確定（震動） · 長按＝車機長按") }
+
+    // Intercept system Back gesture to exit fullscreen touchpad cleanly
+    BackHandler(onBack = onClose)
+
+    // Keep Screen Awake (Prevent Screen Lock!) + Immersive Pure Black Bars while Fullscreen Touchpad is open!
+    DisposableEffect(localView) {
+        val activity = context as? Activity
+        val window = activity?.window
+        val prevKeepOn = localView.keepScreenOn
+        localView.keepScreenOn = true
+        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        val insetsController = if (window != null) {
+            WindowCompat.getInsetsController(window, window.decorView)
+        } else null
+        insetsController?.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        insetsController?.hide(WindowInsetsCompat.Type.systemBars())
+
+        onDispose {
+            localView.keepScreenOn = prevKeepOn
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            insetsController?.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    var showClickRing by remember { mutableStateOf(false) }
+    LaunchedEffect(clickBurstSeq) {
+        if (clickBurstSeq > 0L) {
+            showClickRing = true
+            delay(260L)
+            showClickRing = false
+        }
+    }
+    val ringScale by animateFloatAsState(
+        targetValue = if (showClickRing) 1.9f else 0.5f,
+        animationSpec = tween(250),
+        label = "oledClickRing"
+    )
 
     fun sendTouchAction(action: TouchpadAction, dx: Float = 0f, dy: Float = 0f) {
         BluetoothCompanionService.sendPacketFromPhone(
@@ -765,202 +997,424 @@ private fun PhoneRemoteCarTouchpadCard(
         )
     }
 
-    Surface(
-        color = colors.cardSurface,
-        shape = RoundedCornerShape(22.dp),
+    val oledDimBorder = Color(0xFF1E293B)
+    val oledSubtleText = Color(0xFF94A3B8)
+    val oledAccent = Color(0xFF38BDF8)
+
+    Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .border(1.2.dp, colors.accent.copy(alpha = 0.6f), RoundedCornerShape(22.dp))
+            .fillMaxSize()
+            .background(Color.Black) // 100% Pure OLED #000000 Black!
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(10.dp)
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
+            modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // TOP MINIMAL OLED BAR: Connection Dot + Speed -/+ + Car Sensitivity Jump + Exit Button
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Mouse, contentDescription = null, tint = colors.accent, modifier = Modifier.size(22.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(9.dp)
+                            .clip(CircleShape)
+                            .background(if (isConnected) Color(0xFF22C55E) else Color(0xFFF59E0B))
+                    )
                     Spacer(Modifier.width(8.dp))
-                    Text("操控車機滑鼠觸控板", color = colors.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (isConnected) {
+                            "防鎖屏滑鼠已連線 ${peerName.ifBlank { "AI Box" }}"
+                        } else {
+                            "防鎖屏開啟 · 等待車機連線…"
+                        },
+                        color = oledSubtleText,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
-            }
 
-            // Button on Phone that pops open the Car System Pointer Speed / Mouse Sensitivity Settings!
-            Button(
-                onClick = onOpenCarPointerSpeedSettings,
-                colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("開啟車機系統「滑鼠靈敏度」設定（車機跳出畫面）", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            }
-
-            if (touchpadTip.isNotBlank()) {
-                Text(touchpadTip, color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            }
-
-            // Interactive Multi-Gesture Touchpad Surface
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(215.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(colors.cardSurfaceElevated)
-                    .border(1.5.dp, colors.cardBorder, RoundedCornerShape(18.dp))
-                    .pointerInput(sensitivity) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            val downPos = down.position
-                            val downTime = System.currentTimeMillis()
-                            var lastPos = downPos
-                            var movedAny = false
-                            var longPressed = false
-                            var lastSendMs = 0L
-                            var accDx = 0f
-                            var accDy = 0f
-
-                            val longPressJob = scope.launch {
-                                delay(580L)
-                                if (!movedAny) {
-                                    longPressed = true
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    sendTouchAction(TouchpadAction.LONG_CLICK)
-                                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // Speed Stepper (- / 1.5x / +)
+                    Surface(
+                        color = Color.Black,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.border(1.dp, oledDimBorder, RoundedCornerShape(12.dp))
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    triggerPhoneConfirmVibration(context, localView, heavy = false)
+                                    onSensitivityChange((sensitivity - 0.2f).coerceIn(0.6f, 3.0f))
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(Icons.Rounded.Remove, contentDescription = "減速", tint = oledSubtleText, modifier = Modifier.size(16.dp))
                             }
-
-                            while (true) {
-                                val ev = awaitPointerEvent(PointerEventPass.Main)
-                                val ch = ev.changes.firstOrNull { it.id == down.id } ?: ev.changes.firstOrNull()
-                                if (ch == null) break
-
-                                val cur = ch.position
-                                if (!movedAny && hypot(cur.x - downPos.x, cur.y - downPos.y) > 10f) {
-                                    movedAny = true
-                                    longPressJob.cancel()
-                                }
-
-                                if (movedAny) {
-                                    accDx += (cur.x - lastPos.x) * sensitivity * 1.45f
-                                    accDy += (cur.y - lastPos.y) * sensitivity * 1.45f
-                                    val now = System.currentTimeMillis()
-                                    if (now - lastSendMs >= 20L && (kotlin.math.abs(accDx) >= 1f || kotlin.math.abs(accDy) >= 1f)) {
-                                        sendTouchAction(TouchpadAction.MOVE, accDx, accDy)
-                                        accDx = 0f
-                                        accDy = 0f
-                                        lastSendMs = now
-                                    }
-                                }
-                                lastPos = cur
-
-                                if (ch.changedToUpIgnoreConsumed()) {
-                                    ch.consume()
-                                    break
-                                }
-                                ch.consume()
-                            }
-
-                            longPressJob.cancel()
-                            if (movedAny && (kotlin.math.abs(accDx) >= 0.5f || kotlin.math.abs(accDy) >= 0.5f)) {
-                                sendTouchAction(TouchpadAction.MOVE, accDx, accDy)
-                            } else if (!movedAny && !longPressed && (System.currentTimeMillis() - downTime) < 550L) {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                sendTouchAction(TouchpadAction.CLICK)
+                            Text(
+                                text = String.format(Locale.US, "%.1fx", sensitivity),
+                                color = oledAccent,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            IconButton(
+                                onClick = {
+                                    triggerPhoneConfirmVibration(context, localView, heavy = false)
+                                    onSensitivityChange((sensitivity + 0.2f).coerceIn(0.6f, 3.0f))
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(Icons.Rounded.Add, contentDescription = "加速", tint = oledSubtleText, modifier = Modifier.size(16.dp))
                             }
                         }
                     }
+
+                    // Exit Fullscreen Touchpad Button
+                    Surface(
+                        color = Color.Black,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .border(1.dp, Color(0xFF334155), RoundedCornerShape(12.dp))
+                            .clickable {
+                                triggerPhoneConfirmVibration(context, localView, heavy = false)
+                                onClose()
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = Color(0xFFE2E8F0), modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("關閉", color = Color(0xFFE2E8F0), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            // MAIN GIANT EDGE-TO-EDGE PURE-BLACK OLED TOUCHPAD + RIGHT-SIDE SCROLL STRIP
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Primary Pure-Black Mouse Pad Area (~88% width, full remaining height!)
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color.Black)
+                        .border(1.2.dp, oledDimBorder, RoundedCornerShape(24.dp))
+                        .pointerInput(sensitivity) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                val downPos = down.position
+                                val downTime = System.currentTimeMillis()
+                                touchPoint = downPos
+                                var lastPos = downPos
+                                var movedAny = false
+                                var longPressed = false
+                                var lastSendMs = 0L
+                                var accDx = 0f
+                                var accDy = 0f
+
+                                val longPressJob = scope.launch {
+                                    delay(560L)
+                                    if (!movedAny) {
+                                        longPressed = true
+                                        triggerPhoneConfirmVibration(context, localView, heavy = true)
+                                        clickBurstPos = downPos
+                                        clickBurstSeq++
+                                        statusBanner = "✓ 已觸發車機長按"
+                                        sendTouchAction(TouchpadAction.LONG_CLICK)
+                                    }
+                                }
+
+                                while (true) {
+                                    val ev = awaitPointerEvent(PointerEventPass.Main)
+                                    val ch = ev.changes.firstOrNull { it.id == down.id } ?: ev.changes.firstOrNull()
+                                    if (ch == null) break
+
+                                    val cur = ch.position
+                                    touchPoint = cur
+
+                                    if (!movedAny && hypot(cur.x - downPos.x, cur.y - downPos.y) > 11f) {
+                                        movedAny = true
+                                        longPressJob.cancel()
+                                    }
+
+                                    if (movedAny) {
+                                        accDx += (cur.x - lastPos.x) * sensitivity * 1.55f
+                                        accDy += (cur.y - lastPos.y) * sensitivity * 1.55f
+                                        val now = System.currentTimeMillis()
+                                        if (now - lastSendMs >= 16L && (abs(accDx) >= 0.8f || abs(accDy) >= 0.8f)) {
+                                            sendTouchAction(TouchpadAction.MOVE, accDx, accDy)
+                                            accDx = 0f
+                                            accDy = 0f
+                                            lastSendMs = now
+                                        }
+                                    }
+                                    lastPos = cur
+
+                                    if (ch.changedToUpIgnoreConsumed()) {
+                                        ch.consume()
+                                        break
+                                    }
+                                    ch.consume()
+                                }
+
+                                longPressJob.cancel()
+                                touchPoint = null
+
+                                if (movedAny && (abs(accDx) >= 0.5f || abs(accDy) >= 0.5f)) {
+                                    sendTouchAction(TouchpadAction.MOVE, accDx, accDy)
+                                } else if (!movedAny && !longPressed && (System.currentTimeMillis() - downTime) < 550L) {
+                                    // TAP TO CONFIRM -> CRISP PHONE VIBRATION!
+                                    triggerPhoneConfirmVibration(context, localView, heavy = false)
+                                    clickBurstPos = downPos
+                                    clickBurstSeq++
+                                    statusBanner = "✓ 已點擊確定"
+                                    sendTouchAction(TouchpadAction.CLICK)
+                                }
+                            }
+                        }
+                ) {
+                    // Dim low-luminance OLED watermark in the center
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.TouchApp,
+                            contentDescription = null,
+                            tint = Color(0xFF1E293B),
+                            modifier = Modifier.size(54.dp)
+                        )
+                        Text(
+                            text = "OLED 全螢幕車機觸控板",
+                            color = Color(0xFF334155),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = statusBanner,
+                            color = Color(0xFF475569),
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    // Transient touch-follow glow & confirm-click ripple (zero static burn-in!)
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        touchPoint?.let { pt ->
+                            drawCircle(
+                                color = oledAccent.copy(alpha = 0.18f),
+                                radius = 32.dp.toPx(),
+                                center = pt
+                            )
+                            drawCircle(
+                                color = oledAccent.copy(alpha = 0.55f),
+                                radius = 12.dp.toPx(),
+                                center = pt
+                            )
+                        }
+                        if (showClickRing) {
+                            drawCircle(
+                                color = Color(0xFF22C55E).copy(alpha = 0.65f),
+                                radius = 26.dp.toPx() * ringScale,
+                                center = clickBurstPos,
+                                style = Stroke(width = 3.dp.toPx())
+                            )
+                        }
+                    }
+                }
+
+                // Right-Side Dedicated Vertical Scroll Strip (Slide finger up/down to scroll car lists!)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .width(44.dp)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color.Black)
+                        .border(1.dp, oledDimBorder, RoundedCornerShape(20.dp))
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                var stepY = down.position.y
+                                while (true) {
+                                    val ev = awaitPointerEvent(PointerEventPass.Main)
+                                    val ch = ev.changes.firstOrNull { it.id == down.id } ?: ev.changes.firstOrNull()
+                                    if (ch == null) break
+                                    val dy = ch.position.y - stepY
+                                    if (abs(dy) >= 68f) {
+                                        stepY = ch.position.y
+                                        triggerPhoneConfirmVibration(context, localView, heavy = false)
+                                        sendTouchAction(if (dy < 0f) TouchpadAction.SCROLL_DOWN else TouchpadAction.SCROLL_UP)
+                                    }
+                                    if (ch.changedToUpIgnoreConsumed()) {
+                                        ch.consume()
+                                        break
+                                    }
+                                    ch.consume()
+                                }
+                            }
+                        }
+                        .padding(vertical = 14.dp)
+                ) {
                     Icon(
-                        imageVector = Icons.Rounded.TouchApp,
-                        contentDescription = null,
-                        tint = colors.accent.copy(alpha = 0.65f),
-                        modifier = Modifier.size(40.dp)
+                        imageVector = Icons.Rounded.KeyboardArrowUp,
+                        contentDescription = "上捲",
+                        tint = Color(0xFF475569),
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clickable {
+                                triggerPhoneConfirmVibration(context, localView, heavy = false)
+                                sendTouchAction(TouchpadAction.SCROLL_UP)
+                            }
                     )
                     Text(
-                        text = "在此滑動操控車機游標",
-                        color = colors.primaryText.copy(alpha = 0.85f),
-                        fontSize = 15.sp,
+                        text = "捲\n動\n條",
+                        color = Color(0xFF334155),
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Text(
-                        text = "輕點＝左鍵點擊 · 長按＝車機長按",
-                        color = colors.secondaryText,
-                        fontSize = 12.sp
+                    Icon(
+                        imageVector = Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = "下捲",
+                        tint = Color(0xFF475569),
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clickable {
+                                triggerPhoneConfirmVibration(context, localView, heavy = false)
+                                sendTouchAction(TouchpadAction.SCROLL_DOWN)
+                            }
                     )
                 }
             }
 
-            // Touchpad Hardware-Style Buttons (Left Click / Scroll Up / Scroll Down / Back / Home)
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        sendTouchAction(TouchpadAction.CLICK)
-                    },
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("左鍵點擊", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-                OutlinedButton(
-                    onClick = { sendTouchAction(TouchpadAction.SCROLL_UP) },
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Text("上捲", fontSize = 12.sp)
-                }
-                OutlinedButton(
-                    onClick = { sendTouchAction(TouchpadAction.SCROLL_DOWN) },
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Text("下捲", fontSize = 12.sp)
-                }
-                OutlinedButton(
-                    onClick = { sendTouchAction(TouchpadAction.BACK) },
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = null, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(3.dp))
-                    Text("車機返回", fontSize = 12.sp)
-                }
-                OutlinedButton(
-                    onClick = { sendTouchAction(TouchpadAction.HOME) },
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Rounded.Home, contentDescription = null, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(3.dp))
-                    Text("車機首頁", fontSize = 12.sp)
-                }
-            }
-
-            // Local Phone Touchpad Speed Multiplier Slider
+            // BOTTOM PURE-BLACK TACTILE HARDWARE BUTTONS (Every click vibrates crisp!)
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = "觸控板移速：${String.format(Locale.US, "%.1fx", sensitivity)}",
-                    color = colors.primaryText,
-                    fontSize = 12.sp,
-                    modifier = Modifier.width(105.dp)
-                )
-                Slider(
-                    value = sensitivity,
-                    onValueChange = { onSensitivityChange(it.coerceIn(0.6f, 3.0f)) },
-                    valueRange = 0.6f..3.0f,
-                    colors = SliderDefaults.colors(thumbColor = colors.accent, activeTrackColor = colors.accent),
-                    modifier = Modifier.weight(1f)
-                )
+                // Big Primary Left-Click Confirm Button
+                Surface(
+                    color = Color.Black,
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier
+                        .weight(1.4f)
+                        .fillMaxHeight()
+                        .border(1.4.dp, oledAccent.copy(alpha = 0.7f), RoundedCornerShape(18.dp))
+                        .clickable {
+                            triggerPhoneConfirmVibration(context, localView, heavy = false)
+                            statusBanner = "✓ 已點擊確定"
+                            sendTouchAction(TouchpadAction.CLICK)
+                        }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("確定點擊", color = oledAccent, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                    }
+                }
+
+                // Car Back Button
+                Surface(
+                    color = Color.Black,
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .border(1.dp, oledDimBorder, RoundedCornerShape(18.dp))
+                        .clickable {
+                            triggerPhoneConfirmVibration(context, localView, heavy = false)
+                            statusBanner = "← 車機返回"
+                            sendTouchAction(TouchpadAction.BACK)
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = null, tint = Color(0xFFCBD5E1), modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("返回", color = Color(0xFFCBD5E1), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                // Car Home Button
+                Surface(
+                    color = Color.Black,
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .border(1.dp, oledDimBorder, RoundedCornerShape(18.dp))
+                        .clickable {
+                            triggerPhoneConfirmVibration(context, localView, heavy = false)
+                            statusBanner = "⌂ 車機首頁"
+                            sendTouchAction(TouchpadAction.HOME)
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Rounded.Home, contentDescription = null, tint = Color(0xFFCBD5E1), modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("首頁", color = Color(0xFFCBD5E1), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                // Car System Mouse Sensitivity Popup Button
+                Surface(
+                    color = Color.Black,
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier
+                        .weight(1.1f)
+                        .fillMaxHeight()
+                        .border(1.dp, oledDimBorder, RoundedCornerShape(18.dp))
+                        .clickable {
+                            triggerPhoneConfirmVibration(context, localView, heavy = false)
+                            statusBanner = "⚙️ 已在車機開啟靈敏度設定"
+                            onOpenCarPointerSpeedSettings()
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Rounded.Settings, contentDescription = null, tint = oledSubtleText, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("車機靈敏度", color = oledSubtleText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
             }
         }
     }

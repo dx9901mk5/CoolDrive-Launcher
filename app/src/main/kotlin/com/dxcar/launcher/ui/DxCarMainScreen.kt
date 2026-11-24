@@ -5,6 +5,8 @@ import android.graphics.Rect
 import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -13,15 +15,14 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -56,13 +58,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import kotlin.math.abs
+import kotlin.math.sin
 import com.dxcar.launcher.DxCarApp
 import com.dxcar.launcher.SplitSidePanelActivity
 import com.dxcar.launcher.accessibility.DxCarAccessibilityService
@@ -1295,93 +1302,165 @@ private fun CoolwalkSplitDashboard(
         }
     }
 
-    val customSixCard: @Composable () -> Unit = {
-        CustomSixAppBarCard(
-            slots = customShortcutSlots,
-            installedApps = installedApps,
-            splitShortcuts = splitShortcuts,
-            onSlotEmptyClick = onCustomSlotEmptyClick,
-            onSlotLaunch = onCustomSlotLaunch,
-            onSlotRemove = onCustomSlotRemove
-        )
+    // 1.5-second (1500ms) Inward Card-Exchange Animation ("卡片向內交換特效動畫"):
+    // Both Map and Media cards stay continuously mounted (zero MapView reload!) while smoothly
+    // drawing inward toward the center axis, tilting inward in 3D perspective, crossing over,
+    // and expanding into each other's slot over 1500ms.
+    val showMapPrimary = isMapPrimary || isPlanC
+    val swapProgress = remember { Animatable(if (showMapPrimary) 0f else 1f) }
+    LaunchedEffect(showMapPrimary) {
+        val target = if (showMapPrimary) 0f else 1f
+        if (abs(swapProgress.value - target) > 0.001f) {
+            swapProgress.animateTo(
+                targetValue = target,
+                animationSpec = tween(
+                    durationMillis = 1500,
+                    easing = CubicBezierEasing(0.32f, 0.0f, 0.18f, 1.0f)
+                )
+            )
+        } else {
+            swapProgress.snapTo(target)
+        }
     }
 
-    if (isHorizontalSplit) {
-        val showMapPrimary = isMapPrimary || isPlanC
-        AnimatedContent(
-            targetState = showMapPrimary,
-            transitionSpec = {
-                val dir = if (targetState) 1 else -1
-                val enter = slideInHorizontally(
-                    animationSpec = spring(dampingRatio = 0.84f, stiffness = Spring.StiffnessMediumLow),
-                    initialOffsetX = { fullWidth -> dir * (fullWidth / 5) }
-                ) + fadeIn(tween(240)) + scaleIn(initialScale = 0.96f, animationSpec = tween(240))
-                val exit = slideOutHorizontally(
-                    animationSpec = tween(200),
-                    targetOffsetX = { fullWidth -> -dir * (fullWidth / 6) }
-                ) + fadeOut(tween(180)) + scaleOut(targetScale = 0.96f, animationSpec = tween(180))
-                enter togetherWith exit
-            },
-            label = "coolwalkHorizontalSwap"
-        ) { mapOnPrimary ->
-            val primaryPane: @Composable (Modifier) -> Unit = { mod ->
-                if (mapOnPrimary) mapCardComposable(true, mod) else mediaCardComposable(true, false, mod)
-            }
-            val secondaryColumn: @Composable (Modifier) -> Unit = { mod ->
-                Column(modifier = mod, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (mapOnPrimary) {
-                        mediaCardComposable(false, supportsThirdSubCard, Modifier.weight(1f).fillMaxWidth())
-                    } else {
-                        mapCardComposable(false, Modifier.weight(1f).fillMaxWidth())
-                        if (supportsThirdSubCard && showSixShortcutsInMediaPanel) {
-                            customSixCard()
-                        }
-                    }
-                }
-            }
+    val f = swapProgress.value.coerceIn(0f, 1f)
+    val mid = sin(f * Math.PI).toFloat()
+    val totalWeight = (primaryWeight + secondaryWeight).coerceAtLeast(0.01f)
+    val normPrimary = primaryWeight / totalWeight
+    val normSecondary = secondaryWeight / totalWeight
+    val mapIsPrimaryRole = f < 0.5f
+    val mediaIsPrimaryRole = f >= 0.5f
 
-            Row(
-                modifier = Modifier.fillMaxSize().padding(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                if (rightHandDrive) {
-                    secondaryColumn(Modifier.weight(secondaryWeight).fillMaxHeight())
-                    primaryPane(Modifier.weight(primaryWeight).fillMaxHeight())
-                } else {
-                    primaryPane(Modifier.weight(primaryWeight).fillMaxHeight())
-                    secondaryColumn(Modifier.weight(secondaryWeight).fillMaxHeight())
-                }
-            }
-        }
-    } else {
-        AnimatedContent(
-            targetState = isMapPrimary || isPlanC,
-            transitionSpec = {
-                val dir = if (targetState) 1 else -1
-                val enter = slideInVertically(
-                    animationSpec = spring(dampingRatio = 0.84f, stiffness = Spring.StiffnessMediumLow),
-                    initialOffsetY = { fullHeight -> dir * (fullHeight / 5) }
-                ) + fadeIn(tween(240))
-                val exit = slideOutVertically(
-                    animationSpec = tween(200),
-                    targetOffsetY = { fullHeight -> -dir * (fullHeight / 6) }
-                ) + fadeOut(tween(180))
-                enter togetherWith exit
-            },
-            label = "coolwalkVerticalSwap"
-        ) { mapOnTop ->
-            Column(
-                modifier = Modifier.fillMaxSize().padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                if (mapOnTop) {
-                    mapCardComposable(true, Modifier.weight(primaryWeight).fillMaxWidth())
-                    mediaCardComposable(false, showSixShortcutsInMediaPanel, Modifier.weight(secondaryWeight).fillMaxWidth())
-                } else {
-                    mediaCardComposable(true, showSixShortcutsInMediaPanel, Modifier.weight(primaryWeight).fillMaxWidth())
-                    mapCardComposable(false, Modifier.weight(secondaryWeight).fillMaxWidth())
-                }
-            }
+    val frontScale = 1f - (0.055f * mid)
+    val backScale = 1f - (0.145f * mid)
+    val mapScale = if (showMapPrimary) frontScale else backScale
+    val mediaScale = if (showMapPrimary) backScale else frontScale
+    val mapAlpha = if (showMapPrimary) 1f else (1f - 0.08f * mid)
+    val mediaAlpha = if (showMapPrimary) (1f - 0.08f * mid) else 1f
+    val mapZ = if (showMapPrimary) 2f else 1f
+    val mediaZ = if (showMapPrimary) 1f else 2f
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(12.dp)
+    ) {
+        val gap = 12.dp
+        if (isHorizontalSplit) {
+            val availW = (maxWidth - gap).coerceAtLeast(160.dp)
+            val fullH = maxHeight
+            val primaryW = availW * normPrimary
+            val secondaryW = availW * normSecondary
+            val primaryX = if (rightHandDrive) secondaryW + gap else 0.dp
+            val secondaryX = if (rightHandDrive) 0.dp else primaryW + gap
+
+            val mapW = lerp(primaryW, secondaryW, f)
+            val mediaW = lerp(secondaryW, primaryW, f)
+            val baseMapX = lerp(primaryX, secondaryX, f)
+            val baseMediaX = lerp(secondaryX, primaryX, f)
+
+            val centerX = maxWidth / 2f
+            val halfW = centerX.coerceAtLeast(1.dp)
+            val mapCenter = baseMapX + (mapW / 2f)
+            val mediaCenter = baseMediaX + (mediaW / 2f)
+
+            // Symmetric inward pull toward dashboard center + inward 3D perspective tilt
+            val mapX = baseMapX + (centerX - mapCenter) * (0.20f * mid)
+            val mediaX = baseMediaX + (centerX - mediaCenter) * (0.20f * mid)
+            val mapSideRatio = ((mapCenter - centerX) / halfW).coerceIn(-1f, 1f)
+            val mediaSideRatio = ((mediaCenter - centerX) / halfW).coerceIn(-1f, 1f)
+            val mapRotY = -mapSideRatio * 13f * mid
+            val mediaRotY = -mediaSideRatio * 13f * mid
+
+            mapCardComposable(
+                mapIsPrimaryRole,
+                Modifier
+                    .zIndex(mapZ)
+                    .offset(x = mapX, y = 0.dp)
+                    .width(mapW)
+                    .height(fullH)
+                    .graphicsLayer {
+                        scaleX = mapScale
+                        scaleY = mapScale
+                        rotationY = mapRotY
+                        alpha = mapAlpha
+                        cameraDistance = 16f * density
+                    }
+            )
+
+            mediaCardComposable(
+                mediaIsPrimaryRole,
+                supportsThirdSubCard,
+                Modifier
+                    .zIndex(mediaZ)
+                    .offset(x = mediaX, y = 0.dp)
+                    .width(mediaW)
+                    .height(fullH)
+                    .graphicsLayer {
+                        scaleX = mediaScale
+                        scaleY = mediaScale
+                        rotationY = mediaRotY
+                        alpha = mediaAlpha
+                        cameraDistance = 16f * density
+                    }
+            )
+        } else {
+            val availH = (maxHeight - gap).coerceAtLeast(160.dp)
+            val fullW = maxWidth
+            val primaryH = availH * normPrimary
+            val secondaryH = availH * normSecondary
+            val primaryY = 0.dp
+            val secondaryY = primaryH + gap
+
+            val mapH = lerp(primaryH, secondaryH, f)
+            val mediaH = lerp(secondaryH, primaryH, f)
+            val baseMapY = lerp(primaryY, secondaryY, f)
+            val baseMediaY = lerp(secondaryY, primaryY, f)
+
+            val centerY = maxHeight / 2f
+            val halfH = centerY.coerceAtLeast(1.dp)
+            val mapCenterY = baseMapY + (mapH / 2f)
+            val mediaCenterY = baseMediaY + (mediaH / 2f)
+
+            val mapY = baseMapY + (centerY - mapCenterY) * (0.20f * mid)
+            val mediaY = baseMediaY + (centerY - mediaCenterY) * (0.20f * mid)
+            val mapSideY = ((mapCenterY - centerY) / halfH).coerceIn(-1f, 1f)
+            val mediaSideY = ((mediaCenterY - centerY) / halfH).coerceIn(-1f, 1f)
+            val mapRotX = mapSideY * 11f * mid
+            val mediaRotX = mediaSideY * 11f * mid
+
+            mapCardComposable(
+                mapIsPrimaryRole,
+                Modifier
+                    .zIndex(mapZ)
+                    .offset(x = 0.dp, y = mapY)
+                    .width(fullW)
+                    .height(mapH)
+                    .graphicsLayer {
+                        scaleX = mapScale
+                        scaleY = mapScale
+                        rotationX = mapRotX
+                        alpha = mapAlpha
+                        cameraDistance = 16f * density
+                    }
+            )
+
+            mediaCardComposable(
+                mediaIsPrimaryRole,
+                showSixShortcutsInMediaPanel,
+                Modifier
+                    .zIndex(mediaZ)
+                    .offset(x = 0.dp, y = mediaY)
+                    .width(fullW)
+                    .height(mediaH)
+                    .graphicsLayer {
+                        scaleX = mediaScale
+                        scaleY = mediaScale
+                        rotationX = mediaRotX
+                        alpha = mediaAlpha
+                        cameraDistance = 16f * density
+                    }
+            )
         }
     }
 }
