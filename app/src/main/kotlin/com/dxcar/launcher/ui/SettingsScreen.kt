@@ -100,7 +100,6 @@ import com.dxcar.launcher.map.OfflineMapManager
 import com.dxcar.launcher.map.OfflineMapUiState
 import com.dxcar.launcher.map.OfflineRegionPreset
 import com.dxcar.launcher.overlay.ExtraLargeTutorialModal
-import com.dxcar.launcher.overlay.TUTORIAL_3D_CURSOR_STEPS
 import com.dxcar.launcher.system.AppCategory
 import com.dxcar.launcher.system.HomeLauncherInfo
 import com.dxcar.launcher.system.InstalledAppInfo
@@ -210,7 +209,7 @@ fun SettingsScreen(
                     IconButton(onClick = onClose) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                            contentDescription = "返回",
+                            contentDescription = str("返回", "返回", "Back", "戻る"),
                             tint = colors.primaryText
                         )
                     }
@@ -271,9 +270,19 @@ fun SettingsScreen(
                             Spacer(Modifier.width(6.dp))
                             Text(
                                 text = if (allPermsOk) {
-                                    str("權限已就緒 ($grantedPerms/$totalPerms)", "Permissions OK ($grantedPerms/$totalPerms)", "権限 OK ($grantedPerms/$totalPerms)")
+                                    str(
+                                        "權限已就緒 ($grantedPerms/$totalPerms)",
+                                        "权限已就绪 ($grantedPerms/$totalPerms)",
+                                        "Permissions OK ($grantedPerms/$totalPerms)",
+                                        "権限 OK ($grantedPerms/$totalPerms)"
+                                    )
                                 } else {
-                                    str("權限需求 ($grantedPerms/$totalPerms)", "Permissions ($grantedPerms/$totalPerms)", "権限設定 ($grantedPerms/$totalPerms)")
+                                    str(
+                                        "權限需求 ($grantedPerms/$totalPerms)",
+                                        "权限需求 ($grantedPerms/$totalPerms)",
+                                        "Permissions ($grantedPerms/$totalPerms)",
+                                        "権限設定 ($grantedPerms/$totalPerms)"
+                                    )
                                 },
                                 color = colors.primaryText,
                                 fontSize = 13.sp,
@@ -288,7 +297,7 @@ fun SettingsScreen(
                     ) {
                         Icon(Icons.Rounded.PhoneAndroid, contentDescription = null, modifier = Modifier.size(17.dp))
                         Spacer(Modifier.width(5.dp))
-                        Text(str("手機同步模式", "Phone Mode", "スマホ連携モード"), fontSize = 13.sp, maxLines = 1)
+                        Text(str("手機同步模式", "手机同步模式", "Phone Mode", "スマホ連携モード"), fontSize = 13.sp, maxLines = 1)
                     }
                 }
             }
@@ -356,11 +365,13 @@ fun SettingsScreen(
                 CategoryHeaderBanner(
                     categoryTitle = str(
                         "分類一 · 首頁方案、離線地圖與視覺風格",
+                        "分类一 · 首页方案、离线地图与视觉风格",
                         "Category 1 · Home Plan, Offline Maps & Visual Style",
                         "カテゴリ 1 · ホームプラン・オフライン地図・外観"
                     ),
                     hint = str(
                         "選擇方案 A（含離線地圖下載與自動更新判斷）或方案 C（指定導航＋純音樂），並自訂日夜主題與分割比例",
+                        "选择方案 A（含离线地图下载与自动更新判断）或方案 C（指定导航＋纯音乐），并自定义日夜主题与分屏比例",
                         "Choose Plan A (Offline Maps & Traffic) or Plan C (Custom Nav + Music), plus Theme & Split Ratio",
                         "プラン A（オフライン地図＆渋滞）またはプラン C（指定ナビ＋音楽）、テーマと分割比率を設定"
                     )
@@ -369,10 +380,15 @@ fun SettingsScreen(
                 val cardPlanAndOffline: @Composable (Modifier) -> Unit = { mod ->
                     SettingsSectionCard(
                         icon = Icons.Rounded.Science,
-                        title = str("首頁方案、第一／第二介面教學與離線地圖", "Home Plan, UI 1 & 2 Guide & Offline Maps", "ホームプラン・第1/第2画面ガイド・オフライン地図"),
+                        title = str(
+                            "首頁方案、第一／第二介面教學與離線地圖",
+                            "首页方案、第一／第二界面教程与离线地图",
+                            "Home Plan, UI 1 & 2 Guide & Offline Maps",
+                            "ホームプラン・第1/第2画面ガイド・オフライン地図"
+                        ),
                         headerTrailing = {
                             TutorialPillButton(
-                                label = str("放大教學", "Full Guide", "拡大ガイド"),
+                                label = str("放大教學", "放大教程", "Full Guide", "拡大ガイド"),
                                 onClick = { onActiveTutorialChange(CarSettingsTutorialTopic.DUAL_UI_GUIDE) }
                             )
                         },
@@ -515,7 +531,7 @@ fun SettingsScreen(
                                                         ) {
                                                             Icon(Icons.Rounded.Lock, contentDescription = null, tint = colors.secondaryText, modifier = Modifier.size(11.dp))
                                                             Spacer(Modifier.width(3.dp))
-                                                            Text(str("待 Root", "Needs Root", "Root 待ち"), color = colors.secondaryText, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                                            Text(str("待 Root", "待 Root", "Needs Root", "Root 待ち"), color = colors.secondaryText, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                                                         }
                                                     }
                                                 }
@@ -539,6 +555,8 @@ fun SettingsScreen(
                         val detectedLoc = remember(config.lastKnownLat, config.lastKnownLon) {
                             OfflineMapManager.describeDetectedLocation(config.lastKnownLat, config.lastKnownLon)
                         }
+                        val detectedLocalTitle = DxCarI18n.offlineDetectedLocalTitle(detectedLoc)
+                        val detectedCountryTitle = DxCarI18n.offlineDetectedCountryTitle(detectedLoc)
                         Surface(
                             color = colors.cardSurfaceElevated,
                             shape = RoundedCornerShape(16.dp),
@@ -546,7 +564,12 @@ fun SettingsScreen(
                         ) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(
-                                    text = "方案 A 離線地圖 · 所在區域／所在國家全下載（已快取 ${config.offlineRegions.size} 區）",
+                                    text = str(
+                                        "方案 A 離線地圖 · 所在區域／所在國家全下載（已快取 ${config.offlineRegions.size} 區）",
+                                        "方案 A 离线地图 · 所在区域／所在国家全下载（已缓存 ${config.offlineRegions.size} 区）",
+                                        "Plan A Offline Maps · Local & Country Download (${config.offlineRegions.size} cached)",
+                                        "プラン A オフライン地図 · 地域／国一括取得（${config.offlineRegions.size} 件保存済）"
+                                    ),
                                     color = colors.primaryText,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold
@@ -554,7 +577,7 @@ fun SettingsScreen(
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     OfflineUpdatePolicy.entries.forEach { pol ->
                                         SelectablePill(
-                                            text = pol.labelZh,
+                                            text = DxCarI18n.offlinePolicyLabel(pol),
                                             selected = config.offlineUpdatePolicy == pol,
                                             onClick = { onUpdateConfig { it.copy(offlineUpdatePolicy = pol) } }
                                         )
@@ -589,7 +612,7 @@ fun SettingsScreen(
                                             modifier = Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(4.dp))
                                         )
                                         OutlinedButton(onClick = onCancelOfflineDownload, shape = RoundedCornerShape(10.dp)) {
-                                            Text("取消", fontSize = 11.sp)
+                                            Text(str("取消", "取消", "Cancel", "キャンセル"), fontSize = 11.sp)
                                         }
                                     }
                                 }
@@ -601,7 +624,16 @@ fun SettingsScreen(
                                         colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
-                                        Text("📍 下載所在區域（${detectedLoc.localRegionTitleZh}）", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            str(
+                                                "📍 下載所在區域（$detectedLocalTitle）",
+                                                "📍 下载所在区域（$detectedLocalTitle）",
+                                                "📍 Download Local Area ($detectedLocalTitle)",
+                                                "📍 現在地エリアを取得（$detectedLocalTitle）"
+                                            ),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                     Button(
                                         onClick = { onDownloadOfflineRegion(OfflineMapManager.TOKEN_AUTO_ENTIRE_COUNTRY) },
@@ -609,20 +641,34 @@ fun SettingsScreen(
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E), contentColor = Color.White),
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
-                                        Text("🌏 全下載所在國家（${detectedLoc.countryTitleZh}）", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            str(
+                                                "🌏 全下載所在國家（$detectedCountryTitle）",
+                                                "🌏 全下载所在国家（$detectedCountryTitle）",
+                                                "🌏 Download Entire Country ($detectedCountryTitle)",
+                                                "🌏 現在の国を一括取得（$detectedCountryTitle）"
+                                            ),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                 }
                                 // Full Regional List (no .take(4) truncation!)
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     offlinePresets.forEach { preset ->
                                         val downloaded = config.offlineRegions.any { it.regionId == preset.id }
+                                        val presetTitle = DxCarI18n.offlinePresetTitle(preset.id, preset.titleZh)
                                         OutlinedButton(
                                             onClick = { onDownloadOfflineRegion(preset.id) },
                                             enabled = offlineState.downloadingRegionId == null,
                                             shape = RoundedCornerShape(12.dp)
                                         ) {
                                             Text(
-                                                text = if (downloaded) "✓ 更新 ${preset.titleZh}" else "⬇ 下載 ${preset.titleZh}",
+                                                text = if (downloaded) {
+                                                    str("✓ 更新 $presetTitle", "✓ 更新 $presetTitle", "✓ Update $presetTitle", "✓ 更新 $presetTitle")
+                                                } else {
+                                                    str("⬇ 下載 $presetTitle", "⬇ 下载 $presetTitle", "⬇ Download $presetTitle", "⬇ 取得 $presetTitle")
+                                                },
                                                 fontSize = 11.sp
                                             )
                                         }
@@ -632,8 +678,18 @@ fun SettingsScreen(
                         }
 
                         SettingsToggleRow(
-                            title = "媒體控制器下方整合顯示 6 格快捷 App",
-                            subtitle = "關閉則將右側空間全數留給上方當地天氣與超大專輯封面",
+                            title = str(
+                                "媒體控制器下方整合顯示 6 格快捷 App",
+                                "媒体控制器下方整合显示 6 格快捷 App",
+                                "Show 6 Quick App Shortcuts Below Media Player",
+                                "メディアプレーヤー下に 6 枠ショートカットを表示"
+                            ),
+                            subtitle = str(
+                                "關閉則將右側空間全數留給上方當地天氣與超大專輯封面",
+                                "关闭则将右侧空间全数留给上方当地天气与超大专辑封面",
+                                "Turn off to dedicate right pane to local weather & large album art",
+                                "OFF にすると右側を天気と大型アルバムアートに最大化します"
+                            ),
                             checked = config.showSixShortcutsInMediaPanel,
                             onCheckedChange = { checked -> onUpdateConfig { it.copy(showSixShortcutsInMediaPanel = checked) } }
                         )
@@ -643,21 +699,26 @@ fun SettingsScreen(
                 val cardStyleAndMap: @Composable (Modifier) -> Unit = { mod ->
                     SettingsSectionCard(
                         icon = Icons.Rounded.Palette,
-                        title = "介面風格、日夜排程與分割比例",
+                        title = str(
+                            "介面風格、日夜排程與分割比例",
+                            "界面风格、日夜排程与分屏比例",
+                            "UI Style, Day/Night Schedule & Split Ratio",
+                            "外観スタイル・昼夜スケジュール・分割比率"
+                        ),
                         modifier = mod
                     ) {
-                        Text("介面風格預設", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(str("介面風格預設", "界面风格预设", "UI Style Preset", "外観スタイルプリセット"), color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             LauncherStylePreset.entries.forEach { preset ->
                                 SelectablePill(
-                                    text = preset.labelZh,
+                                    text = DxCarI18n.stylePresetLabel(preset),
                                     selected = config.stylePreset == preset,
                                     onClick = { onUpdateConfig { it.copy(stylePreset = preset) } }
                                 )
                             }
                         }
 
-                        Text("強調色主題", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(str("強調色主題", "强调色主题", "Accent Color Theme", "アクセントカラー"), color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             DxCarAccents.forEachIndexed { idx, accent ->
                                 val selected = config.accentColorIndex == idx
@@ -678,7 +739,7 @@ fun SettingsScreen(
                             }
                         }
 
-                        Text(str("白天／夜晚切換模式", "Day / Night Mode", "昼間 / 夜間モード"), color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(str("白天／夜晚切換模式", "白天／夜晚切换模式", "Day / Night Mode", "昼間 / 夜間モード"), color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             ThemeMode.entries.forEach { mode ->
                                 SelectablePill(
@@ -692,7 +753,7 @@ fun SettingsScreen(
                         if (config.themeMode == ThemeMode.AUTO_TIME) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 TimeStepperCard(
-                                    label = "白天開始",
+                                    label = str("白天開始", "白天开始", "Day Starts", "昼間開始"),
                                     hour = config.dayStartHour,
                                     minute = config.dayStartMinute,
                                     onDeltaMinutes = { delta ->
@@ -702,7 +763,7 @@ fun SettingsScreen(
                                     modifier = Modifier.weight(1f)
                                 )
                                 TimeStepperCard(
-                                    label = "夜晚開始",
+                                    label = str("夜晚開始", "夜晚开始", "Night Starts", "夜間開始"),
                                     hour = config.nightStartHour,
                                     minute = config.nightStartMinute,
                                     onDeltaMinutes = { delta ->
@@ -714,13 +775,18 @@ fun SettingsScreen(
                             }
                         } else if (config.themeMode == ThemeMode.AUTO_SUNRISE_SUNSET) {
                             Text(
-                                text = "今日 GPS 日出 ${solarPreview.formatSunrise()} · 日落 ${solarPreview.formatSunset()}",
+                                text = str(
+                                    "今日 GPS 日出 ${solarPreview.formatSunrise()} · 日落 ${solarPreview.formatSunset()}",
+                                    "今日 GPS 日出 ${solarPreview.formatSunrise()} · 日落 ${solarPreview.formatSunset()}",
+                                    "Today's GPS Sunrise ${solarPreview.formatSunrise()} · Sunset ${solarPreview.formatSunset()}",
+                                    "本日の GPS 日の出 ${solarPreview.formatSunrise()} · 日の入り ${solarPreview.formatSunset()}"
+                                ),
                                 color = colors.accent,
                                 fontSize = 12.sp
                             )
                         }
 
-                        Text(str("內建地圖圖層與路況", "Map Layers & Traffic", "地図レイヤー・交通状況"), color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(str("內建地圖圖層與路況", "内置地图图层与路况", "Map Layers & Traffic", "地図レイヤー・交通状況"), color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             MapEngineStyle.entries.forEach { styleItem ->
                                 SelectablePill(
@@ -731,9 +797,10 @@ fun SettingsScreen(
                             }
                         }
                         SettingsToggleRow(
-                            title = str("疊加 Google 即時路況圖層", "Google Live Traffic Layer", "Google 交通状況レイヤー"),
+                            title = str("疊加 Google 即時路況圖層", "叠加 Google 实时路况图层", "Google Live Traffic Layer", "Google 交通状況レイヤー"),
                             subtitle = str(
                                 "顯示紅黃綠即時車流；可搭配「開啟分屏設定」測試 AOSP 原生可拖動分屏",
+                                "显示红黄绿实时车流；可搭配「分屏设置」测试 AOSP 原生可拖动分屏",
                                 "Shows live traffic flow; pair with Split Setup to test draggable AOSP split-screen",
                                 "リアルタイム渋滞情報を表示（画面分割設定と併用可能）"
                             ),
@@ -764,12 +831,22 @@ fun SettingsScreen(
                                         Icon(Icons.Rounded.Speed, contentDescription = null, tint = colors.accent, modifier = Modifier.size(20.dp))
                                         Spacer(Modifier.width(6.dp))
                                         Column {
-                                            Text(str("60fps / 60Hz 高流暢度顯示模式", "60fps / 60Hz High Refresh Mode", "60fps / 60Hz 高フレームレート表示"), color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                            Text(str("60fps / 60Hz 高流暢度顯示模式", "60fps / 60Hz 高流畅度显示模式", "60fps / 60Hz High Refresh Mode", "60fps / 60Hz 高フレームレート表示"), color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                             Text(
                                                 text = if (refreshCap.supports60Hz) {
-                                                    str("✓ 可用（支援 ${refreshCap.maxSupportedHz}Hz · 目前 ${refreshCap.currentHz}Hz）", "✓ Supported (${refreshCap.maxSupportedHz}Hz max · ${refreshCap.currentHz}Hz now)", "✓ 利用可能（最大 ${refreshCap.maxSupportedHz}Hz · 現在 ${refreshCap.currentHz}Hz）")
+                                                    str(
+                                                        "✓ 可用（支援 ${refreshCap.maxSupportedHz}Hz · 目前 ${refreshCap.currentHz}Hz）",
+                                                        "✓ 可用（支持 ${refreshCap.maxSupportedHz}Hz · 当前 ${refreshCap.currentHz}Hz）",
+                                                        "✓ Supported (${refreshCap.maxSupportedHz}Hz max · ${refreshCap.currentHz}Hz now)",
+                                                        "✓ 利用可能（最大 ${refreshCap.maxSupportedHz}Hz · 現在 ${refreshCap.currentHz}Hz）"
+                                                    )
                                                 } else {
-                                                    str("⚠️ 目前 ${refreshCap.currentHz}Hz（依車機盒韌體）", "⚠️ Currently ${refreshCap.currentHz}Hz (OEM dependent)", "⚠️ 現在 ${refreshCap.currentHz}Hz（端末依存）")
+                                                    str(
+                                                        "⚠️ 目前 ${refreshCap.currentHz}Hz（依車機盒韌體）",
+                                                        "⚠️ 当前 ${refreshCap.currentHz}Hz（依车机盒固件）",
+                                                        "⚠️ Currently ${refreshCap.currentHz}Hz (OEM dependent)",
+                                                        "⚠️ 現在 ${refreshCap.currentHz}Hz（端末依存）"
+                                                    )
                                                 },
                                                 color = if (refreshCap.supports60Hz) colors.statusConnected else Color(0xFFF59E0B),
                                                 fontSize = 12.sp,
@@ -787,12 +864,14 @@ fun SettingsScreen(
                                     text = if (refreshCap.supports60Hz) {
                                         str(
                                             "偵測到此裝置螢幕支援 ${refreshCap.maxSupportedHz}Hz，開啟即可請求 60fps 高流暢度渲染！",
+                                            "检测到此设备屏幕支持 ${refreshCap.maxSupportedHz}Hz，开启即可请求 60fps 高流畅度渲染！",
                                             "Display supports ${refreshCap.maxSupportedHz}Hz; enable to request 60fps smooth rendering.",
                                             "${refreshCap.maxSupportedHz}Hz 対応ディスプレイを検出。ON で 60fps 描画を要求します。"
                                         )
                                     } else {
                                         str(
                                             "未偵測到原生 60Hz（系統回報 ${refreshCap.currentHz}Hz）；開關仍可開啟以請求最高幀率，亦可進原廠設定檢查。",
+                                            "未检测到原生 60Hz（系统回报 ${refreshCap.currentHz}Hz）；开关仍可开启以请求最高帧率，亦可进原厂设置检查。",
                                             "Native 60Hz not reported (${refreshCap.currentHz}Hz); toggle still requests max FPS or check OEM settings.",
                                             "ネイティブ 60Hz 未検出（${refreshCap.currentHz}Hz）。ON で最大 FPS を要求、または純正設定を確認できます。"
                                         )
@@ -806,27 +885,27 @@ fun SettingsScreen(
                                 ) {
                                     Icon(Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(15.dp))
                                     Spacer(Modifier.width(5.dp))
-                                    Text(str("開啟車機顯示／原廠設定檢查 60fps 選項", "Open Car / OEM Display Settings", "車載機・純正ディスプレイ設定を開く"), fontSize = 11.sp)
+                                    Text(str("開啟車機顯示／原廠設定檢查 60fps 選項", "开启车机显示／原厂设置检查 60fps 选项", "Open Car / OEM Display Settings", "車載機・純正ディスプレイ設定を開く"), fontSize = 11.sp)
                                 }
                             }
                         }
 
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             OutlinedButton(onClick = onLaunchRealMapsSplitScreen, shape = RoundedCornerShape(12.dp)) {
-                                Text(str("測試 AOSP 分割G地圖", "Test AOSP Split Maps", "AOSP 分割マップテスト"), fontSize = 12.sp)
+                                Text(str("測試 AOSP 分割G地圖", "测试 AOSP 分屏G地图", "Test AOSP Split Maps", "AOSP 分割マップテスト"), fontSize = 12.sp)
                             }
                             Button(
                                 onClick = onOpenSplitShortcutCreator,
                                 colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text(str("分屏設定／讀取原車分屏", "Split Setup / Import Stock", "画面分割設定・純正取込"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(str("分屏設定／讀取原車分屏", "分屏设置／读取原车分屏", "Split Setup / Import Stock", "画面分割設定・純正取込"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
                         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = str("首頁比例：", "Home Ratio: ", "ホーム比率：") +
+                                text = str("首頁比例：", "首页比例：", "Home Ratio: ", "ホーム比率：") +
                                     "${(config.primarySplitRatio * 100).roundToInt()}% / ${((1f - config.primarySplitRatio) * 100).roundToInt()}%",
                                 color = colors.primaryText,
                                 fontSize = 13.sp,
@@ -847,14 +926,29 @@ fun SettingsScreen(
 
                 // ==================== CATEGORY 2: 常駐 Dock（支援上方／跨啟動器）與啟動器管理 ====================
                 CategoryHeaderBanner(
-                    categoryTitle = "分類二 · 常駐懸浮 Dock（左／右／上方／跨啟動器）與預設桌面",
-                    hint = "左駕預設左側、右駕預設右側，亦可改放「上方」；支援懸浮於其他啟動器上，並內建 3D 俯瞰類滑鼠指標"
+                    categoryTitle = str(
+                        "分類二 · 常駐懸浮 Dock（左／右／上方／跨啟動器）與預設桌面",
+                        "分类二 · 常驻悬浮 Dock（左／右／上方／跨启动器）与默认桌面",
+                        "Category 2 · Persistent Floating Dock & Default Home",
+                        "カテゴリ 2 · 常駐フローティングドック＆標準ホーム設定"
+                    ),
+                    hint = str(
+                        "左駕預設左側、右駕預設右側，亦可改放「上方」；支援懸浮於其他啟動器上，並內建 3D 俯瞰類滑鼠指標",
+                        "左舵默认左侧、右舵默认右侧，亦可改放「上方」；支持悬浮于其他启动器上，并内置 3D 俯瞰类鼠标指针",
+                        "LHD defaults left, RHD right, or Top Bar; floats over other launchers with built-in 3D mouse pointer",
+                        "左/右ハンドル連動や上部配置に対応。他ランチャー上の常駐表示や 3D マウス機能を搭載"
+                    )
                 )
 
                 val cardDockAnd3D: @Composable (Modifier) -> Unit = { mod ->
                     SettingsSectionCard(
                         icon = Icons.Rounded.DisplaySettings,
-                        title = "Dock 位置（左／右／上方）與跨啟動器常駐",
+                        title = str(
+                            "Dock 位置（左／右／上方）與跨啟動器常駐",
+                            "Dock 位置（左／右／上方）与跨启动器常驻",
+                            "Dock Position (Left / Right / Top) & Persistent Overlay",
+                            "ドック位置（左／右／上）＆他ランチャー常駐"
+                        ),
                         headerTrailing = {
                             TutorialPillButton(onClick = { onActiveTutorialChange(CarSettingsTutorialTopic.CURSOR_3D) })
                         },
@@ -877,14 +971,24 @@ fun SettingsScreen(
                                         Icon(Icons.Rounded.WarningAmber, contentDescription = null, tint = Color(0xFFF59E0B), modifier = Modifier.size(20.dp))
                                         Spacer(Modifier.width(8.dp))
                                         Text(
-                                            text = "永久懸浮提醒：請關閉原車啟動器自帶的 Dock 與懸浮按鈕",
+                                            text = str(
+                                                "永久懸浮提醒：請關閉原車啟動器自帶的 Dock 與懸浮按鈕",
+                                                "永久悬浮提醒：请关闭原车启动器自带的 Dock 与悬浮按钮",
+                                                "Overlay Tip: Disable Stock Launcher Dock & Assistive Ball",
+                                                "常駐表示のヒント：純正ランチャーのドックやアシストボールをオフにしてください"
+                                            ),
                                             color = colors.primaryText,
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
                                     Text(
-                                        text = "當啟用本啟動器 Dock 永久懸浮（或懸浮在其他啟動器上方）時，建議先進入車機盒設定關閉原車自帶的側邊欄與懸浮小白點，避免雙重遮擋。",
+                                        text = str(
+                                            "當啟用本啟動器 Dock 永久懸浮（或懸浮在其他啟動器上方）時，建議先進入車機盒設定關閉原車自帶的側邊欄與懸浮小白點，避免雙重遮擋。",
+                                            "当启用本启动器 Dock 永久悬浮（或悬浮在其他启动器上方）时，建议先进入车机盒设置关闭原车自带的侧边栏与悬浮小白点，避免双重遮挡。",
+                                            "When Persistent Floating Dock is enabled across apps/launchers, disable the AI Box's stock sidebar and floating ball in vendor settings to avoid overlap.",
+                                            "常駐ドック（他ランチャー上を含む）を有効にする場合、重なりを防ぐため車載ボックス設定で純正サイドバーやフローティングボールをオフにしてください。"
+                                        ),
                                         color = colors.secondaryText,
                                         fontSize = 12.sp
                                     )
@@ -896,10 +1000,10 @@ fun SettingsScreen(
                                         ) {
                                             Icon(Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
                                             Spacer(Modifier.width(5.dp))
-                                            Text("前往車機盒設定頁面", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Text(str("前往車機盒設定頁面", "前往车机盒设置页面", "Open AI Box Vendor Settings", "車載ボックス設定を開く"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                         }
                                         TutorialPillButton(
-                                            label = "教學",
+                                            label = str("教學", "教程", "Guide", "ガイド"),
                                             onClick = { onActiveTutorialChange(CarSettingsTutorialTopic.STOCK_DOCK_CONFLICT) }
                                         )
                                     }
@@ -907,21 +1011,21 @@ fun SettingsScreen(
                             }
                         }
 
-                        Text(str("駕駛座位置（左駕預設靠左 · 右駕預設靠右）", "Driver Side (LHD Left · RHD Right)", "運転席側（左ハンドル・右ハンドル）"), color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(str("駕駛座位置（左駕預設靠左 · 右駕預設靠右）", "驾驶座位置（左舵默认靠左 · 右舵默认靠右）", "Driver Side (LHD Left · RHD Right)", "運転席側（左ハンドル・右ハンドル）"), color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             SelectablePill(
-                                text = str("左駕模式（預設左側）", "LHD (Left Dock)", "左ハンドル（左ドック）"),
+                                text = str("左駕模式（預設左側）", "左舵模式（默认左侧）", "LHD (Left Dock)", "左ハンドル（左ドック）"),
                                 selected = !config.rightHandDrive,
                                 onClick = { onUpdateConfig { it.copy(rightHandDrive = false) } }
                             )
                             SelectablePill(
-                                text = str("右駕模式（預設右側）", "RHD (Right Dock)", "右ハンドル（右ドック）"),
+                                text = str("右駕模式（預設右側）", "右舵模式（默认右侧）", "RHD (Right Dock)", "右ハンドル（右ドック）"),
                                 selected = config.rightHandDrive,
                                 onClick = { onUpdateConfig { it.copy(rightHandDrive = true) } }
                             )
                         }
 
-                        Text(str("Dock 擺放位置選擇（支援放置於上方！）", "Dock Placement (Supports Top Bar!)", "ドック配置（上部バー対応！）"), color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(str("Dock 擺放位置選擇（支援放置於上方！）", "Dock 摆放位置选择（支持放置于上方！）", "Dock Placement (Supports Top Bar!)", "ドック配置（上部バー対応！）"), color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf(
                                 DockPositionMode.DRIVER_SIDE,
@@ -940,23 +1044,53 @@ fun SettingsScreen(
                         }
 
                         SettingsToggleRow(
-                            title = "常駐懸浮 Dock（全螢幕 App 上方常駐 · 手機端預設停用）",
-                            subtitle = "開啟後於 Google 地圖／YouTube 全螢幕時保留常駐列（含 3D 俯瞰類滑鼠指標與返回／多工鍵）",
+                            title = str(
+                                "常駐懸浮 Dock（全螢幕 App 上方常駐 · 手機端預設停用）",
+                                "常驻悬浮 Dock（全屏 App 上方常驻 · 手机端默认停用）",
+                                "Persistent Floating Dock (Over Fullscreen Apps · Off on Phones)",
+                                "常駐フローティングドック（全画面アプリ上に表示・スマホでは標準オフ）"
+                            ),
+                            subtitle = str(
+                                "開啟後於 Google 地圖／YouTube 全螢幕時保留常駐列（含 3D 俯瞰類滑鼠指標與返回／多工鍵）",
+                                "开启后在 Google 地图／YouTube 全屏时保留常驻栏（含 3D 俯瞰类鼠标指针与返回／多任务键）",
+                                "Keeps Dock accessible over fullscreen Google Maps/YouTube (includes 3D pointer, Back & Recents)",
+                                "Google マップや YouTube の全画面表示中もドック（3D ポインター・戻る・履歴）を維持します"
+                            ),
                             checked = config.persistentOverlayDockEnabled,
                             onCheckedChange = { checked -> onUpdateConfig { it.copy(persistentOverlayDockEnabled = checked) } }
                         )
 
                         if (config.persistentOverlayDockEnabled) {
                             SettingsToggleRow(
-                                title = "同時懸浮在「其他車機啟動器」桌面上",
-                                subtitle = "切換回原廠啟動器或其他桌面時，依然保留 DX-Car 常駐懸浮 Dock",
+                                title = str(
+                                    "同時懸浮在「其他車機啟動器」桌面上",
+                                    "同时悬浮在「其他车机启动器」桌面上",
+                                    "Also Float Over Other Car Launchers",
+                                    "他の車載ランチャーのホーム画面上にも常駐表示"
+                                ),
+                                subtitle = str(
+                                    "切換回原廠啟動器或其他桌面時，依然保留 DX-Car 常駐懸浮 Dock",
+                                    "切换回原厂启动器或其他桌面时，依然保留 DX-Car 常驻悬浮 Dock",
+                                    "Retains DX-Car Floating Dock even when switching back to the stock launcher",
+                                    "純正ランチャーや他のホーム画面に切り替えても DX-Car ドックを維持します"
+                                ),
                                 checked = config.overlayDockOnOtherLaunchers,
                                 onCheckedChange = { checked -> onUpdateConfig { it.copy(overlayDockOnOtherLaunchers = checked) } }
                             )
 
                             SettingsToggleRow(
-                                title = "自動收合為透明邊緣拉條（關閉則永久展開懸浮）",
-                                subtitle = "開啟時縮成邊緣拉條，輕點或往內滑展開；關閉則保持完整 Dock 永久懸浮",
+                                title = str(
+                                    "自動收合為透明邊緣拉條（關閉則永久展開懸浮）",
+                                    "自动收起为透明边缘拉条（关闭则永久展开悬浮）",
+                                    "Auto-Collapse to Edge Handle (Turn Off to Keep Expanded)",
+                                    "端の透明バーへ自動収納（OFF で常時展開）"
+                                ),
+                                subtitle = str(
+                                    "開啟時縮成邊緣拉條，輕點或往內滑展開；關閉則保持完整 Dock 永久懸浮",
+                                    "开启时缩成边缘拉条，轻点或向内滑展开；关闭则保持完整 Dock 永久悬浮",
+                                    "Collapses into a slim edge handle (tap/swipe inward to expand); turn off to keep full Dock visible",
+                                    "ON で画面端のバーに縮小（タップ/内側スワイプで展開）。OFF でフルドックを常時表示"
+                                ),
                                 checked = config.overlayAutoCollapseEnabled,
                                 onCheckedChange = { checked -> onUpdateConfig { it.copy(overlayAutoCollapseEnabled = checked) } }
                             )
@@ -964,10 +1098,10 @@ fun SettingsScreen(
                             if (config.overlayAutoCollapseEnabled) {
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     listOf(
-                                        1500L to "1.5 秒收回（預設）",
-                                        3000L to "3 秒收回",
-                                        5000L to "5 秒收回",
-                                        0L to "手動收回"
+                                        1500L to str("1.5 秒收回（預設）", "1.5 秒收回（默认）", "1.5s Auto-Hide (Default)", "1.5秒で収納（標準）"),
+                                        3000L to str("3 秒收回", "3 秒收回", "3s Auto-Hide", "3秒で収納"),
+                                        5000L to str("5 秒收回", "5 秒收回", "5s Auto-Hide", "5秒で収納"),
+                                        0L to str("手動收回", "手动收回", "Manual Hide", "手動収納")
                                     ).forEach { (ms, label) ->
                                         SelectablePill(
                                             text = label,
@@ -977,7 +1111,17 @@ fun SettingsScreen(
                                     }
                                 }
                                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("拉條厚度：${config.overlayHandleThicknessDp} dp", color = colors.primaryText, fontSize = 12.sp, modifier = Modifier.width(135.dp))
+                                    Text(
+                                        str(
+                                            "拉條厚度：${config.overlayHandleThicknessDp} dp",
+                                            "拉条厚度：${config.overlayHandleThicknessDp} dp",
+                                            "Handle Width: ${config.overlayHandleThicknessDp} dp",
+                                            "バーの太さ：${config.overlayHandleThicknessDp} dp"
+                                        ),
+                                        color = colors.primaryText,
+                                        fontSize = 12.sp,
+                                        modifier = Modifier.width(145.dp)
+                                    )
                                     Slider(
                                         value = config.overlayHandleThicknessDp.toFloat(),
                                         onValueChange = { v -> onUpdateConfig { it.copy(overlayHandleThicknessDp = v.roundToInt().coerceIn(16, 48)) } },
@@ -989,16 +1133,27 @@ fun SettingsScreen(
                             }
                         }
 
+                        val resolvedDockLabel = DxCarI18n.resolvedDockPlacementLabel(layoutSpec.dockPlacement)
                         SettingsToggleRow(
-                            title = "首頁顯示本啟動器 Dock",
-                            subtitle = "目前判定：${layoutSpec.dockPlacement.labelZh}（${layoutSpec.metrics.widthPx}×${layoutSpec.metrics.heightPx} · ${layoutSpec.metrics.densityDpi}dpi）",
+                            title = str("首頁顯示本啟動器 Dock", "首页显示本启动器 Dock", "Show Dock on Home Screen", "ホーム画面にドックを表示"),
+                            subtitle = str(
+                                "目前判定：$resolvedDockLabel（${layoutSpec.metrics.widthPx}×${layoutSpec.metrics.heightPx} · ${layoutSpec.metrics.densityDpi}dpi）",
+                                "当前判定：$resolvedDockLabel（${layoutSpec.metrics.widthPx}×${layoutSpec.metrics.heightPx} · ${layoutSpec.metrics.densityDpi}dpi）",
+                                "Detected: $resolvedDockLabel (${layoutSpec.metrics.widthPx}×${layoutSpec.metrics.heightPx} · ${layoutSpec.metrics.densityDpi}dpi)",
+                                "現在の判定：$resolvedDockLabel（${layoutSpec.metrics.widthPx}×${layoutSpec.metrics.heightPx} · ${layoutSpec.metrics.densityDpi}dpi）"
+                            ),
                             checked = config.showHomeDock,
                             onCheckedChange = { checked -> onUpdateConfig { it.copy(showHomeDock = checked) } }
                         )
 
                         SettingsToggleRow(
-                            title = "24 小時制時鐘",
-                            subtitle = "關閉時顯示單行 12 小時制（如 8:20 PM）；點擊左上 Wi-Fi 圖示可展開下拉快捷鍵",
+                            title = str("24 小時制時鐘", "24 小时制时钟", "24-Hour Clock", "24時間表示"),
+                            subtitle = str(
+                                "關閉時顯示單行 12 小時制（如 8:20 PM）；點擊左上 Wi-Fi 圖示可展開下拉快捷鍵",
+                                "关闭时显示单行 12 小时制（如 8:20 PM）；点击左上 Wi-Fi 图标可展开下拉快捷键",
+                                "Shows 12-hour format (e.g. 8:20 PM) when off; tap top-left Wi-Fi icon for Quick Panel",
+                                "OFF 時は 12時間制（例 8:20 PM）。左上の Wi-Fi アイコンでクイックパネルを展開"
+                            ),
                             checked = config.is24HourClock,
                             onCheckedChange = { checked -> onUpdateConfig { it.copy(is24HourClock = checked) } }
                         )
@@ -1015,11 +1170,30 @@ fun SettingsScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                                    Text("🧊 Dock「3D 俯瞰」類滑鼠指標操作說明", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                    Text("單指移動＝一般觸控 · 長壓 2 秒不放＝左右縮放／上下 3D 俯瞰", color = colors.secondaryText, fontSize = 11.sp)
+                                    Text(
+                                        str(
+                                            "🧊 Dock「3D 俯瞰」類滑鼠指標操作說明",
+                                            "🧊 Dock「3D 俯瞰」类鼠标指针操作说明",
+                                            "🧊 Dock 3D Tilt & Mouse Pointer Guide",
+                                            "🧊 ドック「3D 俯瞰」ポインター操作ガイド"
+                                        ),
+                                        color = colors.primaryText,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        str(
+                                            "單指移動＝一般觸控 · 長壓 2 秒不放＝左右縮放／上下 3D 俯瞰",
+                                            "单指移动＝一般触控 · 长按 2 秒不放＝左右缩放／上下 3D 俯瞰",
+                                            "1-Finger Move = Touch · Hold 2s = Left/Right Zoom & Up/Down 3D Tilt",
+                                            "1本指移動＝通常タッチ · 2秒長押し維持＝左右ズーム／上下 3D 視点"
+                                        ),
+                                        color = colors.secondaryText,
+                                        fontSize = 11.sp
+                                    )
                                 }
                                 TutorialPillButton(
-                                    label = "教學",
+                                    label = str("教學", "教程", "Guide", "ガイド"),
                                     onClick = { onActiveTutorialChange(CarSettingsTutorialTopic.CURSOR_3D) }
                                 )
                             }
@@ -1030,15 +1204,26 @@ fun SettingsScreen(
                 val cardHomeLaunchers: @Composable (Modifier) -> Unit = { mod ->
                     SettingsSectionCard(
                         icon = Icons.Rounded.Home,
-                        title = "啟動器切換與系統預設桌面",
+                        title = str("啟動器切換與系統預設桌面", "启动器切换与系统默认桌面", "Launcher Switcher & Default Home", "ランチャー切替・標準ホーム設定"),
                         modifier = mod
                     ) {
                         val currentDefaultLauncher = homeLaunchers.firstOrNull { it.isDefault }
+                        val fallbackOtherLabel = currentDefaultLauncher?.label ?: str("其他啟動器", "其他启动器", "Other Launcher", "他のランチャー")
                         Text(
                             text = if (permissionHealth.isDefaultHome) {
-                                "✓ 目前預設啟動器：DX-Car Launcher"
+                                str(
+                                    "✓ 目前預設啟動器：DX-Car Launcher",
+                                    "✓ 当前默认启动器：DX-Car Launcher",
+                                    "✓ Current Default Home: DX-Car Launcher",
+                                    "✓ 現在の標準ホーム：DX-Car Launcher"
+                                )
                             } else {
-                                "目前預設啟動器：${currentDefaultLauncher?.label ?: "其他啟動器"}"
+                                str(
+                                    "目前預設啟動器：$fallbackOtherLabel",
+                                    "当前默认启动器：$fallbackOtherLabel",
+                                    "Current Default Home: $fallbackOtherLabel",
+                                    "現在の標準ホーム：$fallbackOtherLabel"
+                                )
                             },
                             color = if (permissionHealth.isDefaultHome) colors.statusConnected else colors.primaryText,
                             fontSize = 14.sp,
@@ -1053,7 +1238,14 @@ fun SettingsScreen(
                             ) {
                                 Icon(Icons.Rounded.Home, contentDescription = null, modifier = Modifier.size(17.dp))
                                 Spacer(Modifier.width(5.dp))
-                                Text(if (permissionHealth.isDefaultHome) "重選預設桌面" else "設為系統預設桌面", fontSize = 12.sp)
+                                Text(
+                                    if (permissionHealth.isDefaultHome) {
+                                        str("重選預設桌面", "重选默认桌面", "Change Default Home", "標準ホームを再選択")
+                                    } else {
+                                        str("設為系統預設桌面", "设为系统默认桌面", "Set as Default Home", "標準ホームに設定")
+                                    },
+                                    fontSize = 12.sp
+                                )
                             }
                             OutlinedButton(
                                 onClick = { SystemStatusMonitor.openHomeLauncherSettings(context) },
@@ -1061,7 +1253,7 @@ fun SettingsScreen(
                             ) {
                                 Icon(Icons.Rounded.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("系統桌面設定", fontSize = 12.sp)
+                                Text(str("系統桌面設定", "系统桌面设置", "System Home Settings", "システムホーム設定"), fontSize = 12.sp)
                             }
                             OutlinedButton(onClick = onRefreshHomeLaunchers, shape = RoundedCornerShape(14.dp)) {
                                 Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -1089,7 +1281,7 @@ fun SettingsScreen(
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(launcher.label, color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                 Text(
-                                                    text = if (launcher.isDefault) "系統預設桌面" else launcher.packageName,
+                                                    text = if (launcher.isDefault) str("系統預設桌面", "系统默认桌面", "System Default Home", "システムの標準ホーム") else launcher.packageName,
                                                     color = if (launcher.isDefault) colors.statusConnected else colors.secondaryText,
                                                     fontSize = 11.sp,
                                                     maxLines = 1,
@@ -1103,7 +1295,7 @@ fun SettingsScreen(
                                                 colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
                                                 shape = RoundedCornerShape(12.dp)
                                             ) {
-                                                Text("切換", fontSize = 12.sp)
+                                                Text(str("切換", "切换", "Switch", "切替"), fontSize = 12.sp)
                                             }
                                         }
                                     }
@@ -1117,19 +1309,35 @@ fun SettingsScreen(
 
                 // ==================== CATEGORY 3: 手機連線同步與版本更新 ====================
                 CategoryHeaderBanner(
-                    categoryTitle = "分類三 · 手機雙通道配對同步、遠端滑鼠與系統更新",
-                    hint = "手機連上車機藍牙免持或開啟 Wi-Fi 熱點即可自動穩定同步通知與遠端滑鼠觸控板；點擊「教學」查看特大字步驟"
+                    categoryTitle = str(
+                        "分類三 · 手機雙通道配對同步、遠端滑鼠與系統更新",
+                        "分类三 · 手机双通道配对同步、远程鼠标与系统更新",
+                        "Category 3 · Phone Dual-Channel Sync, Remote Mouse & Updates",
+                        "カテゴリ 3 · スマホ2チャンネル同期・リモートマウス・更新"
+                    ),
+                    hint = str(
+                        "手機連上車機藍牙免持或開啟 Wi-Fi 熱點即可自動穩定同步通知與遠端滑鼠觸控板；點擊「教學」查看特大字步驟",
+                        "手机连上车机蓝牙免提或开启 Wi-Fi 热点即可自动稳定同步通知与远程鼠标触控板；点击「教程」查看特大字步骤",
+                        "Auto-syncs notifications & remote touchpad via Car Bluetooth or Wi-Fi Hotspot; tap Guide for large-print steps",
+                        "車載 Bluetooth や Wi-Fi テザリングで通知とリモートタッチパッドを自動同期。「ガイド」で拡大手順を表示"
+                    )
                 )
 
                 val cardPhoneBridge: @Composable (Modifier) -> Unit = { mod ->
                     SettingsSectionCard(
                         icon = Icons.Rounded.NotificationsActive,
-                        title = "手機來電／訊息同步與遠端觸控",
+                        title = str(
+                            "手機來電／訊息同步與遠端觸控",
+                            "手机来电／消息同步与远程触控",
+                            "Phone Calls / Messages Sync & Remote Touch",
+                            "スマホ着信・メッセージ同期＆リモート操作"
+                        ),
                         headerTrailing = {
                             TutorialPillButton(onClick = { onActiveTutorialChange(CarSettingsTutorialTopic.PHONE_PAIRING) })
                         },
                         modifier = mod
                     ) {
+                        val bridgeStatusText = DxCarI18n.bridgeStatusLabel(bridgeStatus.status)
                         Surface(
                             color = colors.cardSurfaceElevated,
                             shape = RoundedCornerShape(14.dp),
@@ -1143,9 +1351,19 @@ fun SettingsScreen(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = if (bridgeStatus.transportLabel.isNotBlank()) {
-                                            "連線狀態：${bridgeStatus.status.labelZh} (${bridgeStatus.transportLabel})"
+                                            str(
+                                                "連線狀態：$bridgeStatusText (${bridgeStatus.transportLabel})",
+                                                "连接状态：$bridgeStatusText (${bridgeStatus.transportLabel})",
+                                                "Status: $bridgeStatusText (${bridgeStatus.transportLabel})",
+                                                "接続状態：$bridgeStatusText (${bridgeStatus.transportLabel})"
+                                            )
                                         } else {
-                                            "連線狀態：${bridgeStatus.status.labelZh}"
+                                            str(
+                                                "連線狀態：$bridgeStatusText",
+                                                "连接状态：$bridgeStatusText",
+                                                "Status: $bridgeStatusText",
+                                                "接続状態：$bridgeStatusText"
+                                            )
                                         },
                                         color = colors.primaryText,
                                         fontSize = 14.sp,
@@ -1153,9 +1371,19 @@ fun SettingsScreen(
                                     )
                                     Text(
                                         text = if (bridgeStatus.peerName.isNotBlank()) {
-                                            "已連接手機：${bridgeStatus.peerName}"
+                                            str(
+                                                "已連接手機：${bridgeStatus.peerName}",
+                                                "已连接手机：${bridgeStatus.peerName}",
+                                                "Connected Phone: ${bridgeStatus.peerName}",
+                                                "接続中のスマホ：${bridgeStatus.peerName}"
+                                            )
                                         } else {
-                                            "支援藍牙 SPP ＋ 手機熱點閘道雙向自動直連（無須手動輸入 IP）"
+                                            str(
+                                                "支援藍牙 SPP ＋ 手機熱點閘道雙向自動直連（無須手動輸入 IP）",
+                                                "支持蓝牙 SPP ＋ 手机热点网关双向自动直连（无需手动输入 IP）",
+                                                "Auto bi-directional link via Bluetooth SPP + Hotspot Gateway (No manual IP needed)",
+                                                "Bluetooth SPP＋テザリングゲートウェイ自動直結（IP手入力不要）"
+                                            )
                                         },
                                         color = colors.secondaryText,
                                         fontSize = 12.sp
@@ -1168,11 +1396,13 @@ fun SettingsScreen(
                         SettingsToggleRow(
                             title = str(
                                 "全螢幕導航／看影片時彈出頂部來電與訊息橫幅",
+                                "全屏导航／看视频时弹出顶部来电与消息横幅",
                                 "Show Top Call & Message Banner in Fullscreen Apps",
                                 "フルスクリーン時に着信・通知バナーを上部に表示"
                             ),
                             subtitle = str(
                                 "支援接聽、掛斷、快速回覆與語音回覆",
+                                "支持接听、挂断、快速回复与语音回复",
                                 "Supports Answer, Decline, Quick Reply & Voice Reply",
                                 "応答・切断・クイック返信・音声返信に対応"
                             ),
@@ -1183,11 +1413,13 @@ fun SettingsScreen(
                         SettingsToggleRow(
                             title = str(
                                 "收到新訊息時自動語音朗讀 (TTS)",
+                                "收到新消息时自动语音朗读 (TTS)",
                                 "Auto-Read New Messages (TTS)",
                                 "新着メッセージの自動音声読み上げ (TTS)"
                             ),
                             subtitle = str(
                                 "自動壓低音樂音量播報寄件人與內容",
+                                "自动压低音乐音量播报发件人与内容",
                                 "Automatically ducks music volume to announce sender & message",
                                 "音楽の音量を自動で下げて送信者と内容を読み上げます"
                             ),
@@ -1200,6 +1432,7 @@ fun SettingsScreen(
                             Text(
                                 text = str(
                                     "左上通知與來電橫幅大小（預設 1X 精簡紅框尺寸，字體連動縮放）",
+                                    "左上通知与来电横幅大小（默认 1X 精简尺寸，字体联动缩放）",
                                     "Notification & Call Banner Scale (1X Compact Default)",
                                     "左上通知・着信バナーサイズ（標準 1X コンパクト）"
                                 ),
@@ -1210,7 +1443,7 @@ fun SettingsScreen(
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 com.dxcar.launcher.data.NotificationBannerScale.entries.forEach { scaleOpt ->
                                     val labelText = if (scaleOpt == com.dxcar.launcher.data.NotificationBannerScale.SCALE_1_0X) {
-                                        "${scaleOpt.label} (${str("預設", "Default", "標準")})"
+                                        "${scaleOpt.label} (${str("預設", "默认", "Default", "標準")})"
                                     } else {
                                         scaleOpt.label
                                     }
@@ -1242,7 +1475,12 @@ fun SettingsScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = str("💬 自訂快速回覆選項（點擊通知「快速回覆」展開滑動選擇）", "💬 Custom Quick Replies", "💬 クイック返信のカスタマイズ"),
+                                        text = str(
+                                            "💬 自訂快速回覆選項（點擊通知「快速回覆」展開滑動選擇）",
+                                            "💬 自定义快速回复选项（点击通知「快速回复」展开滑动选择）",
+                                            "💬 Custom Quick Replies",
+                                            "💬 クイック返信のカスタマイズ"
+                                        ),
                                         color = colors.primaryText,
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
@@ -1254,7 +1492,7 @@ fun SettingsScreen(
                                         },
                                         shape = RoundedCornerShape(10.dp)
                                     ) {
-                                        Text(str("恢復預設", "Reset", "初期化"), fontSize = 11.sp)
+                                        Text(str("恢復預設", "恢复默认", "Reset", "初期化"), fontSize = 11.sp)
                                     }
                                 }
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1277,7 +1515,7 @@ fun SettingsScreen(
                                                     },
                                                     modifier = Modifier.size(22.dp)
                                                 ) {
-                                                    Icon(Icons.Rounded.Close, contentDescription = "刪除", tint = colors.secondaryText, modifier = Modifier.size(14.dp))
+                                                    Icon(Icons.Rounded.Close, contentDescription = str("刪除", "删除", "Delete", "削除"), tint = colors.secondaryText, modifier = Modifier.size(14.dp))
                                                 }
                                             }
                                         }
@@ -1292,7 +1530,17 @@ fun SettingsScreen(
                                         value = newQuickReplyInput,
                                         onValueChange = { newQuickReplyInput = it },
                                         singleLine = true,
-                                        placeholder = { Text(str("輸入新增快速回覆詞（例如：正在停車中）…", "Add quick reply phrase…", "返信フレーズを追加…"), fontSize = 12.sp) },
+                                        placeholder = {
+                                            Text(
+                                                str(
+                                                    "輸入新增快速回覆詞（例如：正在停車中）…",
+                                                    "输入新增快速回复语（例如：正在停车中）…",
+                                                    "Add quick reply phrase…",
+                                                    "返信フレーズを追加…"
+                                                ),
+                                                fontSize = 12.sp
+                                            )
+                                        },
                                         shape = RoundedCornerShape(12.dp),
                                         modifier = Modifier.weight(1f)
                                     )
@@ -1309,7 +1557,7 @@ fun SettingsScreen(
                                         colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
-                                        Text(str("＋ 新增", "+ Add", "＋ 追加"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text(str("＋ 新增", "＋ 新增", "+ Add", "＋ 追加"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -1317,13 +1565,29 @@ fun SettingsScreen(
 
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = onSimulateCall, shape = RoundedCornerShape(12.dp)) {
-                                Text(str("測試來電橫幅 (${config.notificationBannerScale.label})", "Test Call (${config.notificationBannerScale.label})", "着信テスト (${config.notificationBannerScale.label})"), fontSize = 12.sp)
+                                Text(
+                                    str(
+                                        "測試來電橫幅 (${config.notificationBannerScale.label})",
+                                        "测试来电横幅 (${config.notificationBannerScale.label})",
+                                        "Test Call (${config.notificationBannerScale.label})",
+                                        "着信テスト (${config.notificationBannerScale.label})"
+                                    ),
+                                    fontSize = 12.sp
+                                )
                             }
                             OutlinedButton(onClick = onSimulateMessage, shape = RoundedCornerShape(12.dp)) {
-                                Text(str("測試左上通知 (${config.notificationBannerScale.label})", "Test Alert (${config.notificationBannerScale.label})", "通知テスト (${config.notificationBannerScale.label})"), fontSize = 12.sp)
+                                Text(
+                                    str(
+                                        "測試左上通知 (${config.notificationBannerScale.label})",
+                                        "测试左上通知 (${config.notificationBannerScale.label})",
+                                        "Test Alert (${config.notificationBannerScale.label})",
+                                        "通知テスト (${config.notificationBannerScale.label})"
+                                    ),
+                                    fontSize = 12.sp
+                                )
                             }
                             TutorialPillButton(
-                                label = str("教學", "Guide", "ガイド"),
+                                label = str("教學", "教程", "Guide", "ガイド"),
                                 onClick = { onActiveTutorialChange(CarSettingsTutorialTopic.PHONE_PAIRING) }
                             )
                         }
@@ -1348,20 +1612,30 @@ fun SettingsScreen(
                                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                                         Icon(Icons.Rounded.Mic, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(20.dp))
                                         Spacer(Modifier.width(6.dp))
-                                        Text("✨ Gemini 語音輸入導航（Dock 與地圖一鍵呼叫）", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            str(
+                                                "✨ Gemini 語音輸入導航（Dock 與地圖一鍵呼叫）",
+                                                "✨ Gemini 语音输入导航（Dock 与地图一键呼叫）",
+                                                "✨ Gemini Voice Navigation (1-Tap from Dock & Map)",
+                                                "✨ Gemini 音声ナビ検索（ドック・地図からワンタップ起動）"
+                                            ),
+                                            color = colors.primaryText,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                     Button(
                                         onClick = onStartVoiceNavigation,
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED), contentColor = Color.White),
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
-                                        Text("🎙️ 測試語音導航", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text(str("🎙️ 測試語音導航", "🎙️ 测试语音导航", "🎙️ Test Voice Nav", "🎙️ 音声ナビをテスト"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     GeminiVoiceMode.entries.forEach { gm ->
                                         SelectablePill(
-                                            text = gm.labelZh,
+                                            text = DxCarI18n.geminiVoiceModeLabel(gm),
                                             selected = config.geminiVoiceMode == gm,
                                             onClick = { onUpdateConfig { it.copy(geminiVoiceMode = gm) } }
                                         )
@@ -1371,7 +1645,17 @@ fun SettingsScreen(
                                     value = config.geminiApiKey,
                                     onValueChange = { key -> onUpdateConfig { it.copy(geminiApiKey = key.trim()) } },
                                     singleLine = true,
-                                    label = { Text("選填 Gemini API Key（不填亦可免 Key 語音導航／喚起 Gemini App）", fontSize = 11.sp) },
+                                    label = {
+                                        Text(
+                                            str(
+                                                "選填 Gemini API Key（不填亦可免 Key 語音導航／喚起 Gemini App）",
+                                                "选填 Gemini API Key（不填亦可免 Key 语音导航／唤起 Gemini App）",
+                                                "Optional Gemini API Key (Works key-free for speech nav / Gemini App)",
+                                                "Gemini API キー（任意・未入力でも音声ナビ／Gemini アプリ起動可能）"
+                                            ),
+                                            fontSize = 11.sp
+                                        )
+                                    },
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 )
@@ -1383,14 +1667,25 @@ fun SettingsScreen(
                 val cardUpdatesAndGithub: @Composable (Modifier) -> Unit = { mod ->
                     SettingsSectionCard(
                         icon = Icons.Rounded.CloudDownload,
-                        title = str("七天試用買斷、GitHub 主頁與恢復預設", "Trial, Pro Unlock, GitHub & Reset", "トライアル・買い切り・GitHub・初期化"),
+                        title = str(
+                            "七天試用買斷、GitHub 主頁與恢復預設",
+                            "七天试用买断、GitHub 主页与恢复默认",
+                            "Trial, Pro Unlock, GitHub & Reset",
+                            "トライアル・買い切り・GitHub・初期化"
+                        ),
                         modifier = mod
                     ) {
                         if (BuildConfig.ENABLE_GITHUB_AUTO_UPDATE) {
                             SettingsToggleRow(
-                                title = str("啟動時自動檢測並下載新版 APK", "Auto-Check & Download Updates", "起動時に自動で更新を確認・取得"),
+                                title = str(
+                                    "啟動時自動檢測並下載新版 APK",
+                                    "启动时自动检测并下载新版 APK",
+                                    "Auto-Check & Download Updates",
+                                    "起動時に自動で更新を確認・取得"
+                                ),
                                 subtitle = str(
                                     "目前版本：v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})",
+                                    "当前版本：v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})",
                                     "Current: v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})",
                                     "現在: v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})"
                                 ),
@@ -1411,8 +1706,8 @@ fun SettingsScreen(
                                     shape = RoundedCornerShape(14.dp)
                                 ) {
                                     Text(
-                                        if (updateState.checking) str("檢查中…", "Checking…", "確認中…")
-                                        else str("檢查更新", "Check Updates", "更新を確認")
+                                        if (updateState.checking) str("檢查中…", "检查中…", "Checking…", "確認中…")
+                                        else str("檢查更新", "检查更新", "Check Updates", "更新を確認")
                                     )
                                 }
                                 if (updateState.hasUpdate || updateState.downloadedReady) {
@@ -1424,9 +1719,19 @@ fun SettingsScreen(
                                     ) {
                                         Text(
                                             when {
-                                                updateState.downloadedReady -> str("立即安裝 v${updateState.latestVersion}", "Install v${updateState.latestVersion}", "今すぐインストール v${updateState.latestVersion}")
-                                                updateState.downloading -> str("下載中 ${(updateState.progress * 100).toInt()}%", "Downloading ${(updateState.progress * 100).toInt()}%", "ダウンロード中 ${(updateState.progress * 100).toInt()}%")
-                                                else -> str("下載更新", "Download Update", "更新をダウンロード")
+                                                updateState.downloadedReady -> str(
+                                                    "立即安裝 v${updateState.latestVersion}",
+                                                    "立即安装 v${updateState.latestVersion}",
+                                                    "Install v${updateState.latestVersion}",
+                                                    "今すぐインストール v${updateState.latestVersion}"
+                                                )
+                                                updateState.downloading -> str(
+                                                    "下載中 ${(updateState.progress * 100).toInt()}%",
+                                                    "下载中 ${(updateState.progress * 100).toInt()}%",
+                                                    "Downloading ${(updateState.progress * 100).toInt()}%",
+                                                    "ダウンロード中 ${(updateState.progress * 100).toInt()}%"
+                                                )
+                                                else -> str("下載更新", "下载更新", "Download Update", "更新をダウンロード")
                                             }
                                         )
                                     }
@@ -1510,7 +1815,7 @@ fun SettingsScreen(
                                             )
                                         }
                                         OutlinedButton(onClick = onRestorePurchases, shape = RoundedCornerShape(12.dp)) {
-                                            Text(str("恢復購買", "Restore", "購入を復元"), fontSize = 12.sp)
+                                            Text(str("恢復購買", "恢复购买", "Restore", "購入を復元"), fontSize = 12.sp)
                                         }
                                     }
                                 }
@@ -1538,7 +1843,12 @@ fun SettingsScreen(
                                     Icon(Icons.Rounded.Code, contentDescription = null, tint = colors.accent)
                                     Spacer(Modifier.width(10.dp))
                                     Column {
-                                        Text("GitHub 開源儲存庫", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            str("GitHub 開源儲存庫", "GitHub 开源仓库", "GitHub Open-Source Repository", "GitHub オープンソースリポジトリ"),
+                                            color = colors.primaryText,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                         Text(UpdateManager.GITHUB_URL, color = colors.accent, fontSize = 11.sp)
                                     }
                                 }
@@ -1560,8 +1870,11 @@ fun SettingsScreen(
                             Icon(Icons.Rounded.RestartAlt, contentDescription = null, modifier = Modifier.size(17.dp))
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                if (confirmResetPending) str("再次點擊確認重置所有設定", "Tap again to confirm reset", "もう一度タップして初期化")
-                                else str("恢復啟動器設定為預設值", "Reset Launcher Defaults", "ランチャー設定を初期化"),
+                                if (confirmResetPending) {
+                                    str("再次點擊確認重置所有設定", "再次点击确认重置所有设置", "Tap again to confirm reset", "もう一度タップして初期化")
+                                } else {
+                                    str("恢復啟動器設定為預設值", "恢复启动器设置为默认值", "Reset Launcher Defaults", "ランチャー設定を初期化")
+                                },
                                 fontSize = 12.sp
                             )
                         }
@@ -1608,18 +1921,37 @@ fun SettingsScreen(
                                 Icon(Icons.Rounded.Security, contentDescription = null, tint = colors.accent, modifier = Modifier.size(26.dp))
                                 Spacer(Modifier.width(10.dp))
                                 Column {
-                                    Text("車機／平板權限列表與 60fps 高流暢設定", color = colors.primaryText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                                    Text("目前已授權 $grantedPerms / $totalPerms 項必要權限", color = colors.secondaryText, fontSize = 12.sp)
+                                    Text(
+                                        str(
+                                            "車機／平板權限列表與 60fps 高流暢設定",
+                                            "车机／平板权限列表与 60fps 高流畅设置",
+                                            "Car / Tablet Permissions & 60fps Smooth Mode",
+                                            "車載機／タブレット権限一覧 ＆ 60fps 設定"
+                                        ),
+                                        color = colors.primaryText,
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        str(
+                                            "目前已授權 $grantedPerms / $totalPerms 項必要權限",
+                                            "当前已授权 $grantedPerms / $totalPerms 项必要权限",
+                                            "$grantedPerms / $totalPerms required permissions granted",
+                                            "必須権限 $grantedPerms / $totalPerms 件が許可済み"
+                                        ),
+                                        color = colors.secondaryText,
+                                        fontSize = 12.sp
+                                    )
                                 }
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedButton(onClick = onRefreshPermissions, shape = RoundedCornerShape(12.dp)) {
                                     Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(4.dp))
-                                    Text("重新檢查")
+                                    Text(str("重新檢查", "重新检查", "Recheck", "再確認"))
                                 }
                                 IconButton(onClick = { onShowPermissionsSheetChange(false) }) {
-                                    Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.primaryText)
+                                    Icon(Icons.Rounded.Close, contentDescription = str("關閉", "关闭", "Close", "閉じる"), tint = colors.primaryText)
                                 }
                             }
                         }
@@ -1648,14 +1980,66 @@ fun SettingsScreen(
                                         Icon(Icons.Rounded.Speed, contentDescription = null, tint = colors.accent, modifier = Modifier.size(22.dp))
                                         Spacer(Modifier.width(8.dp))
                                         Column {
-                                            Text("開啟 60fps / 60Hz 畫面高幀率模式", color = colors.primaryText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                                             Text(
-                                                text = sheetRefreshCap.statusBadgeZh,
+                                                str(
+                                                    "開啟 60fps / 60Hz 畫面高幀率模式",
+                                                    "开启 60fps / 60Hz 画面高帧率模式",
+                                                    "Enable 60fps / 60Hz High Frame Rate Mode",
+                                                    "60fps / 60Hz 高フレームレートモードを有効化"
+                                                ),
+                                                color = colors.primaryText,
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text(
+                                                text = when {
+                                                    sheetRefreshCap.supports60Hz -> str(
+                                                        "✓ 可用（支援 ${sheetRefreshCap.maxSupportedHz}Hz · 目前 ${sheetRefreshCap.currentHz}Hz）",
+                                                        "✓ 可用（支持 ${sheetRefreshCap.maxSupportedHz}Hz · 当前 ${sheetRefreshCap.currentHz}Hz）",
+                                                        "✓ Supported (${sheetRefreshCap.maxSupportedHz}Hz max · ${sheetRefreshCap.currentHz}Hz now)",
+                                                        "✓ 利用可能（最大 ${sheetRefreshCap.maxSupportedHz}Hz · 現在 ${sheetRefreshCap.currentHz}Hz）"
+                                                    )
+                                                    sheetRefreshCap.hasVendorSettingsApp -> str(
+                                                        "⚠️ 目前 ${sheetRefreshCap.currentHz}Hz · 可進原廠設定檢查高幀率",
+                                                        "⚠️ 当前 ${sheetRefreshCap.currentHz}Hz · 可进原厂设置检查高帧率",
+                                                        "⚠️ Currently ${sheetRefreshCap.currentHz}Hz · Check OEM settings for high FPS",
+                                                        "⚠️ 現在 ${sheetRefreshCap.currentHz}Hz · 純正設定で高フレームレートを確認可能"
+                                                    )
+                                                    else -> str(
+                                                        "⚠️ 未偵測到原生 60Hz（目前系統回報 ${sheetRefreshCap.currentHz}Hz）",
+                                                        "⚠️ 未检测到原生 60Hz（当前系统回报 ${sheetRefreshCap.currentHz}Hz）",
+                                                        "⚠️ Native 60Hz not detected (System reports ${sheetRefreshCap.currentHz}Hz)",
+                                                        "⚠️ ネイティブ 60Hz 未検出（システム報告 ${sheetRefreshCap.currentHz}Hz）"
+                                                    )
+                                                },
                                                 color = if (sheetRefreshCap.supports60Hz) colors.statusConnected else Color(0xFFF59E0B),
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Bold
                                             )
-                                            Text(sheetRefreshCap.detailHintZh, color = colors.secondaryText, fontSize = 11.sp)
+                                            Text(
+                                                text = when {
+                                                    sheetRefreshCap.supports60Hz -> str(
+                                                        "偵測到此裝置螢幕支援 ${sheetRefreshCap.maxSupportedHz}Hz（目前實際更新率 ${sheetRefreshCap.currentHz}Hz），開啟開關即可強制以 60fps 高流暢度渲染！",
+                                                        "检测到此设备屏幕支持 ${sheetRefreshCap.maxSupportedHz}Hz（当前实际刷新率 ${sheetRefreshCap.currentHz}Hz），开启开关即可强制以 60fps 高流畅度渲染！",
+                                                        "Display supports ${sheetRefreshCap.maxSupportedHz}Hz (${sheetRefreshCap.currentHz}Hz active); enable toggle to force 60fps smooth rendering!",
+                                                        "${sheetRefreshCap.maxSupportedHz}Hz 対応（現在 ${sheetRefreshCap.currentHz}Hz）。ON にすると 60fps 滑らか描画を強制要求します！"
+                                                    )
+                                                    sheetRefreshCap.hasVendorSettingsApp -> str(
+                                                        "目前螢幕回報為 ${sheetRefreshCap.currentHz}Hz（可能受 CarPlay 通道預設幀率限制）；開啟開關會強制請求最高幀率，亦可點下方進入車機原廠設定開啟 60fps。",
+                                                        "当前屏幕回报为 ${sheetRefreshCap.currentHz}Hz（可能受 CarPlay 通道默认帧率限制）；开启开关会强制请求最高帧率，亦可点下方进入车机原厂设置开启 60fps。",
+                                                        "Screen currently reports ${sheetRefreshCap.currentHz}Hz (may be capped by CarPlay channel); enable toggle to request max FPS, or open OEM Car settings below.",
+                                                        "現在 ${sheetRefreshCap.currentHz}Hz と報告されています（CarPlay 経路制限の可能性）。ON で最大 FPS を要求、または下の純正設定を確認してください。"
+                                                    )
+                                                    else -> str(
+                                                        "未偵測到車機原廠獨立 60Hz 設定（系統回報固定 ${sheetRefreshCap.currentHz}Hz）；開關仍可開啟以強制請求 App 最高渲染幀率，實際上限依車機盒韌體而定。",
+                                                        "未检测到车机原厂独立 60Hz 设置（系统回报固定 ${sheetRefreshCap.currentHz}Hz）；开关仍可开启以强制请求 App 最高渲染帧率，实际上限依车机盒固件而定。",
+                                                        "No dedicated OEM 60Hz setting detected (fixed ${sheetRefreshCap.currentHz}Hz reported); toggle still requests max app FPS subject to AI Box firmware.",
+                                                        "純正 60Hz 設定は未検出（固定 ${sheetRefreshCap.currentHz}Hz）。ON で最大描画 FPS を要求します（上限は車載機ファームウェア依存）。"
+                                                    )
+                                                },
+                                                color = colors.secondaryText,
+                                                fontSize = 11.sp
+                                            )
                                         }
                                     }
                                     Switch(
@@ -1673,43 +2057,87 @@ fun SettingsScreen(
                                 ) {
                                     Icon(Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("進入原廠車機設定開啟 60fps（若有此選項即可開啟）", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        str(
+                                            "進入原廠車機設定開啟 60fps（若有此選項即可開啟）",
+                                            "进入原厂车机设置开启 60fps（若有此选项即可开启）",
+                                            "Open OEM Car Settings for 60fps Option (If Available)",
+                                            "純正の車載機設定を開いて 60fps を確認（対応機種のみ）"
+                                        ),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
                         }
 
                         PermissionRow(
-                            title = "設為預設車機啟動器 (Home)",
+                            title = str(
+                                "設為預設車機啟動器 (Home)",
+                                "设为默认车机启动器 (Home)",
+                                "Set as Default Car Home Launcher",
+                                "標準の車載ホームランチャーに設定"
+                            ),
                             granted = permissionHealth.isDefaultHome,
                             onAction = onRequestSetDefaultHome
                         )
                         PermissionRow(
-                            title = "顯示在其他應用程式上層（常駐 Dock、3D 指標、遠端滑鼠與來電橫幅）",
+                            title = str(
+                                "顯示在其他應用程式上層（常駐 Dock、3D 指標、遠端滑鼠與來電橫幅）",
+                                "显示在其他应用上层（常驻 Dock、3D 指针、远程鼠标与来电横幅）",
+                                "Display Over Other Apps (Floating Dock, 3D Pointer, Remote Mouse & Banners)",
+                                "他のアプリの上に重ねて表示（常駐ドック・3Dポインター・着信バナー）"
+                            ),
                             granted = permissionHealth.hasOverlay,
                             onAction = { PermissionHelper.openOverlayPermission(context) }
                         )
                         PermissionRow(
-                            title = "通知存取權（音樂封面／紅心控制、Google 天氣讀取、導航與訊息）",
+                            title = str(
+                                "通知存取權（音樂封面／紅心控制、Google 天氣讀取、導航與訊息）",
+                                "通知访问权限（音乐封面／红心控制、Google 天气读取、导航与消息）",
+                                "Notification Access (Album Art / Like Control, Weather, Nav & Messages)",
+                                "通知へのアクセス（音楽ジャケット／いいね制御・天気・ナビ・通知）"
+                            ),
                             granted = permissionHealth.hasNotificationListener,
                             onAction = { PermissionHelper.openNotificationListenerSettings(context) }
                         )
                         PermissionRow(
-                            title = "無障礙輔助服務（AOSP 可拖動分屏、3D 類滑鼠指標與手機遠端滑鼠點擊）",
+                            title = str(
+                                "無障礙輔助服務（AOSP 可拖動分屏、3D 類滑鼠指標與手機遠端滑鼠點擊）",
+                                "无障碍辅助服务（AOSP 可拖动分屏、3D 类鼠标指针与手机远程鼠标点击）",
+                                "Accessibility Service (AOSP Split-Screen, 3D Pointer & Remote Mouse Clicks)",
+                                "ユーザー補助サービス（AOSP 画面分割・3D ポインター・リモートマウス操作）"
+                            ),
                             granted = permissionHealth.hasAccessibility,
                             onAction = { PermissionHelper.openAccessibilitySettings(context) }
                         )
                         PermissionRow(
-                            title = "定位、藍牙、電話與通知執行期權限",
+                            title = str(
+                                "定位、藍牙、電話與通知執行期權限",
+                                "定位、蓝牙、电话与通知运行时权限",
+                                "Location, Bluetooth, Phone & Notification Runtime Permissions",
+                                "位置情報・Bluetooth・電話・通知の実行時権限"
+                            ),
                             granted = permissionHealth.hasLocation && permissionHealth.hasBluetooth && permissionHealth.hasPhoneState,
                             onAction = onRequestRuntimePermissions
                         )
                         PermissionRow(
-                            title = "修改系統設定（快捷面板螢幕亮度控制）",
+                            title = str(
+                                "修改系統設定（快捷面板螢幕亮度控制）",
+                                "修改系统设置（快捷面板屏幕亮度控制）",
+                                "Modify System Settings (Quick Panel Screen Brightness Control)",
+                                "システム設定の変更（クイックパネルからの画面輝度調整）"
+                            ),
                             granted = permissionHealth.hasWriteSettings,
                             onAction = { PermissionHelper.openWriteSettingsPermission(context) }
                         )
                         PermissionRow(
-                            title = "忽略電池最佳化（防止背景關閉常駐 Dock 與雙通道連線）",
+                            title = str(
+                                "忽略電池最佳化（防止背景關閉常駐 Dock 與雙通道連線）",
+                                "忽略电池优化（防止后台关闭常驻 Dock 与双通道连接）",
+                                "Ignore Battery Optimizations (Keep Floating Dock & Companion Link Alive)",
+                                "バッテリー最適化を無視（常駐ドックとスマホ連携の切断を防止）"
+                            ),
                             granted = permissionHealth.hasIgnoreBatteryOpt,
                             onAction = { PermissionHelper.requestIgnoreBatteryOptimizations(context) }
                         )
@@ -1722,51 +2150,182 @@ fun SettingsScreen(
         when (activeTutorial) {
             CarSettingsTutorialTopic.DUAL_UI_GUIDE -> {
                 ExtraLargeTutorialModal(
-                    title = "📖 第一介面 (1/2) ＆ 第二介面 (2/2) · 完整操作教學",
-                    steps = listOf(
-                        "【切換第一／第二介面】按住畫面中央分隔線握把（1/2 或 2/2）向左或向右拖曳滑動，即可在「① 第一介面」與「② 第二介面」之間切換。",
-                        "【① 第一介面：封面交換與快捷操作】點擊播放器「專輯封面」即可左右交換地圖與播放器大小；封面左上角「天氣地點膠囊」點擊直開 Google 天氣；下方點讚（♡）旁的「App 圖示」點擊直入該播放 App；地圖右下角「圖層圓鈕」整合切換標準／衛星／3D 底圖與即時路況。",
-                        "【② 第二介面：長壓互換與右半邊全螢幕】長壓中央「2/2 分隔線」可對調左右視窗位置；於 YouTube「上半部影片區向上滑動」（或點播放器右下角全螢幕鈕）即可進入右半邊滿版全螢幕，「向下滑動」或再點按鈕即可退出。",
-                        "【② 第二介面：YouTube 全螢幕快轉手勢】全螢幕狀態下：左 1/3 點兩下倒退 10 秒、右 1/3 點兩下快轉 10 秒；左右 1/3「點兩下後按住不放」可持續加速倒退／快轉；左右水平滑動可直接拖曳時間軸（中央 1/3 維持 YouTube 原生點控）。",
-                        "【② 第二介面：720p 預設與跨系統背景播放】預設以 720p 播放並支援方向盤媒體鍵；切去 Google 地圖、瀏覽器、系統設定或退回原車機盒桌面皆會持續背景播放聲音，僅當其他音樂 App 開始播放時才自動暫停。"
+                    title = str(
+                        "📖 第一介面 (1/2) ＆ 第二介面 (2/2) · 完整操作教學",
+                        "📖 第一界面 (1/2) ＆ 第二界面 (2/2) · 完整操作教程",
+                        "📖 First UI (1/2) & Second UI (2/2) · Full Guide",
+                        "📖 第1画面 (1/2) ＆ 第2画面 (2/2) · 完全ガイド"
                     ),
-                    highlightNote = "💡 提示：點擊 Dock 左下角按鈕在任何非首頁畫面皆會直接帶您回到啟動器首頁；已在首頁時點擊則展開 App 清單！",
+                    steps = listOf(
+                        str(
+                            "【切換第一／第二介面】按住畫面中央分隔線握把（1/2 或 2/2）向左或向右拖曳滑動，即可在「① 第一介面」與「② 第二介面」之間切換。",
+                            "【切换第一／第二界面】按住画面中央分隔线握把（1/2 或 2/2）向左或向右拖拽滑动，即可在「① 第一界面」与「② 第二界面」之间切换。",
+                            "[Switch UI 1 / UI 2] Drag the center divider handle (1/2 or 2/2) left or right to switch smoothly between UI 1 and UI 2.",
+                            "【第1／第2画面の切替】画面中央の区切りバー（1/2 または 2/2）を左右にドラッグして「① 第1画面」と「② 第2画面」を切り替えます。"
+                        ),
+                        str(
+                            "【① 第一介面：封面交換與快捷操作】點擊播放器「專輯封面」即可左右交換地圖與播放器大小；封面左上角「天氣地點膠囊」點擊直開 Google 天氣；下方點讚（♡）旁的「App 圖示」點擊直入該播放 App；地圖右下角「圖層圓鈕」整合切換標準／衛星／3D 底圖與即時路況。",
+                            "【① 第一界面：封面交换与快捷操作】点击播放器「专辑封面」即可左右交换地图与播放器大小；封面左上角「天气地点胶囊」点击直开 Google 天气；下方点赞（♡）旁的「App 图标」点击直入该播放 App；地图右下角「图层圆钮」整合切换标准／卫星／3D 底图与实时路况。",
+                            "[① First UI: Swap & Shortcuts] Tap the Album Cover to swap Map and Media pane sizes; tap the top-left Weather Pill for Google Weather; tap the App Icon next to Like (♡) to open the music app; tap the bottom-right Map Layers button for Standard/Satellite/3D & Live Traffic.",
+                            "【① 第1画面：カバー入替とショートカット】「アルバムカバー」タップで地図とプレーヤーのサイズを入替。カバー左上の天気ピルで Google 天気を表示。いいね（♡）横のアイコンで音楽アプリを起動。地図右下のレイヤーボタンで標準／衛星／3D地図と渋滞情報を切替。"
+                        ),
+                        str(
+                            "【② 第二介面：長壓互換與右半邊全螢幕】長壓中央「2/2 分隔線」可對調左右視窗位置；於 YouTube「上半部影片區向上滑動」（或點播放器右下角全螢幕鈕）即可進入右半邊滿版全螢幕，「向下滑動」或再點按鈕即可退出。",
+                            "【② 第二界面：长按互换与右半边全屏】长按中央「2/2 分隔线」可对调左右窗口位置；在 YouTube「上半部视频区向上滑动」（或点播放器右下角全屏钮）即可进入右半边满版全屏，「向下滑动」或再点按钮即可退出。",
+                            "[② Second UI: Swap & Half-Fullscreen] Long-press the center 2/2 divider to swap left/right sides; swipe UP on the upper YouTube video area (or tap the fullscreen button) to fill the right half; swipe DOWN or tap again to exit.",
+                            "【② 第2画面：左右入替と右半分全画面】中央の「2/2 区切り線」長押しで左右を入替。YouTube 上部の動画エリアを上スワイプ（または全画面ボタン）で右半分フルスクリーン表示、下スワイプで終了します。"
+                        ),
+                        str(
+                            "【② 第二介面：YouTube 全螢幕快轉手勢】全螢幕狀態下：左 1/3 點兩下倒退 10 秒、右 1/3 點兩下快轉 10 秒；左右 1/3「點兩下後按住不放」可持續加速倒退／快轉；左右水平滑動可直接拖曳時間軸（中央 1/3 維持 YouTube 原生點控）。",
+                            "【② 第二界面：YouTube 全屏快进手势】全屏状态下：左 1/3 双击快退 10 秒、右 1/3 双击快进 10 秒；左右 1/3「双击后按住不放」可持续加速快退／快进；左右水平滑动可直接拖拽时间轴（中央 1/3 维持 YouTube 原生点控）。",
+                            "[② Second UI: YouTube Fullscreen Gestures] In fullscreen: double-tap Left/Right 1/3 for -10s / +10s; double-tap & hold Left/Right 1/3 for accelerated rewind/fast-forward; swipe horizontally to scrub timeline (Center 1/3 keeps native YouTube controls).",
+                            "【② 第2画面：YouTube 全画面ジェスチャー】全画面時：左/右 1/3 ダブルタップで 10秒戻し/送り、ダブルタップ長押しで連続高速シーク、左右スワイプでタイムライン移動（中央 1/3 は標準タップ操作）。"
+                        ),
+                        str(
+                            "【② 第二介面：720p 預設與跨系統背景播放】預設以 720p 播放並支援方向盤媒體鍵；切去 Google 地圖、瀏覽器、系統設定或退回原車機盒桌面皆會持續背景播放聲音，僅當其他音樂 App 開始播放時才自動暫停。",
+                            "【② 第二界面：720p 默认与跨系统后台播放】默认以 720p 播放并支持方向盘媒体键；切去 Google 地图、浏览器、系统设置或退回原车机盒桌面均会持续后台播放声音，仅当其他音乐 App 开始播放时才自动暂停。",
+                            "[② Second UI: 720p & Background Play] Streams at 720p by default with steering-wheel media key support; keeps audio playing across Google Maps, Browser, Settings, or Stock Launcher, pausing only when another music app plays.",
+                            "【② 第2画面：標準 720p ＆ バックグラウンド再生】標準 720p 再生とステアリングリモコンに対応。Google マップやブラウザ、純正ホームへ移動しても音声再生を継続し、他音楽アプリの再生時のみ自動一時停止します。"
+                        )
+                    ),
+                    highlightNote = str(
+                        "💡 提示：點擊 Dock 左下角按鈕在任何非首頁畫面皆會直接帶您回到啟動器首頁；已在首頁時點擊則展開 App 清單！",
+                        "💡 提示：点击 Dock 左下角按钮在任何非首页画面均会直接带您回到启动器首页；已在首页时点击则展开 App 列表！",
+                        "💡 Tip: Tapping the Home/Drawer Dock button from any non-home screen returns to DX-Car Home first; tapping it on Home opens the App Drawer!",
+                        "💡 ヒント：ホーム以外の画面でドックのホームボタンを押すとホーム画面へ戻り、ホーム画面で押すとアプリ一覧を開きます！"
+                    ),
                     onClose = { onActiveTutorialChange(null) }
                 )
             }
 
             CarSettingsTutorialTopic.CURSOR_3D -> {
                 ExtraLargeTutorialModal(
-                    title = "🧊 Dock「3D 俯瞰」類滑鼠指標 · 操作教學",
-                    steps = TUTORIAL_3D_CURSOR_STEPS,
-                    highlightNote = "💡 提醒：請先點設定最上方「權限設定」確認【顯示在其他應用程式上層】與【無障礙輔助服務】皆已開啟。",
+                    title = str(
+                        "🧊 Dock「3D 俯瞰」類滑鼠指標 · 操作教學",
+                        "🧊 Dock「3D 俯瞰」类鼠标指针 · 操作教程",
+                        "🧊 Dock 3D Tilt & Mouse Pointer · Guide",
+                        "🧊 ドック「3D 俯瞰」ポインター · 操作ガイド"
+                    ),
+                    steps = listOf(
+                        str(
+                            "點擊 Dock 上的【3D】圖示後，畫面會出現一個「3D 立體類滑鼠指標」跟著您的手指移動。",
+                            "点击 Dock 上的【3D】图标后，画面会出现一个「3D 立体类鼠标指针」跟着您的手指移动。",
+                            "Tap the [3D] icon on the Dock to summon a 3D mouse-like pointer that follows your finger.",
+                            "ドックの【3D】アイコンをタップすると、指に追従する「3D マウスポインター」が表示されます。"
+                        ),
+                        str(
+                            "一般點擊或直接滑動手指時：維持「單指觸控」（附藍色光軌特效提示），可正常平移地圖或點擊按鈕。",
+                            "一般点击或直接滑动手指时：维持「单指触控」（附蓝色光轨特效提示），可正常平移地图或点击按钮。",
+                            "Tap or drag normally for standard 1-finger touch (with cyan light trail) to pan maps or tap buttons.",
+                            "通常のタップやスライドは「1本指タッチ」（青い軌跡エフェクト付き）として地図移動やボタン操作を行えます。"
+                        ),
+                        str(
+                            "長壓原處滿 2 秒（手指不要離開螢幕！）：游標外圈會亮起綠色十字光環，代表已進入「雙指模擬模式」。",
+                            "长按原处满 2 秒（手指不要离开屏幕！）：光标外圈会亮起绿色十字光环，代表已进入「双指模拟模式」。",
+                            "Hold still for 2 seconds without lifting your finger: a green crosshair halo lights up to indicate 2-Finger Simulation Mode.",
+                            "同じ場所を 2 秒間長押し（指を離さないでください！）：緑色の十字リングが点灯し「2本指シミュレートモード」に入ります。"
+                        ),
+                        str(
+                            "長壓滿 2 秒且手指不放開繼續移動：\n• 往左滑 ＝ 地圖縮小\n• 往右滑 ＝ 地圖放大\n• 往上／往下滑 ＝ 模擬雙指進入或退出 3D 建築俯瞰視角！",
+                            "长按满 2 秒且手指不放开继续移动：\n• 往左滑 ＝ 地图缩小\n• 往右滑 ＝ 地图放大\n• 往上／往下滑 ＝ 模拟双指进入或退出 3D 建筑俯瞰视角！",
+                            "While holding after 2 seconds, slide without lifting:\n• Slide Left = Zoom Out\n• Slide Right = Zoom In\n• Slide Up / Down = 2-Finger 3D Building Tilt / Back to 2D!",
+                            "2秒長押し後、指を離さずにスライド：\n• 左スライド ＝ ズームアウト\n• 右スライド ＝ ズームイン\n• 上／下スライド ＝ 3D 俯瞰視点切替／2D 復帰！"
+                        ),
+                        str(
+                            "手指一放開螢幕，就會自動變回一般「類滑鼠指標」；下次要縮放或切 3D 時，重新長壓 2 秒即可再次啟用。",
+                            "手指一放开屏幕，就会自动变回一般「类鼠标指针」；下次要缩放或切 3D 时，重新长按 2 秒即可再次启用。",
+                            "Lifting your finger resets back to normal pointer mode; hold 2 seconds again anytime to zoom or tilt.",
+                            "指を離すと自動的に通常ポインターへ戻ります。再度ズームや 3D 切替を行う際はもう一度 2 秒長押ししてください。"
+                        )
+                    ),
+                    highlightNote = str(
+                        "💡 提醒：請先點設定最上方「權限設定」確認【顯示在其他應用程式上層】與【無障礙輔助服務】皆已開啟。",
+                        "💡 提醒：请先点设置最上方「权限需求」确认【显示在其他应用上层】与【无障碍辅助服务】均已开启。",
+                        "💡 Note: Ensure both [Display Over Other Apps] and [Accessibility Service] are enabled in Permissions at the top of Settings.",
+                        "💡 ヒント：設定上部の「権限設定」から【他のアプリの上に重ねて表示】と【ユーザー補助サービス】の両方が有効かご確認ください。"
+                    ),
                     onClose = { onActiveTutorialChange(null) }
                 )
             }
 
             CarSettingsTutorialTopic.PHONE_PAIRING -> {
                 ExtraLargeTutorialModal(
-                    title = "📱 車機與手機配對同步 · 完整教學",
-                    steps = listOf(
-                        "【車機端】點設定最上方「權限設定」，開啟【顯示在其他應用程式上層】、【通知存取權】與【無障礙輔助服務】（啟用遠端滑鼠點擊）。",
-                        "【手機端】安裝同一支 APK 開啟會自動進入手機介面：點最上方「權限設定」開啟【通知讀取權限】（Android 13+ 若顯示受限制設定，先去應用程式資訊右上角 ⋮ 點「允許受限制的設定」）。",
-                        "【自動連線方式】只要「手機連上車機盒藍牙（可接電話狀態）」或「開啟手機 Wi-Fi 熱點給車機連網」，雙端會自動透過藍牙 SPP 或熱點閘道穩定連線，不需手動輸入 IP！",
-                        "【遠端滑鼠觸控板】連線後手機畫面可直接當作車機滑鼠觸控板使用；點手機上的「車機滑鼠靈敏度設定」，車機畫面就會自動跳出系統指標速度設定頁！"
+                    title = str(
+                        "📱 車機與手機配對同步 · 完整教學",
+                        "📱 车机与手机配对同步 · 完整教程",
+                        "📱 Car & Phone Companion Sync · Full Guide",
+                        "📱 車載機＆スマホ連携同期 · 完全ガイド"
                     ),
-                    highlightNote = "✓ 已修復 Wi-Fi 熱點頻繁斷開問題：現在通知推播與「推播測試通知」皆走背景高速通道，連線持續穩定不中斷！",
+                    steps = listOf(
+                        str(
+                            "【車機端】點設定最上方「權限設定」，開啟【顯示在其他應用程式上層】、【通知存取權】與【無障礙輔助服務】（啟用遠端滑鼠點擊）。",
+                            "【车机端】点设置最上方「权限需求」，开启【显示在其他应用上层】、【通知访问权限】与【无障碍辅助服务】（启用远程鼠标点击）。",
+                            "[On Car AI Box] Tap Permissions at the top of Settings and enable [Display Over Other Apps], [Notification Access], and [Accessibility Service] (for remote mouse clicks).",
+                            "【車載機側】設定上部の「権限設定」から【他のアプリの上に表示】・【通知へのアクセス】・【ユーザー補助サービス】（リモートクリック用）を有効にします。"
+                        ),
+                        str(
+                            "【手機端】安裝同一支 APK 開啟會自動進入手機介面：點最上方「權限設定」開啟【通知讀取權限】（Android 13+ 若顯示受限制設定，先去應用程式資訊右上角 ⋮ 點「允許受限制的設定」）。",
+                            "【手机端】安装同一支 APK 开启会自动进入手机界面：点最上方「权限需求」开启【通知读取权限】（Android 13+ 若显示受限制设置，先去应用信息右上角 ⋮ 点「允许受限制的设置」）。",
+                            "[On Smartphone] Install the same APK (auto-enters Phone Companion mode): tap Permissions and enable [Notification Access] (on Android 13+, if restricted, open App Info → top-right ⋮ → Allow restricted settings).",
+                            "【スマホ側】同じ APK を入れて起動すると自動でスマホモードになります。上部の「権限設定」から【通知へのアクセス】を許可します（Android 13+ で制限される場合はアプリ情報 → 右上 ⋮ →「制限付き設定を許可」）。"
+                        ),
+                        str(
+                            "【自動連線方式】只要「手機連上車機盒藍牙（可接電話狀態）」或「開啟手機 Wi-Fi 熱點給車機連網」，雙端會自動透過藍牙 SPP 或熱點閘道穩定連線，不需手動輸入 IP！",
+                            "【自动连接方式】只要「手机连上车机盒蓝牙（可接电话状态）」或「开启手机 Wi-Fi 热点给车机联网」，双端会自动通过蓝牙 SPP 或热点网关稳定连接，无需手动输入 IP！",
+                            "[Auto-Connection] Simply connect your phone to Car Bluetooth or turn on your phone's Wi-Fi Hotspot for the Car — both sides connect automatically via Bluetooth SPP or Hotspot Gateway with no manual IP!",
+                            "【自動接続】「スマホを車載 Bluetooth に接続」または「スマホの Wi-Fi テザリングに車載機を接続」するだけで、Bluetooth SPP またはゲートウェイ経由で自動接続されます（IP 入力不要）！"
+                        ),
+                        str(
+                            "【遠端滑鼠觸控板】連線後手機畫面可直接當作車機滑鼠觸控板使用；點手機上的「車機滑鼠靈敏度設定」，車機畫面就會自動跳出系統指標速度設定頁！",
+                            "【远程鼠标触控板】连接后手机画面可直接当作车机鼠标触控板使用；点手机上的「车机鼠标灵敏度设置」，车机画面就会自动弹出系统指针速度设置页！",
+                            "[Remote Mouse Touchpad] Once connected, use your phone screen as a multi-touch Car touchpad; tap [Car Pointer Speed Settings] on your phone to pop up system pointer speed settings on the Car screen!",
+                            "【リモートタッチパッド】接続後はスマホ画面で車載機のマウス操作が可能。スマホ側の「車載マウス感度設定」を押すと車載画面にポインター速度設定が開きます！"
+                        )
+                    ),
+                    highlightNote = str(
+                        "✓ 已修復 Wi-Fi 熱點頻繁斷開問題：現在通知推播與「推播測試通知」皆走背景高速通道，連線持續穩定不中斷！",
+                        "✓ 已修复 Wi-Fi 热点频繁断开问题：现在通知推送与「推送测试通知」均走后台高速通道，连接持续稳定不中断！",
+                        "✓ Hotspot stability enhanced: notifications and test alerts run on a dedicated background IO channel for uninterrupted syncing!",
+                        "✓ テザリング接続の安定性を強化：通知転送とテスト送信は専用の高速バックグラウンド通信で途切れず動作します！"
+                    ),
                     onClose = { onActiveTutorialChange(null) }
                 )
             }
 
             CarSettingsTutorialTopic.STOCK_DOCK_CONFLICT -> {
                 ExtraLargeTutorialModal(
-                    title = "⚙️ 關閉原車啟動器 Dock 與懸浮球 · 教學",
-                    steps = listOf(
-                        "當您開啟 DX-Car Launcher 的「常駐懸浮 Dock（永久懸浮或跨啟動器懸浮）」時，若車機盒原本自帶左側欄或白色懸浮球，兩個懸浮層可能會重疊。",
-                        "請點擊下方「前往車機盒設定頁面」按鈕（或開啟車機盒內建的「車機設定／輔助觸控／懸浮球」App）。",
-                        "將原車系統的「懸浮按鈕（Assistive Touch／小白點）」與「原廠導航側邊欄」關閉，即可享受乾淨無遮擋的 AA Coolwalk 常駐 Dock！"
+                    title = str(
+                        "⚙️ 關閉原車啟動器 Dock 與懸浮球 · 教學",
+                        "⚙️ 关闭原车启动器 Dock 与悬浮球 · 教程",
+                        "⚙️ Disable Stock Launcher Dock & Floating Ball · Guide",
+                        "⚙️ 純正ドック＆フローティングボールの無効化 · ガイド"
                     ),
-                    actionButtonLabel = "立即前往車機盒設定頁面",
+                    steps = listOf(
+                        str(
+                            "當您開啟 DX-Car Launcher 的「常駐懸浮 Dock（永久懸浮或跨啟動器懸浮）」時，若車機盒原本自帶左側欄或白色懸浮球，兩個懸浮層可能會重疊。",
+                            "当您开启 DX-Car Launcher 的「常驻悬浮 Dock（永久悬浮或跨启动器悬浮）」时，若车机盒原本自带左侧栏或白色悬浮球，两个悬浮层可能会重叠。",
+                            "When DX-Car's Persistent Floating Dock is enabled across apps/launchers, the AI Box's built-in sidebar or white assistive ball may overlap with it.",
+                            "DX-Car の「常駐フローティングドック」を有効にした際、車載ボックス標準の左サイドバーや白いアシストボールがあると重なる場合があります。"
+                        ),
+                        str(
+                            "請點擊下方「前往車機盒設定頁面」按鈕（或開啟車機盒內建的「車機設定／輔助觸控／懸浮球」App）。",
+                            "请点击下方「前往车机盒设置页面」按钮（或开启车机盒内置的「车机设置／辅助触控／悬浮球」App）。",
+                            "Tap [Open AI Box Vendor Settings] below (or open your AI Box's built-in Car Settings / Assistive Touch / Float Ball app).",
+                            "下の「車載ボックス設定を開く」ボタンを押すか、端末内蔵の「車載設定／Assistive Touch／フローティングボール」アプリを開いてください。"
+                        ),
+                        str(
+                            "將原車系統的「懸浮按鈕（Assistive Touch／小白點）」與「原廠導航側邊欄」關閉，即可享受乾淨無遮擋的 AA Coolwalk 常駐 Dock！",
+                            "将原车系统的「悬浮按钮（Assistive Touch／小白点）」与「原厂导航侧边栏」关闭，即可享受干净无遮挡的 AA Coolwalk 常驻 Dock！",
+                            "Turn off the stock [Assistive Touch / Floating Ball] and [Stock Navigation Sidebar] for a clean, unobstructed AA Coolwalk Dock!",
+                            "純正システムの「フローティングボタン（Assistive Touch）」と「純正ナビサイドバー」をオフにすると、すっきり快適に常駐ドックを使えます！"
+                        )
+                    ),
+                    actionButtonLabel = str(
+                        "立即前往車機盒設定頁面",
+                        "立即前往车机盒设置页面",
+                        "Open AI Box Vendor Settings Now",
+                        "今すぐ車載ボックス設定を開く"
+                    ),
                     onActionClick = {
                         SystemStatusMonitor.openAiBoxVendorSettings(context, preferDisplayFor60Fps = false)
                         onActiveTutorialChange(null)
@@ -1831,7 +2390,7 @@ private fun CategoryHeaderBanner(
 
 @Composable
 fun TutorialPillButton(
-    label: String = "教學",
+    label: String = str("教學", "教程", "Guide", "ガイド"),
     onClick: () -> Unit
 ) {
     val colors = LocalDxCarColors.current
@@ -1949,10 +2508,10 @@ private fun TimeStepperCard(
             }
             Row {
                 IconButton(onClick = { onDeltaMinutes(-15) }, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Rounded.Remove, contentDescription = "減少15分", tint = colors.primaryText, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Rounded.Remove, contentDescription = str("減少15分", "减少15分", "-15 min", "-15分"), tint = colors.primaryText, modifier = Modifier.size(18.dp))
                 }
                 IconButton(onClick = { onDeltaMinutes(15) }, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Rounded.Add, contentDescription = "增加15分", tint = colors.primaryText, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Rounded.Add, contentDescription = str("增加15分", "增加15分", "+15 min", "+15分"), tint = colors.primaryText, modifier = Modifier.size(18.dp))
                 }
             }
         }
@@ -2018,7 +2577,7 @@ private fun PermissionRow(
             Text(title, color = colors.primaryText, fontSize = 13.sp)
         }
         Text(
-            text = if (granted) "已就緒" else "前往開啟",
+            text = if (granted) str("已就緒", "已就绪", "Granted", "許可済み") else str("前往開啟", "前往开启", "Enable", "設定を開く"),
             color = if (granted) colors.statusConnected else colors.accent,
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold

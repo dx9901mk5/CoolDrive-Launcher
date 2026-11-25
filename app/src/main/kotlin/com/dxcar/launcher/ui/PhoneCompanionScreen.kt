@@ -37,10 +37,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -257,9 +257,19 @@ fun PhoneCompanionScreen(
             )
         )
         touchpadTip = if (ok) {
-            "✓ 已送出指令！車機螢幕已跳出「滑鼠／指標速度（靈敏度）」設定頁"
+            DxCarI18n.tr(
+                "✓ 已送出指令！車機螢幕已跳出「滑鼠／指標速度（靈敏度）」設定頁",
+                "✓ 已发送指令！车机屏幕已弹出「鼠标／指针速度（灵敏度）」设置页",
+                "✓ Sent! Pointer Speed / Mouse Sensitivity settings opened on Car screen",
+                "✓ 送信完了！車載画面に「ポインター速度（マウス感度）」設定を表示しました"
+            )
         } else {
-            "⚠️ 尚未連上車機，請確認上方顯示「已連線同步中」"
+            DxCarI18n.tr(
+                "⚠️ 尚未連上車機，請確認上方顯示「已連線同步中」",
+                "⚠️ 尚未连上车机，请确认上方显示「已连接同步中」",
+                "⚠️ Not connected to Car yet — verify connection status above",
+                "⚠️ 車載機に未接続です。上部の接続状態をご確認ください"
+            )
         }
     }
 
@@ -268,11 +278,11 @@ fun PhoneCompanionScreen(
         listOf("com.facebook.orca") to "Messenger",
         listOf("com.whatsapp", "com.whatsapp.w4b") to "WhatsApp",
         listOf("org.telegram.messenger") to "Telegram",
-        listOf("com.google.android.apps.messaging") to "Google 簡訊",
-        listOf("com.samsung.android.messaging") to "三星簡訊",
-        listOf("com.android.mms", "com.coloros.mms", "com.oplus.mms", "com.miui.mms") to "系統簡訊",
-        listOf("com.vivo.mms", "com.sie.mms", "com.bbk.mms", "com.iqoo.mms") to "vivo 簡訊",
-        listOf("com.tencent.mm") to "WeChat",
+        listOf("com.google.android.apps.messaging") to str("Google 簡訊", "Google 短信", "Google Messages", "Google メッセージ"),
+        listOf("com.samsung.android.messaging") to str("三星簡訊", "三星短信", "Samsung Messages", "Samsung メッセージ"),
+        listOf("com.android.mms", "com.coloros.mms", "com.oplus.mms", "com.miui.mms") to str("系統簡訊", "系统短信", "System SMS", "標準 SMS／メッセージ"),
+        listOf("com.vivo.mms", "com.sie.mms", "com.bbk.mms", "com.iqoo.mms") to str("vivo 簡訊", "vivo 短信", "vivo Messages", "vivo メッセージ"),
+        listOf("com.tencent.mm") to str("WeChat", "微信 (WeChat)", "WeChat", "WeChat"),
         listOf("com.instagram.android") to "Instagram",
         listOf("com.instagram.barcelona") to "Threads",
         listOf("com.discord") to "Discord",
@@ -328,7 +338,7 @@ fun PhoneCompanionScreen(
                         )
                     }
                     TutorialPillButton(
-                        label = str("教學", "Guide", "ガイド"),
+                        label = str("教學", "教程", "Guide", "ガイド"),
                         onClick = { showLargeTutorial = true }
                     )
                 }
@@ -379,9 +389,19 @@ fun PhoneCompanionScreen(
                             Spacer(Modifier.width(6.dp))
                             Text(
                                 text = if (allPermsOk) {
-                                    str("權限已就緒 ($grantedPerms/$totalPerms)", "Permissions OK ($grantedPerms/$totalPerms)", "権限 OK ($grantedPerms/$totalPerms)")
+                                    str(
+                                        "權限已就緒 ($grantedPerms/$totalPerms)",
+                                        "权限已就绪 ($grantedPerms/$totalPerms)",
+                                        "Permissions OK ($grantedPerms/$totalPerms)",
+                                        "権限 OK ($grantedPerms/$totalPerms)"
+                                    )
                                 } else {
-                                    str("權限需求 ($grantedPerms/$totalPerms · 點此開啟)", "Permissions ($grantedPerms/$totalPerms · Tap)", "権限設定 ($grantedPerms/$totalPerms · 開く)")
+                                    str(
+                                        "權限需求 ($grantedPerms/$totalPerms · 點此開啟)",
+                                        "权限需求 ($grantedPerms/$totalPerms · 点此开启)",
+                                        "Permissions ($grantedPerms/$totalPerms · Tap)",
+                                        "権限設定 ($grantedPerms/$totalPerms · 開く)"
+                                    )
                                 },
                                 color = colors.primaryText,
                                 fontSize = 13.sp,
@@ -397,7 +417,7 @@ fun PhoneCompanionScreen(
                         ) {
                             Icon(Icons.Rounded.DirectionsCar, contentDescription = null, modifier = Modifier.size(17.dp))
                             Spacer(Modifier.width(5.dp))
-                            Text(str("切換車機模式", "Switch to Car Mode", "車載モードへ切替"), fontSize = 13.sp)
+                            Text(str("切換車機模式", "切换车机模式", "Switch to Car Mode", "車載モードへ切替"), fontSize = 13.sp)
                         }
                     }
                 }
@@ -405,8 +425,18 @@ fun PhoneCompanionScreen(
 
             // ==================== CATEGORY 1: 車機連線狀態與測試 ====================
             PhoneCategoryLabel(
-                title = "分類一 · 車機雙通道連線狀態",
-                hint = "連上車機藍牙或開啟手機熱點自動直連；無須手動輸入 IP"
+                title = str(
+                    "分類一 · 車機雙通道連線狀態",
+                    "分类一 · 车机双通道连接状态",
+                    "Category 1 · Dual-Channel Car Connection",
+                    "カテゴリ 1 · 車載機デュアル接続状態"
+                ),
+                hint = str(
+                    "連上車機藍牙或開啟手機熱點自動直連；無須手動輸入 IP",
+                    "连上车机蓝牙或开启手机热点自动直连；无需手动输入 IP",
+                    "Auto-connects via Car Bluetooth or Wi-Fi Hotspot — no manual IP needed",
+                    "車載 Bluetooth またはスマホのテザリングで自動直結（IP手入力不要）"
+                )
             )
 
             Surface(
@@ -443,9 +473,14 @@ fun PhoneCompanionScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = if (isConnected) {
-                                    "已連線同步中 (${bridgeStatus.transportLabel})"
+                                    str(
+                                        "已連線同步中 (${bridgeStatus.transportLabel})",
+                                        "已连接同步中 (${bridgeStatus.transportLabel})",
+                                        "Connected & Syncing (${bridgeStatus.transportLabel})",
+                                        "接続済み・同期中 (${bridgeStatus.transportLabel})"
+                                    )
                                 } else {
-                                    bridgeStatus.status.labelZh
+                                    DxCarI18n.bridgeStatusLabel(bridgeStatus.status)
                                 },
                                 color = colors.primaryText,
                                 fontSize = 16.sp,
@@ -454,11 +489,26 @@ fun PhoneCompanionScreen(
                             Text(
                                 text = when {
                                     isConnected && bridgeStatus.peerName.isNotBlank() ->
-                                        "已連接車機：${bridgeStatus.peerName}"
+                                        str(
+                                            "已連接車機：${bridgeStatus.peerName}",
+                                            "已连接车机：${bridgeStatus.peerName}",
+                                            "Connected Car: ${bridgeStatus.peerName}",
+                                            "接続中の車載機：${bridgeStatus.peerName}"
+                                        )
                                     config.companionTargetDeviceName.isNotBlank() ->
-                                        "藍牙目標：${config.companionTargetDeviceName}（連熱點亦自動雙向直連）"
+                                        str(
+                                            "藍牙目標：${config.companionTargetDeviceName}（連熱點亦自動雙向直連）",
+                                            "蓝牙目标：${config.companionTargetDeviceName}（连热点亦自动双向直连）",
+                                            "BT Target: ${config.companionTargetDeviceName} (Hotspot also auto-connects)",
+                                            "Bluetooth 対象：${config.companionTargetDeviceName}（テザリングでも自動接続）"
+                                        )
                                     else ->
-                                        "只要手機已連車機藍牙通話或開啟熱點，系統即自動偵測連入"
+                                        str(
+                                            "只要手機已連車機藍牙通話或開啟熱點，系統即自動偵測連入",
+                                            "只要手机已连车机蓝牙通话或开启热点，系统即自动检测连入",
+                                            "Auto-detects & connects whenever paired to Car BT audio or Wi-Fi Hotspot",
+                                            "車載 Bluetooth 通話またはテザリング接続時に自動検出して接続します"
+                                        )
                                 },
                                 color = colors.secondaryText,
                                 fontSize = 12.sp
@@ -486,9 +536,19 @@ fun PhoneCompanionScreen(
                             Spacer(Modifier.width(8.dp))
                             Text(
                                 text = if (listenerAlive) {
-                                    "✓ 通知擷取服務已啟動運作中"
+                                    str(
+                                        "✓ 通知擷取服務已啟動運作中",
+                                        "✓ 通知捕获服务已启动运行中",
+                                        "✓ Notification Listener Service Active",
+                                        "✓ 通知読み取りサービス稼働中"
+                                    )
                                 } else {
-                                    "⚠️ 尚未啟用通知讀取服務，請點最上方「權限需求」開啟"
+                                    str(
+                                        "⚠️ 尚未啟用通知讀取服務，請點最上方「權限需求」開啟",
+                                        "⚠️ 尚未启用通知读取服务，请点最上方「权限需求」开启",
+                                        "⚠️ Notification Access off — tap Permissions above to enable",
+                                        "⚠️ 通知へのアクセスが未許可です。上部の「権限設定」から有効にしてください"
+                                    )
                                 },
                                 color = colors.primaryText,
                                 fontSize = 12.sp,
@@ -511,7 +571,7 @@ fun PhoneCompanionScreen(
                         ) {
                             Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("立即搜尋重連")
+                            Text(str("立即搜尋重連", "立即搜索重连", "Reconnect Now", "今すぐ再接続"))
                         }
                         OutlinedButton(
                             onClick = {
@@ -521,22 +581,42 @@ fun PhoneCompanionScreen(
                                         id = UUID.randomUUID().toString(),
                                         appPackage = "jp.naver.line.android",
                                         appName = "LINE",
-                                        sender = "手機同步測試",
-                                        text = "DX-Car Launcher 雙通道通知測試成功！",
+                                        sender = DxCarI18n.tr(
+                                            "手機同步測試",
+                                            "手机同步测试",
+                                            "Phone Sync Test",
+                                            "スマホ同期テスト"
+                                        ),
+                                        text = DxCarI18n.tr(
+                                            "DX-Car Launcher 雙通道通知測試成功！",
+                                            "DX-Car Launcher 双通道通知测试成功！",
+                                            "DX-Car Launcher dual-channel notification test succeeded!",
+                                            "DX-Car Launcher デュアル通知テスト成功！"
+                                        ),
                                         canReply = false
                                     )
                                 )
                                 testSentTip = if (ok) {
-                                    "✓ 已送出測試通知至車機！請看車機上方橫幅或鈴鐺"
+                                    DxCarI18n.tr(
+                                        "✓ 已送出測試通知至車機！請看車機上方橫幅或鈴鐺",
+                                        "✓ 已发送测试通知至车机！请看车机上方横幅或铃铛",
+                                        "✓ Test notification sent! Check the banner or bell on your Car screen",
+                                        "✓ テスト通知を送信しました！車載画面の上部バナーまたはベルをご確認ください"
+                                    )
                                 } else {
-                                    "⏳ 已排入傳送佇列並喚醒連線：請確認車機已安裝開啟新版且連上同一藍牙或熱點"
+                                    DxCarI18n.tr(
+                                        "⏳ 已排入傳送佇列並喚醒連線：請確認車機已安裝開啟新版且連上同一藍牙或熱點",
+                                        "⏳ 已排入发送队列并唤醒连接：请确认车机已安装开启新版且连上同一蓝牙或热点",
+                                        "⏳ Queued & waking link: ensure Car has the latest app open on same BT or Hotspot",
+                                        "⏳ 送信キューに追加し接続を起動中：車載機側も最新版を起動し同じ BT／テザリングに接続してください"
+                                    )
                                 }
                             },
                             shape = RoundedCornerShape(14.dp)
                         ) {
                             Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("推播測試通知")
+                            Text(str("推播測試通知", "推送测试通知", "Send Test Alert", "テスト通知を送信"))
                         }
                     }
                     if (testSentTip.isNotBlank()) {
@@ -553,8 +633,18 @@ fun PhoneCompanionScreen(
             // ==================== CATEGORY 2: 手機限定 — 全螢幕純黑 OLED 滑鼠觸控板啟動器 ====================
             if (isPhoneExclusive) {
                 PhoneCategoryLabel(
-                    title = "分類二 · 車機遠端滑鼠觸控板（手機專屬）",
-                    hint = "點擊下方執行按鈕展開「全螢幕純黑 OLED 防鎖屏觸控板」（支援點擊清脆震動回饋與車機滑鼠靈敏度設定）"
+                    title = str(
+                        "分類二 · 車機遠端滑鼠觸控板（手機專屬）",
+                        "分类二 · 车机远程鼠标触控板（手机专属）",
+                        "Category 2 · Remote Car Mouse Touchpad (Phone Exclusive)",
+                        "カテゴリ 2 · 車載リモートマウスタッチパッド（スマホ専用）"
+                    ),
+                    hint = str(
+                        "點擊下方執行按鈕展開「全螢幕純黑 OLED 防鎖屏觸控板」（支援點擊清脆震動回饋與車機滑鼠靈敏度設定）",
+                        "点击下方执行按钮展开「全屏纯黑 OLED 防锁屏触控板」（支持点击清脆震动反馈与车机鼠标灵敏度设置）",
+                        "Tap below to launch the Fullscreen Pure-Black OLED Keep-Awake Touchpad with crisp haptic click & Car pointer speed control",
+                        "下のボタンで「全画面ピュアブラック OLED スリープ防止タッチパッド」を起動（振動フィードバック＆車載マウス感度設定対応）"
+                    )
                 )
 
                 PhoneTouchpadLauncherCard(
@@ -568,8 +658,18 @@ fun PhoneCompanionScreen(
 
             // ==================== CATEGORY 3: 藍牙目標與通知過濾設定 ====================
             PhoneCategoryLabel(
-                title = "分類三 · 配對車機選擇與通知過濾",
-                hint = "可點選車機藍牙名稱加速指定配對，並選擇要推送至車機的 App"
+                title = str(
+                    "分類三 · 配對車機選擇與通知過濾",
+                    "分类三 · 配对车机选择与通知过滤",
+                    "Category 3 · Paired Car Selection & Notification Filter",
+                    "カテゴリ 3 · ペアリング車載機の選択＆通知フィルター"
+                ),
+                hint = str(
+                    "可點選車機藍牙名稱加速指定配對，並選擇要推送至車機的 App",
+                    "可点选车机蓝牙名称加速指定配对，并选择要推送至车机的 App",
+                    "Select your Car Bluetooth device for faster pairing and choose which apps forward notifications",
+                    "車載 Bluetooth 名を選択して素早く接続し、車載機へ転送するアプリを選択します"
+                )
             )
 
             Surface(
@@ -589,23 +689,34 @@ fun PhoneCompanionScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "選擇配對的車機 AI Box（熱點連上亦自動通）",
+                            text = str(
+                                "選擇配對的車機 AI Box（熱點連上亦自動通）",
+                                "选择配对的车机 AI Box（热点连上亦自动通）",
+                                "Select Paired Car AI Box (Hotspot Also Auto-Connects)",
+                                "ペアリング済みの車載 AI Box を選択（テザリングでも自動接続）"
+                            ),
                             color = colors.primaryText,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
                         )
                         OutlinedButton(onClick = onRefreshPairedDevices, shape = RoundedCornerShape(12.dp)) {
-                            Text("重新整理", fontSize = 12.sp)
+                            Text(str("重新整理", "刷新", "Refresh", "更新"), fontSize = 12.sp)
                         }
                     }
                     if (pairedDevices.isEmpty()) {
                         Text(
-                            text = "未偵測到已配對藍牙裝置（請先確認已授予藍牙權限，或直接開啟手機 Wi-Fi 熱點給車機連網）。",
+                            text = str(
+                                "未偵測到已配對藍牙裝置（請先確認已授予藍牙權限，或直接開啟手機 Wi-Fi 熱點給車機連網）。",
+                                "未检测到已配对蓝牙设备（请先确认已授予蓝牙权限，或直接开启手机 Wi-Fi 热点给车机联网）。",
+                                "No paired Bluetooth devices found (grant Bluetooth permission first, or turn on Wi-Fi Hotspot for your Car).",
+                                "ペアリング済みの Bluetooth 機器が見つかりません（Bluetooth 権限を許可するか、Wi-Fi テザリングをオンにしてください）。"
+                            ),
                             color = colors.secondaryText,
                             fontSize = 12.sp
                         )
                     } else {
+                        val btConnectedSuffix = str("目前已連上藍牙", "当前已连上蓝牙", "Connected via BT", "Bluetooth 接続中")
                         pairedDevices.forEach { dev ->
                             val selected = dev.address == config.companionTargetDeviceAddress
                             Row(
@@ -622,7 +733,7 @@ fun PhoneCompanionScreen(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(dev.name, color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                                     Text(
-                                        text = "${dev.address}${if (dev.isConnected) " · 目前已連上藍牙" else ""}",
+                                        text = "${dev.address}${if (dev.isConnected) " · $btConnectedSuffix" else ""}",
                                         color = if (dev.isConnected) colors.statusConnected else colors.secondaryText,
                                         fontSize = 11.sp
                                     )
@@ -649,13 +760,23 @@ fun PhoneCompanionScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                                 Text(
-                                    text = "選擇要攔截推送到車機的 App（預設已幫您打勾 ✓）",
+                                    text = str(
+                                        "選擇要攔截推送到車機的 App（預設已幫您打勾 ✓）",
+                                        "选择要拦截推送到车机的 App（默认已帮您打勾 ✓）",
+                                        "Select Apps to Forward to Car (Common apps pre-checked ✓)",
+                                        "車載機へ通知転送するアプリを選択（主要アプリは選択済 ✓）"
+                                    ),
                                     color = colors.primaryText,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "點選下方任一項目即可勾選／取消；亦可從手機已安裝 App 挑選更多應用程式",
+                                    text = str(
+                                        "點選下方任一項目即可勾選／取消；亦可從手機已安裝 App 挑選更多應用程式",
+                                        "点选下方任一项目即可勾选／取消；亦可从手机已安装 App 挑选更多应用",
+                                        "Tap any chip below to toggle, or pick more from all installed phone apps",
+                                        "下のチップをタップして切替、またはインストール済みアプリから追加できます"
+                                    ),
                                     color = colors.secondaryText,
                                     fontSize = 11.sp
                                 )
@@ -684,8 +805,8 @@ fun PhoneCompanionScreen(
                         }
 
                         // Custom extra apps selected from installed apps beyond knownAppGroups
-                        val knownFlat = remember { knownAppGroups.flattenPairs() }
-                        val extraSelectedApps = remember(installedApps, config.companionAllowedPackages) {
+                        val knownFlat = remember(knownAppGroups) { knownAppGroups.flattenPairs() }
+                        val extraSelectedApps = remember(installedApps, config.companionAllowedPackages, knownFlat) {
                             installedApps.filter {
                                 config.companionAllowedPackages.contains(it.packageName) && !knownFlat.contains(it.packageName)
                             }
@@ -725,7 +846,16 @@ fun PhoneCompanionScreen(
                                 },
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text("✓ 恢復預設常用全打勾", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    str(
+                                        "✓ 恢復預設常用全打勾",
+                                        "✓ 恢复默认常用全打勾",
+                                        "✓ Reset Default Apps",
+                                        "✓ 標準アプリを再選択"
+                                    ),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                             Button(
                                 onClick = { showInstalledAppPicker = true },
@@ -734,7 +864,16 @@ fun PhoneCompanionScreen(
                             ) {
                                 Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("勾選更多手機 App（共 ${installedApps.size} 款）", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    str(
+                                        "勾選更多手機 App（共 ${installedApps.size} 款）",
+                                        "勾选更多手机 App（共 ${installedApps.size} 款）",
+                                        "More Phone Apps (${installedApps.size})",
+                                        "他のアプリを選択（全 ${installedApps.size} 件）"
+                                    ),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
                     }
@@ -750,8 +889,27 @@ fun PhoneCompanionScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                            Text("無差別同步所有 App 通知（不限勾選清單）", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            Text("預設關閉（僅推送上方已打勾 App，避免相機／相簿備份通知干擾行車）", color = colors.secondaryText, fontSize = 11.sp)
+                            Text(
+                                str(
+                                    "無差別同步所有 App 通知（不限勾選清單）",
+                                    "无差别同步所有 App 通知（不限勾选清单）",
+                                    "Forward All App Notifications (Ignore Checklist)",
+                                    "すべてのアプリ通知を転送（選択リスト無制限）"
+                                ),
+                                color = colors.primaryText,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                str(
+                                    "預設關閉（僅推送上方已打勾 App，避免相機／相簿備份通知干擾行車）",
+                                    "默认关闭（仅推送上方已打勾 App，避免相机／相册备份通知干扰行车）",
+                                    "Off by default (only forwards checked apps to avoid backup/system clutter while driving)",
+                                    "標準オフ（選択アプリのみ転送し、バックアップ等の不要な通知を防止）"
+                                ),
+                                color = colors.secondaryText,
+                                fontSize = 11.sp
+                            )
                         }
                         Switch(
                             checked = config.companionSyncAllApps,
@@ -764,8 +922,18 @@ fun PhoneCompanionScreen(
 
             // ==================== CATEGORY 4: 診斷紀錄與版本更新 ====================
             PhoneCategoryLabel(
-                title = "分類四 · 即時診斷紀錄與版本更新",
-                hint = "手機與車機皆更新至同一最新版本可獲得最完整雙向通道支援"
+                title = str(
+                    "分類四 · 即時診斷紀錄與版本更新",
+                    "分类四 · 实时诊断记录与版本更新",
+                    "Category 4 · Live Diagnostics & App Updates",
+                    "カテゴリ 4 · 診断ログ＆バージョン更新"
+                ),
+                hint = str(
+                    "手機與車機皆更新至同一最新版本可獲得最完整雙向通道支援",
+                    "手机与车机皆更新至同一最新版本可获得最完整双向通道支持",
+                    "Keep both Phone & Car updated to the same latest version for best dual-channel reliability",
+                    "スマホと車載機の両方を同じ最新版に更新すると最も安定して連携できます"
+                )
             )
 
             if (bridgeStatus.recentLogs.isNotEmpty()) {
@@ -777,7 +945,17 @@ fun PhoneCompanionScreen(
                         .border(1.dp, colors.cardBorder, RoundedCornerShape(22.dp))
                 ) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("即時同步與診斷紀錄", color = colors.primaryText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            str(
+                                "即時同步與診斷紀錄",
+                                "实时同步与诊断记录",
+                                "Live Sync & Diagnostic Logs",
+                                "リアルタイム同期・診断ログ"
+                            ),
+                            color = colors.primaryText,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                         bridgeStatus.recentLogs.take(8).forEach { line ->
                             Text(line, color = colors.secondaryText, fontSize = 12.sp)
                         }
@@ -847,7 +1025,7 @@ fun PhoneCompanionScreen(
                                 onClick = onRestorePurchases,
                                 shape = RoundedCornerShape(14.dp)
                             ) {
-                                Text(str("恢復購買", "Restore Purchase", "購入を復元"))
+                                Text(str("恢復購買", "恢复购买", "Restore Purchase", "購入を復元"))
                             }
                         }
                     }
@@ -866,8 +1044,11 @@ fun PhoneCompanionScreen(
                                 shape = RoundedCornerShape(14.dp)
                             ) {
                                 Text(
-                                    if (updateState.checking) str("檢查中…", "Checking…", "確認中…")
-                                    else str("檢查 GitHub 更新", "Check Updates", "更新を確認")
+                                    if (updateState.checking) {
+                                        str("檢查中…", "检查中…", "Checking…", "確認中…")
+                                    } else {
+                                        str("檢查 GitHub 更新", "检查 GitHub 更新", "Check Updates", "更新を確認")
+                                    }
                                 )
                             }
                             if (updateState.hasUpdate || updateState.downloadedReady || updateState.downloading) {
@@ -879,9 +1060,24 @@ fun PhoneCompanionScreen(
                                 ) {
                                     Text(
                                         when {
-                                            updateState.downloadedReady -> str("立即安裝 v${updateState.latestVersion}", "Install v${updateState.latestVersion}", "今すぐインストール v${updateState.latestVersion}")
-                                            updateState.downloading -> str("下載中 ${(updateState.progress * 100).toInt()}%", "Downloading ${(updateState.progress * 100).toInt()}%", "ダウンロード中 ${(updateState.progress * 100).toInt()}%")
-                                            else -> str("下載更新 v${updateState.latestVersion}", "Download v${updateState.latestVersion}", "更新 v${updateState.latestVersion}")
+                                            updateState.downloadedReady -> str(
+                                                "立即安裝 v${updateState.latestVersion}",
+                                                "立即安装 v${updateState.latestVersion}",
+                                                "Install v${updateState.latestVersion}",
+                                                "今すぐインストール v${updateState.latestVersion}"
+                                            )
+                                            updateState.downloading -> str(
+                                                "下載中 ${(updateState.progress * 100).toInt()}%",
+                                                "下载中 ${(updateState.progress * 100).toInt()}%",
+                                                "Downloading ${(updateState.progress * 100).toInt()}%",
+                                                "ダウンロード中 ${(updateState.progress * 100).toInt()}%"
+                                            )
+                                            else -> str(
+                                                "下載更新 v${updateState.latestVersion}",
+                                                "下载更新 v${updateState.latestVersion}",
+                                                "Download v${updateState.latestVersion}",
+                                                "更新 v${updateState.latestVersion}"
+                                            )
                                         }
                                     )
                                 }
@@ -914,7 +1110,12 @@ fun PhoneCompanionScreen(
                         shape = RoundedCornerShape(14.dp)
                     ) {
                         Text(
-                            str("GitHub 開源主頁：dx9901mk5/DX-Car-Launcher", "GitHub: dx9901mk5/DX-Car-Launcher", "GitHub: dx9901mk5/DX-Car-Launcher"),
+                            str(
+                                "GitHub 開源主頁：dx9901mk5/DX-Car-Launcher",
+                                "GitHub 开源主页：dx9901mk5/DX-Car-Launcher",
+                                "GitHub: dx9901mk5/DX-Car-Launcher",
+                                "GitHub: dx9901mk5/DX-Car-Launcher"
+                            ),
                             fontSize = 12.sp
                         )
                     }
@@ -949,14 +1150,30 @@ fun PhoneCompanionScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("手機端必要權限設定 ($grantedPerms/$totalPerms)", color = colors.primaryText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                str(
+                                    "手機端必要權限設定 ($grantedPerms/$totalPerms)",
+                                    "手机端必要权限设置 ($grantedPerms/$totalPerms)",
+                                    "Required Phone Permissions ($grantedPerms/$totalPerms)",
+                                    "スマホ側の必須権限 ($grantedPerms/$totalPerms)"
+                                ),
+                                color = colors.primaryText,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f).padding(end = 8.dp)
+                            )
                             IconButton(onClick = { showPermissionsSheet = false }) {
-                                Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.primaryText)
+                                Icon(Icons.Rounded.Close, contentDescription = str("關閉", "关闭", "Close", "閉じる"), tint = colors.primaryText)
                             }
                         }
 
                         CompanionPermButton(
-                            label = "1. 通知讀取權限（攔截 LINE / 簡訊並執行車機回覆）",
+                            label = str(
+                                "1. 通知讀取權限（攔截 LINE / 簡訊並執行車機回覆）",
+                                "1. 通知读取权限（拦截 LINE / 短信并执行车机回复）",
+                                "1. Notification Access (Forward LINE / SMS & send replies from Car)",
+                                "1. 通知へのアクセス（LINE・SMS の転送と車載機からの返信）"
+                            ),
                             ok = permissionHealth.hasNotificationListener,
                             onClick = { PermissionHelper.openNotificationListenerSettings(context) }
                         )
@@ -973,7 +1190,12 @@ fun PhoneCompanionScreen(
                                 Icon(Icons.Rounded.Security, contentDescription = null, tint = colors.accent, modifier = Modifier.size(20.dp))
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    text = "若顯示「受限制的設定」無法開啟：點此前往應用程式資訊 → 右上角 ⋮ → 允許受限制的設定",
+                                    text = str(
+                                        "若顯示「受限制的設定」無法開啟：點此前往應用程式資訊 → 右上角 ⋮ → 允許受限制的設定",
+                                        "若显示「受限制的设置」无法开启：点此前往应用信息 → 右上角 ⋮ → 允许受限制的设置",
+                                        "If blocked by 'Restricted setting': tap here → App Info → top-right ⋮ → Allow restricted settings",
+                                        "「制限付き設定」と表示される場合：ここをタップ → アプリ情報 → 右上 ⋮ →「制限付き設定を許可」"
+                                    ),
                                     color = colors.primaryText,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.SemiBold,
@@ -982,17 +1204,32 @@ fun PhoneCompanionScreen(
                             }
                         }
                         CompanionPermButton(
-                            label = "2. 藍牙、來電狀態與前景通知權限",
+                            label = str(
+                                "2. 藍牙、來電狀態與前景通知權限",
+                                "2. 蓝牙、来电状态与前台通知权限",
+                                "2. Bluetooth, Phone Call State & Foreground Notification",
+                                "2. Bluetooth・着信状態・通知の権限"
+                            ),
                             ok = permissionHealth.hasBluetooth && permissionHealth.hasPhoneState && permissionHealth.hasPostNotifications,
                             onClick = onRequestRuntimePermissions
                         )
                         CompanionPermButton(
-                            label = "3. 手機聯絡人與來電號碼權限（顯示聯絡人姓名與陌生純號碼）",
+                            label = str(
+                                "3. 手機聯絡人與來電號碼權限（顯示聯絡人姓名與陌生純號碼）",
+                                "3. 手机联系人与来电号码权限（显示联系人姓名与陌生纯号码）",
+                                "3. Contacts & Call Log (Show caller name & phone number on Car)",
+                                "3. 連絡先＆通話履歴（車載画面に発信者名と電話番号を表示）"
+                            ),
                             ok = permissionHealth.hasContacts && permissionHealth.hasCallLog,
                             onClick = onRequestRuntimePermissions
                         )
                         CompanionPermButton(
-                            label = "4. 忽略電池最佳化（鎖屏後保持連線不斷開）",
+                            label = str(
+                                "4. 忽略電池最佳化（鎖屏後保持連線不斷開）",
+                                "4. 忽略电池优化（锁屏后保持连接不断开）",
+                                "4. Ignore Battery Optimizations (Keep link alive while screen is off)",
+                                "4. バッテリー最適化を無視（画面ロック後も接続を維持）"
+                            ),
                             ok = permissionHealth.hasIgnoreBatteryOpt,
                             onClick = { PermissionHelper.requestIgnoreBatteryOptimizations(context) }
                         )
@@ -1038,12 +1275,31 @@ fun PhoneCompanionScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("勾選要推送到車機的手機 App", color = colors.primaryText, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                                Text("目前已勾選 ${config.companionAllowedPackages.size} 項（預設已勾選常用通訊與簡訊）", color = colors.secondaryText, fontSize = 12.sp)
+                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                Text(
+                                    str(
+                                        "勾選要推送到車機的手機 App",
+                                        "勾选要推送到车机的手机 App",
+                                        "Select Phone Apps to Forward to Car",
+                                        "車載機へ通知転送するアプリを選択"
+                                    ),
+                                    color = colors.primaryText,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    str(
+                                        "目前已勾選 ${config.companionAllowedPackages.size} 項（預設已勾選常用通訊與簡訊）",
+                                        "当前已勾选 ${config.companionAllowedPackages.size} 项（默认已勾选常用通讯与短信）",
+                                        "${config.companionAllowedPackages.size} selected (common messaging apps pre-selected)",
+                                        "現在 ${config.companionAllowedPackages.size} 件選択中（主要メッセージアプリは標準選択済）"
+                                    ),
+                                    color = colors.secondaryText,
+                                    fontSize = 12.sp
+                                )
                             }
                             IconButton(onClick = { showInstalledAppPicker = false }) {
-                                Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.primaryText)
+                                Icon(Icons.Rounded.Close, contentDescription = str("關閉", "关闭", "Close", "閉じる"), tint = colors.primaryText)
                             }
                         }
 
@@ -1052,7 +1308,12 @@ fun PhoneCompanionScreen(
                             onValueChange = { appSearchQuery = it },
                             singleLine = true,
                             leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.accent) },
-                            placeholder = { Text("搜尋手機 App 名稱…", fontSize = 13.sp) },
+                            placeholder = {
+                                Text(
+                                    str("搜尋手機 App 名稱…", "搜索手机 App 名称…", "Search phone apps…", "アプリ名を検索…"),
+                                    fontSize = 13.sp
+                                )
+                            },
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -1066,7 +1327,7 @@ fun PhoneCompanionScreen(
                                 },
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text("全部打勾", fontSize = 12.sp)
+                                Text(str("全部打勾", "全部打勾", "Select All", "すべて選択"), fontSize = 12.sp)
                             }
                             OutlinedButton(
                                 onClick = {
@@ -1075,7 +1336,7 @@ fun PhoneCompanionScreen(
                                 },
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text("只勾選預設常用", fontSize = 12.sp)
+                                Text(str("只勾選預設常用", "只勾选默认常用", "Default Apps Only", "標準アプリのみ選択"), fontSize = 12.sp)
                             }
                         }
 
@@ -1126,15 +1387,50 @@ fun PhoneCompanionScreen(
         // EXTRA-LARGE FONT TUTORIAL MODAL
         if (showLargeTutorial) {
             ExtraLargeTutorialModal(
-                title = "📖 手機與車機連線＆多指滑鼠 · 教學",
-                steps = listOf(
-                    "【重要】請先將「車機盒」與「手機」都更新到最新同一版本 APK！",
-                    "點擊手機最上方【權限需求】按鈕，開啟「通知讀取權限」（若 vivo／三星／Pixel 顯示受限制設定，先點黃色提示去應用程式資訊右上角 ⋮ 點「允許受限制的設定」）、藍牙與忽略電池最佳化。",
-                    "車機端同樣點設定最上方【權限需求】，開啟「顯示在其他應用程式上層」、「通知存取權」與「無障礙輔助服務」。",
-                    "常用通訊與簡訊 App 預設已自動幫您打勾 ✓，您也可隨時點擊「勾選更多手機 App」自由增減要推送到車機的應用程式！",
-                    "點擊【啟動全螢幕滑鼠觸控板】進入純黑 OLED 防鎖屏模式：支援「單指移動／輕點震動確定」、「雙指捏合張開＝車機地圖縮放」、「雙指上下滑＝車機 Google 地圖 3D 俯瞰」、「雙指輕點＝返回」、「三指上滑＝多工／下滑＝首頁」！"
+                title = str(
+                    "📖 手機與車機連線＆多指滑鼠 · 教學",
+                    "📖 手机与车机连接＆多指鼠标 · 教程",
+                    "📖 Phone–Car Sync & Multi-Touch Pad · Guide",
+                    "📖 スマホ連携＆マルチタッチパッド · ガイド"
                 ),
-                highlightNote = "💡 離開全螢幕觸控板後，手機即恢復正常休眠；下車斷開藍牙與熱點自動退回 0% 耗電待機模式！",
+                steps = listOf(
+                    str(
+                        "【重要】請先將「車機盒」與「手機」都更新到最新同一版本 APK！",
+                        "【重要】请先将「车机盒」与「手机」都更新到最新同一版本 APK！",
+                        "[Important] Update both your Car AI Box and Smartphone to the same latest APK version first!",
+                        "【重要】「車載ボックス」と「スマホ」の両方を同じ最新バージョンの APK に更新してください！"
+                    ),
+                    str(
+                        "點擊手機最上方【權限需求】按鈕，開啟「通知讀取權限」（若 vivo／三星／Pixel 顯示受限制設定，先點黃色提示去應用程式資訊右上角 ⋮ 點「允許受限制的設定」）、藍牙與忽略電池最佳化。",
+                        "点击手机最上方【权限需求】按钮，开启「通知读取权限」（若 vivo／三星／Pixel 显示受限制设置，先点提示去应用信息右上角 ⋮ 点「允许受限制的设置」）、蓝牙与忽略电池优化。",
+                        "Tap [Permissions] at the top of your phone screen and grant Notification Access (if restricted on vivo/Samsung/Pixel, open App Info → top-right ⋮ → Allow restricted settings), Bluetooth, and Ignore Battery Optimizations.",
+                        "スマホ上部の【権限設定】から「通知へのアクセス」（制限される場合はアプリ情報 → 右上 ⋮ →「制限付き設定を許可」）・Bluetooth・バッテリー最適化の無視を許可します。"
+                    ),
+                    str(
+                        "車機端同樣點設定最上方【權限需求】，開啟「顯示在其他應用程式上層」、「通知存取權」與「無障礙輔助服務」。",
+                        "车机端同样点设置最上方【权限需求】，开启「显示在其他应用上层」、「通知访问权限」与「无障碍辅助服务」。",
+                        "On your Car AI Box, tap [Permissions] in Settings and enable Display Over Other Apps, Notification Access, and Accessibility Service.",
+                        "車載機側でも設定上部の【権限設定】から「他のアプリの上に表示」「通知へのアクセス」「ユーザー補助サービス」を有効にします。"
+                    ),
+                    str(
+                        "常用通訊與簡訊 App 預設已自動幫您打勾 ✓，您也可隨時點擊「勾選更多手機 App」自由增減要推送到車機的應用程式！",
+                        "常用通讯与短信 App 默认已自动帮您打勾 ✓，您也可随时点击「勾选更多手机 App」自由增减要推送到车机的应用！",
+                        "Common messaging & SMS apps are pre-checked ✓ by default; tap [More Phone Apps] anytime to customize which apps forward alerts to your Car!",
+                        "主要なメッセージ・SMS アプリは標準で選択済み ✓ です。「他のアプリを選択」からいつでも追加・解除できます！"
+                    ),
+                    str(
+                        "點擊【啟動全螢幕滑鼠觸控板】進入純黑 OLED 防鎖屏模式：支援「單指移動／輕點震動確定」、「雙指捏合張開＝車機地圖縮放」、「雙指上下滑＝車機 Google 地圖 3D 俯瞰」、「雙指輕點＝返回」、「三指上滑＝多工／下滑＝首頁」！",
+                        "点击【启动全屏鼠标触控板】进入纯黑 OLED 防锁屏模式：支持「单指移动／轻点震动确定」、「双指捏合张开＝车机地图缩放」、「双指上下滑＝车机 Google 地图 3D 俯瞰」、「双指轻点＝返回」、「三指上滑＝多任务／下滑＝首页」！",
+                        "Tap [Launch Fullscreen Touchpad] for Pure-Black OLED Keep-Awake mode: 1-finger move/tap with crisp haptic click, 2-finger pinch to zoom Car Maps, 2-finger vertical drag for 3D tilt, 2-finger tap for Back, and 3-finger swipe up/down for Recents/Home!",
+                        "【全画面タッチパッドを起動】で純黒 OLED スリープ防止モードへ：1本指移動＆振動クリック、2本指ピンチで車載地図ズーム、2本指上下で 3D 視点切替、2本指タップで戻る、3本指上/下で履歴/ホームに対応！"
+                    )
+                ),
+                highlightNote = str(
+                    "💡 離開全螢幕觸控板後，手機即恢復正常休眠；下車斷開藍牙與熱點自動退回 0% 耗電待機模式！",
+                    "💡 离开全屏触控板后，手机即恢复正常休眠；下车断开蓝牙与热点自动退回 0% 耗电待机模式！",
+                    "💡 Exiting the fullscreen touchpad restores normal screen sleep; disconnecting Car BT & Hotspot returns to zero-drain standby automatically!",
+                    "💡 全画面タッチパッドを閉じると通常スリープに戻り、降車して BT・テザリングが切れると自動で省電力待機に戻ります！"
+                ),
                 onClose = { showLargeTutorial = false }
             )
         }
@@ -1200,8 +1496,22 @@ private fun PhoneTouchpadLauncherCard(
                 Icon(Icons.Rounded.Mouse, contentDescription = null, tint = colors.accent, modifier = Modifier.size(24.dp))
                 Spacer(Modifier.width(8.dp))
                 Column {
-                    Text("操控車機滑鼠觸控板", color = colors.primaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    Text("點擊下方執行鈕進入「全螢幕純黑 OLED 防鎖屏觸控模式」", color = colors.secondaryText, fontSize = 12.sp)
+                    Text(
+                        str("操控車機滑鼠觸控板", "操控车机鼠标触控板", "Remote Car Mouse Touchpad", "車載マウスタッチパッド操作"),
+                        color = colors.primaryText,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        str(
+                            "點擊下方執行鈕進入「全螢幕純黑 OLED 防鎖屏觸控模式」",
+                            "点击下方执行钮进入「全屏纯黑 OLED 防锁屏触控模式」",
+                            "Tap below to enter Fullscreen Pure-Black OLED Keep-Awake Touchpad Mode",
+                            "下のボタンで「全画面ピュアブラック OLED スリープ防止モード」を開始"
+                        ),
+                        color = colors.secondaryText,
+                        fontSize = 12.sp
+                    )
                 }
             }
 
@@ -1224,9 +1534,16 @@ private fun PhoneTouchpadLauncherCard(
                 Icon(Icons.Rounded.OpenInFull, contentDescription = null, tint = colors.accent, modifier = Modifier.size(22.dp))
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    text = "啟動全螢幕滑鼠觸控板（OLED 純黑 · 防鎖屏）",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.ExtraBold
+                    text = str(
+                        "啟動全螢幕滑鼠觸控板（OLED 純黑 · 防鎖屏）",
+                        "启动全屏鼠标触控板（OLED 纯黑 · 防锁屏）",
+                        "Launch Fullscreen Touchpad (Pure OLED · Keep Awake)",
+                        "全画面タッチパッドを起動（純黒 OLED・スリープ防止）"
+                    ),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
@@ -1240,22 +1557,37 @@ private fun PhoneTouchpadLauncherCard(
             ) {
                 Icon(Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("開啟車機系統「滑鼠靈敏度」設定（車機跳出畫面）", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    str(
+                        "開啟車機系統「滑鼠靈敏度」設定（車機跳出畫面）",
+                        "开启车机系统「鼠标灵敏度」设置（车机弹出画面）",
+                        "Open Car Pointer Speed Settings (Pops up on Car)",
+                        "車載システムの「マウス感度」設定を開く（車載画面に表示）"
+                    ),
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
 
             if (touchpadTip.isNotBlank()) {
                 Text(touchpadTip, color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
 
+            val formattedSpeed = String.format(Locale.US, "%.1fx", sensitivity)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "移速倍率：${String.format(Locale.US, "%.1fx", sensitivity)}",
+                    text = str(
+                        "移速倍率：$formattedSpeed",
+                        "移速倍率：$formattedSpeed",
+                        "Speed: $formattedSpeed",
+                        "移動速度：$formattedSpeed"
+                    ),
                     color = colors.primaryText,
                     fontSize = 12.sp,
-                    modifier = Modifier.width(105.dp)
+                    modifier = Modifier.width(115.dp)
                 )
                 Slider(
                     value = sensitivity,
@@ -1291,9 +1623,14 @@ private fun FullscreenOledCarTouchpad(
     var activeTouchPoints by remember { mutableStateOf<List<Offset>>(emptyList()) }
     var clickBurstSeq by remember { mutableLongStateOf(0L) }
     var clickBurstPos by remember { mutableStateOf(Offset.Zero) }
-    var statusBanner by remember {
-        mutableStateOf("單指＝游標／點擊震動 · 雙指捏合＝車機縮放 · 雙指上下＝3D俯瞰 · 三指＝多工／首頁")
-    }
+    var statusBanner by remember { mutableStateOf("") }
+
+    val defaultStatusBanner = str(
+        "單指＝游標／點擊震動 · 雙指捏合＝車機縮放 · 雙指上下＝3D俯瞰 · 三指＝多工／首頁",
+        "单指＝光标／点击震动 · 双指捏合＝车机缩放 · 双指上下＝3D俯瞰 · 三指＝多任务／首页",
+        "1-Finger = Move/Tap · 2-Finger Pinch = Zoom · 2-Finger Up/Down = 3D Tilt · 3-Finger = Recents/Home",
+        "1本指＝移動/タップ · 2本指ピンチ＝ズーム · 2本指上下＝3D視点 · 3本指＝履歴/ホーム"
+    )
 
     // Intercept system Back gesture to exit fullscreen touchpad cleanly
     BackHandler(onBack = onClose)
@@ -1381,11 +1718,22 @@ private fun FullscreenOledCarTouchpad(
                             .background(if (isConnected) Color(0xFF22C55E) else Color(0xFFF59E0B))
                     )
                     Spacer(Modifier.width(8.dp))
+                    val targetName = peerName.ifBlank { "AI Box" }
                     Text(
                         text = if (isConnected) {
-                            "防鎖屏滑鼠已連線 ${peerName.ifBlank { "AI Box" }}"
+                            str(
+                                "防鎖屏滑鼠已連線 $targetName",
+                                "防锁屏鼠标已连接 $targetName",
+                                "Keep-Awake Mouse · $targetName",
+                                "スリープ防止マウス接続済 · $targetName"
+                            )
                         } else {
-                            "防鎖屏開啟 · 等待車機連線…"
+                            str(
+                                "防鎖屏開啟 · 等待車機連線…",
+                                "防锁屏开启 · 等待车机连接…",
+                                "Keep-Awake On · Waiting for Car…",
+                                "スリープ防止 ON · 車載機待機中…"
+                            )
                         },
                         color = oledSubtleText,
                         fontSize = 12.sp,
@@ -1416,7 +1764,7 @@ private fun FullscreenOledCarTouchpad(
                                 },
                                 modifier = Modifier.size(28.dp)
                             ) {
-                                Icon(Icons.Rounded.Remove, contentDescription = "減速", tint = oledSubtleText, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Rounded.Remove, contentDescription = str("減速", "减速", "Slower", "遅く"), tint = oledSubtleText, modifier = Modifier.size(16.dp))
                             }
                             Text(
                                 text = String.format(Locale.US, "%.1fx", sensitivity),
@@ -1431,7 +1779,7 @@ private fun FullscreenOledCarTouchpad(
                                 },
                                 modifier = Modifier.size(28.dp)
                             ) {
-                                Icon(Icons.Rounded.Add, contentDescription = "加速", tint = oledSubtleText, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Rounded.Add, contentDescription = str("加速", "加速", "Faster", "速く"), tint = oledSubtleText, modifier = Modifier.size(16.dp))
                             }
                         }
                     }
@@ -1451,9 +1799,9 @@ private fun FullscreenOledCarTouchpad(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = Color(0xFFE2E8F0), modifier = Modifier.size(16.dp))
+                            Icon(Icons.Rounded.Close, contentDescription = str("關閉", "关闭", "Close", "閉じる"), tint = Color(0xFFE2E8F0), modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("關閉", color = Color(0xFFE2E8F0), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(str("關閉", "关闭", "Close", "閉じる"), color = Color(0xFFE2E8F0), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -1506,7 +1854,12 @@ private fun FullscreenOledCarTouchpad(
                                         triggerPhoneConfirmVibration(context, localView, heavy = true)
                                         clickBurstPos = downPos
                                         clickBurstSeq++
-                                        statusBanner = "✓ 已觸發車機長按"
+                                        statusBanner = DxCarI18n.tr(
+                                            "✓ 已觸發車機長按",
+                                            "✓ 已触发车机长按",
+                                            "✓ Car Long-Press Triggered",
+                                            "✓ 車載機の長押しを実行"
+                                        )
                                         sendTouchAction(TouchpadAction.LONG_CLICK)
                                     }
                                 }
@@ -1535,16 +1888,31 @@ private fun FullscreenOledCarTouchpad(
                                                 multiActionTriggered = true
                                                 triggerPhoneConfirmVibration(context, localView, heavy = true)
                                                 if (d3y < 0f) {
-                                                    statusBanner = "✓ 三指上滑 → 車機多工視窗"
+                                                    statusBanner = DxCarI18n.tr(
+                                                        "✓ 三指上滑 → 車機多工視窗",
+                                                        "✓ 三指上滑 → 车机多任务窗口",
+                                                        "✓ 3-Finger Swipe Up → Car Recents",
+                                                        "✓ 3本指上スワイプ → 車載機の履歴"
+                                                    )
                                                     sendTouchAction(TouchpadAction.RECENTS)
                                                 } else {
-                                                    statusBanner = "✓ 三指下滑 → 返回車機首頁"
+                                                    statusBanner = DxCarI18n.tr(
+                                                        "✓ 三指下滑 → 返回車機首頁",
+                                                        "✓ 三指下滑 → 返回车机首页",
+                                                        "✓ 3-Finger Swipe Down → Car Home",
+                                                        "✓ 3本指下スワイプ → 車載ホーム"
+                                                    )
                                                     sendTouchAction(TouchpadAction.HOME)
                                                 }
                                             } else if (abs(d3x) >= 95f && abs(d3x) > abs(d3y)) {
                                                 multiActionTriggered = true
                                                 triggerPhoneConfirmVibration(context, localView, heavy = true)
-                                                statusBanner = "✓ 三指橫滑 → 車機首頁地圖↔媒體交換"
+                                                statusBanner = DxCarI18n.tr(
+                                                    "✓ 三指橫滑 → 車機首頁地圖↔媒體交換",
+                                                    "✓ 三指横滑 → 车机首页地图↔媒体交换",
+                                                    "✓ 3-Finger Swipe → Swap Map ↔ Media",
+                                                    "✓ 3本指横スワイプ → 地図↔メディア入替"
+                                                )
                                                 sendTouchAction(TouchpadAction.SWAP_HOME_PANES)
                                             }
                                         }
@@ -1575,10 +1943,20 @@ private fun FullscreenOledCarTouchpad(
                                                         lastSendMs = now
                                                         triggerPhoneConfirmVibration(context, localView, heavy = false)
                                                         if (dSpan > 0f) {
-                                                            statusBanner = "🔍 雙指張開 → 車機地圖／畫面放大"
+                                                            statusBanner = DxCarI18n.tr(
+                                                                "🔍 雙指張開 → 車機地圖／畫面放大",
+                                                                "🔍 双指张开 → 车机地图／画面放大",
+                                                                "🔍 2-Finger Spread → Zoom In",
+                                                                "🔍 2本指ピンチアウト → 拡大"
+                                                            )
                                                             sendTouchAction(TouchpadAction.TWO_FINGER_SPREAD_OUT)
                                                         } else {
-                                                            statusBanner = "🔍 雙指捏合 → 車機地圖／畫面縮小"
+                                                            statusBanner = DxCarI18n.tr(
+                                                                "🔍 雙指捏合 → 車機地圖／畫面縮小",
+                                                                "🔍 双指捏合 → 车机地图／画面缩小",
+                                                                "🔍 2-Finger Pinch → Zoom Out",
+                                                                "🔍 2本指ピンチイン → 縮小"
+                                                            )
                                                             sendTouchAction(TouchpadAction.TWO_FINGER_PINCH_IN)
                                                         }
                                                     }
@@ -1590,10 +1968,20 @@ private fun FullscreenOledCarTouchpad(
                                                         lastSendMs = now
                                                         triggerPhoneConfirmVibration(context, localView, heavy = false)
                                                         if (dCy < 0f) {
-                                                            statusBanner = "🧊 雙指上推 → 車機 Google 地圖 3D 俯瞰"
+                                                            statusBanner = DxCarI18n.tr(
+                                                                "🧊 雙指上推 → 車機 Google 地圖 3D 俯瞰",
+                                                                "🧊 双指上推 → 车机 Google 地图 3D 俯瞰",
+                                                                "🧊 2-Finger Drag Up → 3D Map Tilt",
+                                                                "🧊 2本指上スライド → 3D 俯瞰視点"
+                                                            )
                                                             sendTouchAction(TouchpadAction.TWO_FINGER_DRAG_UP)
                                                         } else {
-                                                            statusBanner = "🧊 雙指下拉 → 車機 Google 地圖回 2D／下拉"
+                                                            statusBanner = DxCarI18n.tr(
+                                                                "🧊 雙指下拉 → 車機 Google 地圖回 2D／下拉",
+                                                                "🧊 双指下拉 → 车机 Google 地图回 2D／下拉",
+                                                                "🧊 2-Finger Drag Down → 2D View",
+                                                                "🧊 2本指下スライド → 2D 視点復帰"
+                                                            )
                                                             sendTouchAction(TouchpadAction.TWO_FINGER_DRAG_DOWN)
                                                         }
                                                     }
@@ -1605,10 +1993,20 @@ private fun FullscreenOledCarTouchpad(
                                                         lastSendMs = now
                                                         triggerPhoneConfirmVibration(context, localView, heavy = false)
                                                         if (dCx < 0f) {
-                                                            statusBanner = "⇄ 雙指左滑 → 車機雙指平移"
+                                                            statusBanner = DxCarI18n.tr(
+                                                                "⇄ 雙指左滑 → 車機雙指平移",
+                                                                "⇄ 双指左滑 → 车机双指平移",
+                                                                "⇄ 2-Finger Left → Pan Left",
+                                                                "⇄ 2本指左スライド → 2本指移動"
+                                                            )
                                                             sendTouchAction(TouchpadAction.TWO_FINGER_DRAG_LEFT)
                                                         } else {
-                                                            statusBanner = "⇄ 雙指右滑 → 車機雙指平移"
+                                                            statusBanner = DxCarI18n.tr(
+                                                                "⇄ 雙指右滑 → 車機雙指平移",
+                                                                "⇄ 双指右滑 → 车机双指平移",
+                                                                "⇄ 2-Finger Right → Pan Right",
+                                                                "⇄ 2本指右スライド → 2本指移動"
+                                                            )
                                                             sendTouchAction(TouchpadAction.TWO_FINGER_DRAG_RIGHT)
                                                         }
                                                     }
@@ -1650,12 +2048,22 @@ private fun FullscreenOledCarTouchpad(
                                         triggerPhoneConfirmVibration(context, localView, heavy = false)
                                         clickBurstPos = downPos
                                         clickBurstSeq++
-                                        statusBanner = "✓ 已點擊確定"
+                                        statusBanner = DxCarI18n.tr(
+                                            "✓ 已點擊確定",
+                                            "✓ 已点击确定",
+                                            "✓ Clicked",
+                                            "✓ クリック送信"
+                                        )
                                         sendTouchAction(TouchpadAction.CLICK)
                                     }
                                 } else if (maxFingers == 2 && !multiActionTriggered && elapsed < 420L) {
                                     triggerPhoneConfirmVibration(context, localView, heavy = false)
-                                    statusBanner = "← 雙指輕點 → 車機返回"
+                                    statusBanner = DxCarI18n.tr(
+                                        "← 雙指輕點 → 車機返回",
+                                        "← 双指轻点 → 车机返回",
+                                        "← 2-Finger Tap → Car Back",
+                                        "← 2本指タップ → 車載機の戻る"
+                                    )
                                     sendTouchAction(TouchpadAction.BACK)
                                 }
                             }
@@ -1674,13 +2082,18 @@ private fun FullscreenOledCarTouchpad(
                             modifier = Modifier.size(54.dp)
                         )
                         Text(
-                            text = "OLED 全螢幕多指車機觸控板",
+                            text = str(
+                                "OLED 全螢幕多指車機觸控板",
+                                "OLED 全屏多指车机触控板",
+                                "OLED Fullscreen Multi-Touch Car Pad",
+                                "OLED 全画面マルチタッチ車載パッド"
+                            ),
                             color = Color(0xFF334155),
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = statusBanner,
+                            text = statusBanner.ifBlank { defaultStatusBanner },
                             color = Color(0xFF475569),
                             fontSize = 12.sp
                         )
@@ -1758,7 +2171,7 @@ private fun FullscreenOledCarTouchpad(
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.KeyboardArrowUp,
-                        contentDescription = "上捲",
+                        contentDescription = str("上捲", "上滚", "Scroll Up", "上スクロール"),
                         tint = Color(0xFF475569),
                         modifier = Modifier
                             .size(24.dp)
@@ -1768,15 +2181,15 @@ private fun FullscreenOledCarTouchpad(
                             }
                     )
                     Text(
-                        text = "捲\n動\n條",
+                        text = str("捲\n動\n條", "滚\n动\n条", "S\nC\nR\nO\nL\nL", "ス\nク\nロ\n｜\nル"),
                         color = Color(0xFF334155),
                         fontSize = 11.sp,
-                        lineHeight = 15.sp,
+                        lineHeight = 14.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Icon(
                         imageVector = Icons.Rounded.KeyboardArrowDown,
-                        contentDescription = "下捲",
+                        contentDescription = str("下捲", "下滚", "Scroll Down", "下スクロール"),
                         tint = Color(0xFF475569),
                         modifier = Modifier
                             .size(24.dp)
@@ -1805,12 +2218,24 @@ private fun FullscreenOledCarTouchpad(
                         .border(1.4.dp, oledAccent.copy(alpha = 0.7f), RoundedCornerShape(18.dp))
                         .clickable {
                             triggerPhoneConfirmVibration(context, localView, heavy = false)
-                            statusBanner = "✓ 已點擊確定"
+                            statusBanner = DxCarI18n.tr(
+                                "✓ 已點擊確定",
+                                "✓ 已点击确定",
+                                "✓ Clicked",
+                                "✓ クリック送信"
+                            )
                             sendTouchAction(TouchpadAction.CLICK)
                         }
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text("確定點擊", color = oledAccent, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 4.dp)) {
+                        Text(
+                            str("確定點擊", "确定点击", "Tap / Click", "決定クリック"),
+                            color = oledAccent,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
 
@@ -1824,18 +2249,25 @@ private fun FullscreenOledCarTouchpad(
                         .border(1.dp, oledDimBorder, RoundedCornerShape(18.dp))
                         .clickable {
                             triggerPhoneConfirmVibration(context, localView, heavy = false)
-                            statusBanner = "← 車機返回"
+                            statusBanner = DxCarI18n.tr("← 車機返回", "← 车机返回", "← Car Back", "← 車載機の戻る")
                             sendTouchAction(TouchpadAction.BACK)
                         }
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = null, tint = Color(0xFFCBD5E1), modifier = Modifier.size(17.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("返回", color = Color(0xFFCBD5E1), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = null, tint = Color(0xFFCBD5E1), modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(3.dp))
+                        Text(
+                            str("返回", "返回", "Back", "戻る"),
+                            color = Color(0xFFCBD5E1),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
 
@@ -1849,18 +2281,25 @@ private fun FullscreenOledCarTouchpad(
                         .border(1.dp, oledDimBorder, RoundedCornerShape(18.dp))
                         .clickable {
                             triggerPhoneConfirmVibration(context, localView, heavy = false)
-                            statusBanner = "⌂ 車機首頁"
+                            statusBanner = DxCarI18n.tr("⌂ 車機首頁", "⌂ 车机首页", "⌂ Car Home", "⌂ 車載ホーム")
                             sendTouchAction(TouchpadAction.HOME)
                         }
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Rounded.Home, contentDescription = null, tint = Color(0xFFCBD5E1), modifier = Modifier.size(17.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("首頁", color = Color(0xFFCBD5E1), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Rounded.Home, contentDescription = null, tint = Color(0xFFCBD5E1), modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(3.dp))
+                        Text(
+                            str("首頁", "首页", "Home", "ホーム"),
+                            color = Color(0xFFCBD5E1),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
 
@@ -1874,18 +2313,30 @@ private fun FullscreenOledCarTouchpad(
                         .border(1.dp, oledDimBorder, RoundedCornerShape(18.dp))
                         .clickable {
                             triggerPhoneConfirmVibration(context, localView, heavy = false)
-                            statusBanner = "⚙️ 已在車機開啟靈敏度設定"
+                            statusBanner = DxCarI18n.tr(
+                                "⚙️ 已在車機開啟靈敏度設定",
+                                "⚙️ 已在车机开启灵敏度设置",
+                                "⚙️ Opened Car Pointer Speed Settings",
+                                "⚙️ 車載画面に感度設定を表示"
+                            )
                             onOpenCarPointerSpeedSettings()
                         }
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Rounded.Settings, contentDescription = null, tint = oledSubtleText, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("車機靈敏度", color = oledSubtleText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Icon(Icons.Rounded.Settings, contentDescription = null, tint = oledSubtleText, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(3.dp))
+                        Text(
+                            str("車機靈敏度", "车机灵敏度", "Car Speed", "車載感度"),
+                            color = oledSubtleText,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
             }
@@ -1912,7 +2363,7 @@ private fun CompanionPermButton(
     ) {
         Text(label, color = colors.primaryText, fontSize = 13.sp, modifier = Modifier.weight(1f).padding(end = 8.dp))
         Text(
-            text = if (ok) "已授權" else "前往開啟",
+            text = if (ok) str("已授權", "已授权", "Granted", "許可済み") else str("前往開啟", "前往开启", "Enable", "設定を開く"),
             color = if (ok) colors.statusConnected else colors.accent,
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold

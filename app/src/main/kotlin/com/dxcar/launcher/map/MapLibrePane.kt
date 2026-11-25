@@ -89,7 +89,10 @@ import com.dxcar.launcher.comms.ActiveNavBanner
 import com.dxcar.launcher.data.MapEngineStyle
 import com.dxcar.launcher.data.OfflineRegionRecord
 import com.dxcar.launcher.data.OfflineUpdatePolicy
+import com.dxcar.launcher.i18n.DxCarI18n
 import com.dxcar.launcher.i18n.DxCarI18n.str
+import com.dxcar.launcher.i18n.EffectiveLanguage
+import com.dxcar.launcher.i18n.LocalAppLanguage
 import com.dxcar.launcher.theme.LocalDxCarColors
 import com.dxcar.launcher.ui.bouncyClickable
 import org.maplibre.android.camera.CameraPosition
@@ -146,6 +149,7 @@ fun LiveMapCard(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalDxCarColors.current
+    val currentLang = LocalAppLanguage.current
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -349,8 +353,18 @@ fun LiveMapCard(
                             }
                             Text(
                                 text = when {
-                                    builtInNavState.isSearching -> str("✨ 正在於內建地圖搜尋目的地…", "✨ Searching destination on built-in map…", "✨ 内蔵マップで目的地を検索中…")
-                                    builtInNavState.isRouting -> str("🗺️ 正在規劃內建地圖導航藍線…", "🗺️ Calculating route on built-in map…", "🗺️ 内蔵マップでルートを計算中…")
+                                    builtInNavState.isSearching -> str(
+                                        "✨ 正在於內建地圖搜尋目的地…",
+                                        "✨ 正在于内置地图搜索目的地…",
+                                        "✨ Searching destination on built-in map…",
+                                        "✨ 内蔵マップで目的地を検索中…"
+                                    )
+                                    builtInNavState.isRouting -> str(
+                                        "🗺️ 正在規劃內建地圖導航藍線…",
+                                        "🗺️ 正在规划内置地图导航路线…",
+                                        "🗺️ Calculating route on built-in map…",
+                                        "🗺️ 内蔵マップでルートを計算中…"
+                                    )
                                     else -> "$distTxt · ${builtInNavState.currentInstructionZh}"
                                 },
                                 color = Color.White,
@@ -363,7 +377,12 @@ fun LiveMapCard(
                                 val remKm = "%.1f km".format(builtInNavState.remainingDistanceMeters / 1000f)
                                 val remMin = (builtInNavState.remainingDurationSeconds / 60).coerceAtLeast(1)
                                 Text(
-                                    text = "目的地：${builtInNavState.destinationName} · 剩餘 $remKm · 約 $remMin 分鐘",
+                                    text = str(
+                                        "目的地：${builtInNavState.destinationName} · 剩餘 $remKm · 約 $remMin 分鐘",
+                                        "目的地：${builtInNavState.destinationName} · 剩余 $remKm · 约 $remMin 分钟",
+                                        "Dest: ${builtInNavState.destinationName} · $remKm left · ~$remMin min",
+                                        "目的地：${builtInNavState.destinationName} · 残り $remKm · 約 $remMin 分"
+                                    ),
                                     color = Color(0xFFD1FAE5),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold,
@@ -373,10 +392,10 @@ fun LiveMapCard(
                             }
                         }
                         IconButton(onClick = onVoiceNavClick) {
-                            Icon(Icons.Rounded.Mic, contentDescription = "語音換目的地", tint = Color.White)
+                            Icon(Icons.Rounded.Mic, contentDescription = str("語音換目的地", "语音换目的地", "Voice change destination", "音声で目的地を変更"), tint = Color.White)
                         }
                         IconButton(onClick = onStopBuiltInNav) {
-                            Icon(Icons.Rounded.Close, contentDescription = "結束導航", tint = Color.White)
+                            Icon(Icons.Rounded.Close, contentDescription = str("結束導航", "结束导航", "Stop navigation", "ナビ終了"), tint = Color.White)
                         }
                     }
                 }
@@ -439,13 +458,13 @@ fun LiveMapCard(
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.Search,
-                                    contentDescription = "搜尋目的地",
+                                    contentDescription = str("搜尋目的地", "搜索目的地", "Search destination", "目的地を検索"),
                                     tint = colors.accent,
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    text = "內建地圖導航搜尋…",
+                                    text = str("內建地圖導航搜尋…", "内置地图导航搜索…", "Search built-in map…", "内蔵マップで検索…"),
                                     color = colors.primaryText,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Medium,
@@ -460,16 +479,17 @@ fun LiveMapCard(
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             MapChipButton(
                                 icon = Icons.Rounded.Mic,
-                                label = "✨ Gemini 語音導航",
+                                label = str("✨ Gemini 語音導航", "✨ Gemini 语音导航", "✨ Gemini Voice Nav", "✨ Gemini 音声ナビ"),
                                 highlight = true,
                                 onClick = onVoiceNavClick
                             )
+                            val dlPct = (offlineState.progress * 100).toInt()
                             MapChipButton(
                                 icon = Icons.Rounded.CloudDownload,
                                 label = if (offlineState.downloadingRegionId != null) {
-                                    "下載 ${(offlineState.progress * 100).toInt()}%"
+                                    str("下載 $dlPct%", "下载 $dlPct%", "DL $dlPct%", "保存中 $dlPct%")
                                 } else {
-                                    "離線地圖"
+                                    str("離線地圖", "离线地图", "Offline Maps", "オフライン地図")
                                 },
                                 highlight = showOfflineSheet || offlineState.updateSuggestion != null || offlineState.downloadingRegionId != null,
                                 onClick = { showOfflineSheet = !showOfflineSheet }
@@ -477,20 +497,20 @@ fun LiveMapCard(
                             if (homeAddress.isNotBlank()) {
                                 MapChipButton(
                                     icon = Icons.Rounded.Home,
-                                    label = "回家",
+                                    label = str("回家", "回家", "Home", "自宅"),
                                     onClick = { onQuickBuiltInNavigateQuery(homeAddress) }
                                 )
                             }
                             if (workAddress.isNotBlank()) {
                                 MapChipButton(
                                     icon = Icons.Rounded.Work,
-                                    label = "公司",
+                                    label = str("公司", "公司", "Work", "職場"),
                                     onClick = { onQuickBuiltInNavigateQuery(workAddress) }
                                 )
                             }
                             MapChipButton(
                                 icon = Icons.Rounded.Navigation,
-                                label = "G地圖",
+                                label = str("G地圖", "G地图", "G Maps", "Gマップ"),
                                 highlight = false,
                                 onClick = { onLaunchGoogleMapsApp(null) }
                             )
@@ -520,7 +540,17 @@ fun LiveMapCard(
                                         value = builtInQueryText,
                                         onValueChange = { builtInQueryText = it },
                                         singleLine = true,
-                                        placeholder = { Text(str("輸入目的地（直接於本啟動器內建地圖導航）…", "Enter destination (navigate on built-in map)…", "目的地を入力（内蔵マップで案内）…"), fontSize = 12.sp) },
+                                        placeholder = {
+                                            Text(
+                                                str(
+                                                    "輸入目的地（直接於本啟動器內建地圖導航）…",
+                                                    "输入目的地（直接在本启动器内置地图导航）…",
+                                                    "Enter destination (navigate on built-in map)…",
+                                                    "目的地を入力（内蔵マップで案内）…"
+                                                ),
+                                                fontSize = 12.sp
+                                            )
+                                        },
                                         shape = RoundedCornerShape(12.dp),
                                         modifier = Modifier.weight(1f)
                                     )
@@ -529,13 +559,13 @@ fun LiveMapCard(
                                         colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
-                                        Text(str("搜尋", "Search", "検索"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text(str("搜尋", "搜索", "Search", "検索"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
                                     IconButton(onClick = onVoiceNavClick) {
-                                        Icon(Icons.Rounded.Mic, contentDescription = "語音輸入", tint = Color(0xFFA78BFA))
+                                        Icon(Icons.Rounded.Mic, contentDescription = str("語音輸入", "语音输入", "Voice input", "音声入力"), tint = Color(0xFFA78BFA))
                                     }
                                     IconButton(onClick = { showBuiltInSearchBox = false }) {
-                                        Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.secondaryText)
+                                        Icon(Icons.Rounded.Close, contentDescription = str("關閉", "关闭", "Close", "閉じる"), tint = colors.secondaryText)
                                     }
                                 }
                                 if (builtInNavState.errorMessage.isNotBlank()) {
@@ -559,7 +589,7 @@ fun LiveMapCard(
                                             Text(res.name, color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             Text(res.subtitle, color = colors.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         }
-                                        Text(str("開始導航 →", "Start Nav →", "案内開始 →"), color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text(str("開始導航 →", "开始导航 →", "Start Nav →", "案内開始 →"), color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -569,6 +599,25 @@ fun LiveMapCard(
                     // Smart Offline Map Update Recommendation Pill (user chooses whether to update!)
                     val suggestion = offlineState.updateSuggestion
                     if (suggestion != null && !showOfflineSheet) {
+                        val sugTitle = OfflineMapManager.presetTitleStr(suggestion.regionId, suggestion.regionTitleZh)
+                        val sugText = when {
+                            suggestion.daysAgo > 0L -> str(
+                                "「$sugTitle」離線地圖已下載 ${suggestion.daysAgo} 天（超過設定的 ${suggestion.policyDays} 天），建議連網時更新",
+                                "「$sugTitle」离线地图已下载 ${suggestion.daysAgo} 天（超过设置的 ${suggestion.policyDays} 天），建议联网时更新",
+                                "\"$sugTitle\" offline map is ${suggestion.daysAgo} days old (over ${suggestion.policyDays}-day limit). Update recommended.",
+                                "「$sugTitle」オフライン地図は保存から ${suggestion.daysAgo} 日経過（設定 ${suggestion.policyDays} 日超過）。更新を推奨します"
+                            )
+                            suggestion.isUncachedArea -> {
+                                val liveDet = OfflineMapManager.describeDetectedLocation(location.latitude, location.longitude, currentLang)
+                                str(
+                                    "偵測到車輛進入「${liveDet.localRegionTitleZh}」尚未離線快取，可一鍵下載所在區域地圖",
+                                    "检测到车辆进入「${liveDet.localRegionTitleZh}」尚未离线缓存，可一键下载所在区域地图",
+                                    "Entered \"${liveDet.localRegionTitleZh}\" without offline cache. Download local map in one tap.",
+                                    "オフライン未保存の「${liveDet.localRegionTitleZh}」に入りました。ワンタップで周辺地図を保存できます"
+                                )
+                            }
+                            else -> suggestion.reasonZh
+                        }
                         Surface(
                             color = colors.glassOverlay,
                             shape = RoundedCornerShape(16.dp),
@@ -589,7 +638,7 @@ fun LiveMapCard(
                                     Icon(Icons.Rounded.Update, contentDescription = null, tint = colors.accent, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(8.dp))
                                     Text(
-                                        text = suggestion.reasonZh,
+                                        text = sugText,
                                         color = colors.primaryText,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold,
@@ -603,13 +652,13 @@ fun LiveMapCard(
                                         colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
-                                        Text("立即更新", fontSize = 11.sp)
+                                        Text(str("立即更新", "立即更新", "Update Now", "今すぐ更新"), fontSize = 11.sp)
                                     }
                                     OutlinedButton(
                                         onClick = onDismissOfflineSuggestion,
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
-                                        Text("稍後", fontSize = 11.sp)
+                                        Text(str("稍後", "稍后", "Later", "後で"), fontSize = 11.sp)
                                     }
                                 }
                             }
@@ -633,7 +682,7 @@ fun LiveMapCard(
                         ) {
                             Icon(Icons.Rounded.Navigation, contentDescription = null, tint = colors.accent, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("即時地圖", color = colors.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(str("即時地圖", "实时地图", "Live Map", "ライブ地図"), color = colors.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
             if (showSwapButton) {
@@ -645,7 +694,7 @@ fun LiveMapCard(
                         .clickable { onSwapRequested() }
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.SwapHoriz, contentDescription = "切換為主畫面", tint = colors.onAccent, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Rounded.SwapHoriz, contentDescription = str("切換為主畫面", "切换为主画面", "Swap to primary pane", "メイン画面に切替"), tint = colors.onAccent, modifier = Modifier.size(18.dp))
                     }
                 }
             }
@@ -677,7 +726,11 @@ fun LiveMapCard(
                     Text("km/h", color = colors.secondaryText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                     if (isPrimary) {
                         Text(
-                            text = if (location.hasRealFix) "GPS 即時" else "定位中",
+                            text = if (location.hasRealFix) {
+                                str("GPS 即時", "GPS 实时", "GPS Live", "GPS 測位中")
+                            } else {
+                                str("定位中", "定位中", "Locating", "測位待機")
+                            },
                             color = if (location.hasRealFix) colors.statusConnected else colors.secondaryText,
                             fontSize = 9.sp
                         )
@@ -710,7 +763,7 @@ fun LiveMapCard(
                                     mapLibreMap?.animateCamera(CameraUpdateFactory.zoomTo(currentZoom), 300)
                                 }
                         ) {
-                            Icon(Icons.Rounded.Add, contentDescription = "放大", tint = colors.primaryText)
+                            Icon(Icons.Rounded.Add, contentDescription = str("放大", "放大", "Zoom in", "拡大"), tint = colors.primaryText)
                         }
                         Box(
                             Modifier
@@ -728,7 +781,7 @@ fun LiveMapCard(
                                     mapLibreMap?.animateCamera(CameraUpdateFactory.zoomTo(currentZoom), 300)
                                 }
                         ) {
-                            Icon(Icons.Rounded.Remove, contentDescription = "縮小", tint = colors.primaryText)
+                            Icon(Icons.Rounded.Remove, contentDescription = str("縮小", "缩小", "Zoom out", "縮小"), tint = colors.primaryText)
                         }
                     }
                 }
@@ -736,19 +789,23 @@ fun LiveMapCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SmallGlassCircleButton(
                         icon = Icons.Rounded.Layers,
-                        contentDescription = "切換底圖圖層與即時路況",
+                        contentDescription = str("切換底圖圖層與即時路況", "切换底图图层与实时路况", "Map layers & live traffic", "地図レイヤーと交通状況"),
                         active = showLayerPicker || trafficEnabled || mapEngineStyle != MapEngineStyle.GOOGLE_TRAFFIC_TILES,
                         onClick = { showLayerPicker = !showLayerPicker }
                     )
                     SmallGlassCircleButton(
                         icon = Icons.Rounded.MyLocation,
-                        contentDescription = "置中車位",
+                        contentDescription = str("置中車位", "居中车位", "Center on vehicle", "現在地に戻る"),
                         active = followVehicle,
                         onClick = { followVehicle = true }
                     )
                     SmallGlassCircleButton(
                         icon = Icons.Rounded.OpenInFull,
-                        contentDescription = if (isFullscreen) "返回分割" else "全螢幕地圖",
+                        contentDescription = if (isFullscreen) {
+                            str("返回分割", "返回分屏", "Exit fullscreen", "分割表示に戻る")
+                        } else {
+                            str("全螢幕地圖", "全屏地图", "Fullscreen map", "全画面マップ")
+                        },
                         active = isFullscreen,
                         onClick = onToggleFullscreen
                     )
@@ -782,9 +839,9 @@ fun LiveMapCard(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("地圖圖層與路況", color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text(str("地圖圖層與路況", "地图图层与路况", "Map Layers & Traffic", "地図レイヤーと交通状況"), color = colors.primaryText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                         IconButton(onClick = { showLayerPicker = false }, modifier = Modifier.size(26.dp)) {
-                            Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.secondaryText, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Rounded.Close, contentDescription = str("關閉", "关闭", "Close", "閉じる"), tint = colors.secondaryText, modifier = Modifier.size(18.dp))
                         }
                     }
 
@@ -804,7 +861,7 @@ fun LiveMapCard(
                                     }
                             ) {
                                 Text(
-                                    text = styleItem.labelZh,
+                                    text = DxCarI18n.mapEngineLabel(styleItem),
                                     color = if (selected) colors.onAccent else colors.primaryText,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold,
@@ -825,8 +882,8 @@ fun LiveMapCard(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("疊加 Google 即時路況", color = colors.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            Text("適用於標準與衛星混合圖層", color = colors.secondaryText, fontSize = 10.sp)
+                            Text(str("疊加 Google 即時路況", "叠加 Google 实时路况", "Overlay Google Live Traffic", "Google リアルタイム交通状況を重ねる"), color = colors.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(str("適用於標準與衛星混合圖層", "适用于标准与卫星混合图层", "Available on Standard & Satellite layers", "標準マップおよび衛星写真レイヤーに対応"), color = colors.secondaryText, fontSize = 10.sp)
                         }
                         Switch(
                             checked = trafficEnabled,
@@ -847,7 +904,13 @@ fun LiveMapCard(
                 .align(Alignment.TopCenter)
                 .padding(top = 60.dp, start = 14.dp, end = 14.dp, bottom = 14.dp)
         ) {
-            val dateFmt = remember { SimpleDateFormat("yyyy/MM/dd", Locale.TAIWAN) }
+            val dateLocale = when (currentLang) {
+                EffectiveLanguage.ZH_TW -> Locale.TAIWAN
+                EffectiveLanguage.ZH_CN -> Locale.SIMPLIFIED_CHINESE
+                EffectiveLanguage.EN -> Locale.US
+                EffectiveLanguage.JA -> Locale.JAPAN
+            }
+            val dateFmt = remember(currentLang) { SimpleDateFormat("yyyy/MM/dd", dateLocale) }
             val byId = remember(downloadedRegions) { downloadedRegions.associateBy { it.regionId } }
 
             Surface(
@@ -872,24 +935,34 @@ fun LiveMapCard(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "方案 A · 離線地圖下載與自動更新判斷",
+                                text = str(
+                                    "方案 A · 離線地圖下載與自動更新判斷",
+                                    "方案 A · 离线地图下载与自动更新判断",
+                                    "Plan A · Offline Maps & Smart Update",
+                                    "プラン A · オフライン地図と自動更新判定"
+                                ),
                                 color = colors.primaryText,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "無網路／地下室／山區自動使用離線快取圖磚；可自選更新提醒週期",
+                                text = str(
+                                    "無網路／地下室／山區自動使用離線快取圖磚；可自選更新提醒週期",
+                                    "无网络／地下室／山区自动使用离线缓存图砖；可自选更新提醒周期",
+                                    "Auto-uses cached tiles in tunnels, basements & mountains; customizable update reminders",
+                                    "圏外・地下・山間部で自動的にキャッシュ地図を使用。更新通知周期を選択可能"
+                                ),
                                 color = colors.secondaryText,
                                 fontSize = 11.sp
                             )
                         }
                         IconButton(onClick = { showOfflineSheet = false }) {
-                            Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.primaryText)
+                            Icon(Icons.Rounded.Close, contentDescription = str("關閉", "关闭", "Close", "閉じる"), tint = colors.primaryText)
                         }
                     }
 
                     // User-selectable update reminder policy
-                    Text("何時提醒更新離線地圖：", color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(str("何時提醒更新離線地圖：", "何时提醒更新离线地图：", "Offline map update reminder:", "オフライン地図の更新通知タイミング："), color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -904,7 +977,7 @@ fun LiveMapCard(
                                     .clickable { onSelectOfflinePolicy(pol) }
                             ) {
                                 Text(
-                                    text = pol.labelZh,
+                                    text = DxCarI18n.offlinePolicyLabel(pol),
                                     color = if (selected) colors.onAccent else colors.primaryText,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold,
@@ -955,14 +1028,14 @@ fun LiveMapCard(
                                 onClick = onCancelOfflineDownload,
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text("取消", fontSize = 11.sp)
+                                Text(str("取消", "取消", "Cancel", "キャンセル"), fontSize = 11.sp)
                             }
                         }
                     }
 
                     // Smart GPS Current-Region & Entire-Country One-Tap Batch Download Buttons!
-                    val detectedLoc = remember(location.latitude, location.longitude) {
-                        OfflineMapManager.describeDetectedLocation(location.latitude, location.longitude)
+                    val detectedLoc = remember(location.latitude, location.longitude, currentLang) {
+                        OfflineMapManager.describeDetectedLocation(location.latitude, location.longitude, currentLang)
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -975,7 +1048,16 @@ fun LiveMapCard(
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("📍 下載所在區域（${detectedLoc.localRegionTitleZh}）", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                str(
+                                    "📍 下載所在區域（${detectedLoc.localRegionTitleZh}）",
+                                    "📍 下载所在区域（${detectedLoc.localRegionTitleZh}）",
+                                    "📍 Download Local (${detectedLoc.localRegionTitleZh})",
+                                    "📍 現在地エリアを保存（${detectedLoc.localRegionTitleZh}）"
+                                ),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                         Button(
                             onClick = { onDownloadOfflineRegion(OfflineMapManager.TOKEN_AUTO_ENTIRE_COUNTRY) },
@@ -984,7 +1066,16 @@ fun LiveMapCard(
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("🌏 全下載所在國家（${detectedLoc.countryTitleZh}）", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                str(
+                                    "🌏 全下載所在國家（${detectedLoc.countryTitleZh}）",
+                                    "🌏 全下载所在国家（${detectedLoc.countryTitleZh}）",
+                                    "🌏 Download Country (${detectedLoc.countryTitleZh})",
+                                    "🌏 国全体を保存（${detectedLoc.countryTitleZh}）"
+                                ),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
 
@@ -1011,16 +1102,23 @@ fun LiveMapCard(
                             ) {
                                 Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                                     Text(
-                                        text = preset.titleZh,
+                                        text = OfflineMapManager.presetTitleStr(preset.id, preset.titleZh),
                                         color = colors.primaryText,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                     Text(
                                         text = if (rec != null) {
-                                            "✓ 已下載 (${dateFmt.format(Date(rec.downloadedAtMs))} · 約 %.1f MB)".format(rec.approxSizeMb)
+                                            val dateStr = dateFmt.format(Date(rec.downloadedAtMs))
+                                            val mbStr = "%.1f".format(Locale.US, rec.approxSizeMb)
+                                            str(
+                                                "✓ 已下載 ($dateStr · 約 $mbStr MB)",
+                                                "✓ 已下载 ($dateStr · 约 $mbStr MB)",
+                                                "✓ Downloaded ($dateStr · ~$mbStr MB)",
+                                                "✓ 保存済み ($dateStr · 約 $mbStr MB)"
+                                            )
                                         } else {
-                                            preset.subtitleZh
+                                            OfflineMapManager.presetSubtitleStr(preset.id, preset.subtitleZh)
                                         },
                                         color = if (rec != null) colors.statusConnected else colors.secondaryText,
                                         fontSize = 11.sp
@@ -1036,9 +1134,9 @@ fun LiveMapCard(
                                     ) {
                                         Text(
                                             text = when {
-                                                isDownloadingThis -> "下載中…"
-                                                rec != null -> "更新圖資"
-                                                else -> "下載離線"
+                                                isDownloadingThis -> str("下載中…", "下载中…", "Downloading…", "保存中…")
+                                                rec != null -> str("更新圖資", "更新图资", "Update", "更新")
+                                                else -> str("下載離線", "下载离线", "Download", "保存")
                                             },
                                             fontSize = 12.sp
                                         )
@@ -1048,7 +1146,7 @@ fun LiveMapCard(
                                             onClick = { onDeleteOfflineRegion(preset.id) },
                                             modifier = Modifier.size(32.dp)
                                         ) {
-                                            Icon(Icons.Rounded.DeleteOutline, contentDescription = "刪除離線包", tint = colors.secondaryText, modifier = Modifier.size(18.dp))
+                                            Icon(Icons.Rounded.DeleteOutline, contentDescription = str("刪除離線包", "删除离线包", "Delete offline map", "オフライン地図を削除"), tint = colors.secondaryText, modifier = Modifier.size(18.dp))
                                         }
                                     }
                                 }

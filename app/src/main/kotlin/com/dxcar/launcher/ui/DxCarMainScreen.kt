@@ -114,6 +114,8 @@ import com.dxcar.launcher.system.WifiHotspotFastRestarter
 import com.dxcar.launcher.theme.DayNightEngine
 import com.dxcar.launcher.theme.DxCarTheme
 import com.dxcar.launcher.theme.LocalDxCarColors
+import com.dxcar.launcher.i18n.DxCarI18n
+import com.dxcar.launcher.i18n.DxCarI18n.str
 import com.dxcar.launcher.weather.LocalWeatherState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -124,6 +126,13 @@ enum class LauncherDestination {
     FULLSCREEN_YOUTUBE_WEB,
     APP_DRAWER,
     SETTINGS
+}
+
+private fun mapEngineStyleLabelTr(style: MapEngineStyle): String = when (style) {
+    MapEngineStyle.GOOGLE_TRAFFIC_TILES -> DxCarI18n.tr("Google 繁中地圖", "Google 中文地图", "Google Maps", "Google マップ")
+    MapEngineStyle.GOOGLE_SATELLITE_HYBRID -> DxCarI18n.tr("Google 衛星混合", "Google 卫星混合", "Google Satellite", "Google 衛星写真")
+    MapEngineStyle.OPENFREEMAP_VECTOR_3D -> DxCarI18n.tr("OpenFreeMap 3D 向量", "OpenFreeMap 3D 矢量", "OpenFreeMap 3D", "OpenFreeMap 3D")
+    MapEngineStyle.OPENFREEMAP_DARK -> DxCarI18n.tr("深色極簡向量", "深色极简矢量", "Dark Vector", "ダークベクター")
 }
 
 @Composable
@@ -278,7 +287,12 @@ fun DxCarRootScreen(
     LaunchedEffect(remoteSwapSeq) {
         if (remoteSwapSeq > 0L) {
             isMapPrimary = !isMapPrimary
-            gestureHudText = "⇄ 已從手機多指觸控切換首頁分欄"
+            gestureHudText = DxCarI18n.tr(
+                "⇄ 已從手機多指觸控切換首頁分欄",
+                "⇄ 已从手机多指触控切换首页分栏",
+                "⇄ Swapped home panes via phone touchpad",
+                "⇄ スマホタッチパッドでホーム分割を入れ替えました"
+            )
         }
     }
 
@@ -429,11 +443,22 @@ fun DxCarRootScreen(
         val pct = (layoutSpec.primaryWeight * 100).toInt()
         if (targetPackage.isNullOrBlank()) {
             app.installedAppsRepository.launchGoogleMapsFreeform(bounds)
-            gestureHudText = "🗺 已以 $pct% 比例貼合開啟真實 Google 地圖"
+            gestureHudText = DxCarI18n.tr(
+                "🗺 已以 $pct% 比例貼合開啟真實 Google 地圖",
+                "🗺 已以 $pct% 比例贴合开启真实 Google 地图",
+                "🗺 Opened Google Maps fitted to $pct% pane",
+                "🗺 Google マップを $pct% 枠にフィット起動しました"
+            )
         } else {
             app.installedAppsRepository.launchPackageFreeform(targetPackage, bounds)
-            val label = app.installedAppsRepository.findApp(targetPackage)?.label ?: "導航 App"
-            gestureHudText = "🗺 已以 $pct% 比例貼合開啟 $label"
+            val label = app.installedAppsRepository.findApp(targetPackage)?.label
+                ?: DxCarI18n.tr("導航 App", "导航应用", "Nav App", "ナビアプリ")
+            gestureHudText = DxCarI18n.tr(
+                "🗺 已以 $pct% 比例貼合開啟 $label",
+                "🗺 已以 $pct% 比例贴合开启 $label",
+                "🗺 Opened $label fitted to $pct% pane",
+                "🗺 $label を $pct% 枠にフィット起動しました"
+            )
         }
     }
 
@@ -448,7 +473,12 @@ fun DxCarRootScreen(
             dockOffsetTopPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.TOP) dockPx else 0,
             dockOffsetBottomPx = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0
         )
-        gestureHudText = "⊞ 正在開啟 AOSP 分屏：${sc.label} (${sc.ratio.label})"
+        gestureHudText = DxCarI18n.tr(
+            "⊞ 正在開啟 AOSP 分屏：${sc.label} (${sc.ratio.label})",
+            "⊞ 正在开启 AOSP 分屏：${sc.label} (${sc.ratio.label})",
+            "⊞ Launching Split-Screen: ${sc.label} (${sc.ratio.label})",
+            "⊞ AOSP 分割画面を起動中：${sc.label} (${sc.ratio.label})"
+        )
     }
 
     fun handleCustomShortcutLaunch(token: String) {
@@ -463,7 +493,11 @@ fun DxCarRootScreen(
             token == BuiltInShortcutTokens.DAY_NIGHT -> {
                 val nextMode = if (isNight) ThemeMode.FORCE_DAY else ThemeMode.FORCE_NIGHT
                 app.preferences.update { it.copy(themeMode = nextMode) }
-                gestureHudText = if (nextMode == ThemeMode.FORCE_NIGHT) "🌙 已切換為夜間模式" else "☀️ 已切換為白天模式"
+                gestureHudText = if (nextMode == ThemeMode.FORCE_NIGHT) {
+                    DxCarI18n.tr("🌙 已切換為夜間模式", "🌙 已切换为夜间模式", "🌙 Switched to Night Mode", "🌙 夜間モードに切り替えました")
+                } else {
+                    DxCarI18n.tr("☀️ 已切換為白天模式", "☀️ 已切换为白天模式", "☀️ Switched to Day Mode", "☀️ 昼間モードに切り替えました")
+                }
             }
             token == BuiltInShortcutTokens.SPLIT_GMAPS -> {
                 SplitSidePanelActivity.launchWithRealGoogleMaps(context)
@@ -475,7 +509,12 @@ fun DxCarRootScreen(
             }
             else -> {
                 if (!launchAppRespectingOptions(token)) {
-                    gestureHudText = "無法啟動該應用程式"
+                    gestureHudText = DxCarI18n.tr(
+                        "無法啟動該應用程式",
+                        "无法启动该应用",
+                        "Unable to launch this app",
+                        "このアプリを起動できません"
+                    )
                 }
             }
         }
@@ -484,7 +523,11 @@ fun DxCarRootScreen(
     fun handleToggleDayNight() {
         val nextMode = if (isNight) ThemeMode.FORCE_DAY else ThemeMode.FORCE_NIGHT
         app.preferences.update { it.copy(themeMode = nextMode) }
-        gestureHudText = if (nextMode == ThemeMode.FORCE_NIGHT) "🌙 已切換為夜間模式" else "☀️ 已切換為白天模式"
+        gestureHudText = if (nextMode == ThemeMode.FORCE_NIGHT) {
+            DxCarI18n.tr("🌙 已切換為夜間模式", "🌙 已切换为夜间模式", "🌙 Switched to Night Mode", "🌙 夜間モードに切り替えました")
+        } else {
+            DxCarI18n.tr("☀️ 已切換為白天模式", "☀️ 已切换为白天模式", "☀️ Switched to Day Mode", "☀️ 昼間モードに切り替えました")
+        }
     }
 
     DxCarTheme(
@@ -624,7 +667,12 @@ fun DxCarRootScreen(
                             if (acc != null) {
                                 acc.goBack()
                             } else {
-                                gestureHudText = "請點設定最上方「權限需求」開啟無障礙服務"
+                                gestureHudText = DxCarI18n.tr(
+                                    "請點設定最上方「權限需求」開啟無障礙服務",
+                                    "请点设置最上方「权限需求」开启无障碍服务",
+                                    "Enable Accessibility Service in Settings > Permissions first",
+                                    "設定上部の「必要な権限」からユーザー補助サービスを有効にしてください"
+                                )
                             }
                         }
                     },
@@ -633,7 +681,12 @@ fun DxCarRootScreen(
                         if (acc != null) {
                             acc.openRecents()
                         } else {
-                            gestureHudText = "請點設定最上方「權限需求」開啟無障礙服務"
+                            gestureHudText = DxCarI18n.tr(
+                                "請點設定最上方「權限需求」開啟無障礙服務",
+                                "请点设置最上方「权限需求」开启无障碍服务",
+                                "Enable Accessibility Service in Settings > Permissions first",
+                                "設定上部の「必要な権限」からユーザー補助サービスを有効にしてください"
+                            )
                         }
                     }
                 )
@@ -656,9 +709,19 @@ fun DxCarRootScreen(
                                 onPageChanged = { nextPage ->
                                     currentDashboardPage = nextPage
                                     gestureHudText = if (nextPage == 0) {
-                                        "① 第一介面 · 導航與音樂天氣"
+                                        DxCarI18n.tr(
+                                            "① 第一介面 · 導航與音樂天氣",
+                                            "① 第一界面 · 导航与音乐天气",
+                                            "① Page 1 · Navigation, Media & Weather",
+                                            "① ページ 1 · ナビ・音楽・天気"
+                                        )
                                     } else {
-                                        "② 第二介面 · 1:1 方案A地圖 ＋ YouTube 視窗"
+                                        DxCarI18n.tr(
+                                            "② 第二介面 · 1:1 方案A地圖 ＋ YouTube 視窗",
+                                            "② 第二界面 · 1:1 方案A地图 ＋ YouTube 窗口",
+                                            "② Page 2 · 1:1 Live Map + YouTube Window",
+                                            "② ページ 2 · 1:1 マップ ＋ YouTube ウィンドウ"
+                                        )
                                     }
                                 },
                                 pageOneContent = { onSeamDragDelta, onSeamDragEnd ->
@@ -698,18 +761,44 @@ fun DxCarRootScreen(
                                         },
                                         onSelectMapStyle = { styleItem ->
                                             app.preferences.update { it.copy(mapEngineStyle = styleItem) }
-                                            gestureHudText = "🗺 已切換圖層：${styleItem.labelZh}"
+                                            val styleName = mapEngineStyleLabelTr(styleItem)
+                                            gestureHudText = DxCarI18n.tr(
+                                                "🗺 已切換圖層：$styleName",
+                                                "🗺 已切换图层：$styleName",
+                                                "🗺 Map Layer: $styleName",
+                                                "🗺 マップレイヤー切替：$styleName"
+                                            )
                                         },
                                         onToggleTraffic = {
                                             val nextTraffic = !config.mapTrafficEnabled
                                             app.preferences.update { it.copy(mapTrafficEnabled = nextTraffic) }
-                                            gestureHudText = if (nextTraffic) "🚦 已開啟 Google 即時路況" else "🗺 已關閉即時路況圖層"
+                                            gestureHudText = if (nextTraffic) {
+                                                DxCarI18n.tr(
+                                                    "🚦 已開啟 Google 即時路況",
+                                                    "🚦 已开启 Google 实时路况",
+                                                    "🚦 Live Traffic Enabled",
+                                                    "🚦 Google リアルタイム交通情報をオンにしました"
+                                                )
+                                            } else {
+                                                DxCarI18n.tr(
+                                                    "🗺 已關閉即時路況圖層",
+                                                    "🗺 已关闭实时路况图层",
+                                                    "🗺 Live Traffic Hidden",
+                                                    "🗺 交通情報レイヤーをオフにしました"
+                                                )
+                                            }
                                         },
                                         onToggleMapStyle = {
                                             val allStyles = MapEngineStyle.entries
                                             val next = allStyles[(allStyles.indexOf(config.mapEngineStyle) + 1) % allStyles.size]
                                             app.preferences.update { it.copy(mapEngineStyle = next) }
-                                            gestureHudText = "🗺 切換至 ${next.labelZh}"
+                                            val nextName = mapEngineStyleLabelTr(next)
+                                            gestureHudText = DxCarI18n.tr(
+                                                "🗺 切換至 $nextName",
+                                                "🗺 切换至 $nextName",
+                                                "🗺 Switched to $nextName",
+                                                "🗺 $nextName に切り替えました"
+                                            )
                                         },
                                         onSelectOfflinePolicy = { pol ->
                                             app.preferences.update { it.copy(offlineUpdatePolicy = pol) }
@@ -728,7 +817,12 @@ fun DxCarRootScreen(
                                         onSelectPlanCNavPkg = { pkg ->
                                             app.preferences.update { it.copy(planCNavPackage = pkg) }
                                             val label = app.installedAppsRepository.findApp(pkg)?.label ?: pkg
-                                            gestureHudText = "🧭 已指定左側導航：$label"
+                                            gestureHudText = DxCarI18n.tr(
+                                                "🧭 已指定左側導航：$label",
+                                                "🧭 已指定左侧导航：$label",
+                                                "🧭 Primary Nav App: $label",
+                                                "🧭 メインナビアプリを設定：$label"
+                                            )
                                         },
                                         onLaunchPlanCFreeform = { pkg ->
                                             launchFreeformPrimaryBox(pkg)
@@ -736,7 +830,12 @@ fun DxCarRootScreen(
                                                 if (Settings.canDrawOverlays(context)) {
                                                     PersistentDockOverlayService.showPlanCMusicPanel(context)
                                                 } else {
-                                                    gestureHudText = "請點設定最上方「權限需求」授予懸浮權限以顯示右側音樂控盤"
+                                                    gestureHudText = DxCarI18n.tr(
+                                                        "請點設定最上方「權限需求」授予懸浮權限以顯示右側音樂控盤",
+                                                        "请点设置最上方「权限需求」授予悬浮权限以显示右侧音乐控盘",
+                                                        "Grant Overlay Permission in Settings > Permissions to show floating media panel",
+                                                        "右側の音楽パネルを表示するには設定上部の「必要な権限」でオーバーレイ権限を許可してください"
+                                                    )
                                                 }
                                             }
                                         },
@@ -794,7 +893,12 @@ fun DxCarRootScreen(
                                         onCustomSlotLaunch = ::handleCustomShortcutLaunch,
                                         onCustomSlotRemove = { slotIdx, label ->
                                             app.preferences.clearCustomShortcutSlot(slotIdx)
-                                            gestureHudText = "🗑 已移除 $label（點擊 ＋ 可重新加入）"
+                                            gestureHudText = DxCarI18n.tr(
+                                                "🗑 已移除 $label（點擊 ＋ 可重新加入）",
+                                                "🗑 已移除 $label（点击 ＋ 可重新加入）",
+                                                "🗑 Removed $label (Tap + to re-add)",
+                                                "🗑 $label を削除しました（＋タップで再追加）"
+                                            )
                                         }
                                     )
                                 },
@@ -972,7 +1076,12 @@ fun DxCarRootScreen(
                                 onLaunchSplitShortcut = ::dispatchSplitShortcutWithDockOffsets,
                                 onRemoveSplitShortcut = { sc ->
                                     app.preferences.removeSplitShortcut(sc.id)
-                                    gestureHudText = "🗑 已移除分屏捷徑：${sc.label}"
+                                    gestureHudText = DxCarI18n.tr(
+                                        "🗑 已移除分屏捷徑：${sc.label}",
+                                        "🗑 已移除分屏快捷方式：${sc.label}",
+                                        "🗑 Removed split shortcut: ${sc.label}",
+                                        "🗑 分割ショートカットを削除：${sc.label}"
+                                    )
                                 },
                                 onUninstallApp = { targetApp ->
                                     val launched = app.installedAppsRepository.requestUninstallApp(targetApp.packageName)
@@ -985,11 +1094,21 @@ fun DxCarRootScreen(
                                 },
                                 onCreateFolder = { name, pkgs ->
                                     app.preferences.createAppFolder(name, pkgs)
-                                    gestureHudText = "📁 已建立資料夾：$name"
+                                    gestureHudText = DxCarI18n.tr(
+                                        "📁 已建立資料夾：$name",
+                                        "📁 已新建文件夹：$name",
+                                        "📁 Created folder: $name",
+                                        "📁 フォルダを作成しました：$name"
+                                    )
                                 },
                                 onAddAppToFolder = { folderId, pkg ->
                                     app.preferences.addAppToFolder(folderId, pkg)
-                                    gestureHudText = "📁 已加入資料夾"
+                                    gestureHudText = DxCarI18n.tr(
+                                        "📁 已加入資料夾",
+                                        "📁 已加入文件夹",
+                                        "📁 Added to folder",
+                                        "📁 フォルダに追加しました"
+                                    )
                                 },
                                 onRenameFolder = { folderId, newName ->
                                     app.preferences.renameAppFolder(folderId, newName)
@@ -999,7 +1118,12 @@ fun DxCarRootScreen(
                                 },
                                 onDeleteFolder = { folderId ->
                                     app.preferences.deleteAppFolder(folderId)
-                                    gestureHudText = "📁 已解散資料夾"
+                                    gestureHudText = DxCarI18n.tr(
+                                        "📁 已解散資料夾",
+                                        "📁 已解散文件夹",
+                                        "📁 Folder ungrouped",
+                                        "📁 フォルダを解除しました"
+                                    )
                                 },
                                 onOpenSplitCreator = { showSplitCreator = true },
                                 onLaunchYoutube = ::launchYoutubeBest,
@@ -1038,7 +1162,10 @@ fun DxCarRootScreen(
                                     onStartGeminiVoiceNav()
                                 },
                                 onTestWifiHotspotCycle = {
-                                    WifiHotspotFastRestarter.forceCycleSystemWifi(context, "手動測試")
+                                    WifiHotspotFastRestarter.forceCycleSystemWifi(
+                                        context,
+                                        DxCarI18n.tr("手動測試", "手动测试", "Manual Test", "手動テスト")
+                                    )
                                 },
                                 onUpdateConfig = { transform -> app.preferences.update(transform) },
                                 onRequestSetDefaultHome = {
@@ -1047,7 +1174,21 @@ fun DxCarRootScreen(
                                 },
                                 onSwitchToLauncher = { targetLauncher ->
                                     val launched = app.installedAppsRepository.launchHomeLauncher(targetLauncher)
-                                    gestureHudText = if (launched) "🏠 正在切換至 ${targetLauncher.label}" else "無法啟動 ${targetLauncher.label}"
+                                    gestureHudText = if (launched) {
+                                        DxCarI18n.tr(
+                                            "🏠 正在切換至 ${targetLauncher.label}",
+                                            "🏠 正在切换至 ${targetLauncher.label}",
+                                            "🏠 Switching to ${targetLauncher.label}",
+                                            "🏠 ${targetLauncher.label} に切り替え中"
+                                        )
+                                    } else {
+                                        DxCarI18n.tr(
+                                            "無法啟動 ${targetLauncher.label}",
+                                            "无法启动 ${targetLauncher.label}",
+                                            "Unable to launch ${targetLauncher.label}",
+                                            "${targetLauncher.label} を起動できません"
+                                        )
+                                    }
                                 },
                                 onRefreshHomeLaunchers = {
                                     app.installedAppsRepository.refreshHomeLaunchers()
@@ -1060,7 +1201,12 @@ fun DxCarRootScreen(
                                 onOpenSplitShortcutCreator = { showSplitCreator = true },
                                 onResetSettingsToDefaults = {
                                     app.preferences.resetToDefaults()
-                                    gestureHudText = "↺ 已恢復所有啟動器設定為預設值"
+                                    gestureHudText = DxCarI18n.tr(
+                                        "↺ 已恢復所有啟動器設定為預設值",
+                                        "↺ 已恢复所有启动器设置为默认值",
+                                        "↺ All launcher settings reset to defaults",
+                                        "↺ すべての設定を初期値に戻しました"
+                                    )
                                 },
                                 onRefreshPermissions = {
                                     permissionHealth = PermissionHelper.check(context)
@@ -1162,7 +1308,12 @@ fun DxCarRootScreen(
                         }
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Apps, contentDescription = "展開 App 選單", tint = colors.primaryText, modifier = Modifier.size(26.dp))
+                        Icon(
+                            Icons.Rounded.Apps,
+                            contentDescription = str("展開 App 選單", "展开应用菜单", "Open App Drawer", "アプリ一覧を開く"),
+                            tint = colors.primaryText,
+                            modifier = Modifier.size(26.dp)
+                        )
                     }
                 }
             }
@@ -1304,7 +1455,10 @@ fun DxCarRootScreen(
                                     onClick = { app.billingTrialManager.restorePurchases() },
                                     shape = RoundedCornerShape(16.dp)
                                 ) {
-                                    Text(com.dxcar.launcher.i18n.DxCarI18n.str("恢復購買", "Restore Purchase", "購入を復元"), fontSize = 14.sp)
+                                    Text(
+                                        str("恢復購買", "恢复购买", "Restore Purchase", "購入を復元"),
+                                        fontSize = 14.sp
+                                    )
                                 }
                             }
                         }
@@ -1344,7 +1498,12 @@ fun DxCarRootScreen(
                     onReadAloud = { app.notificationCenter.readMessageAloud(it) },
                     onQuickReply = { item, reply ->
                         app.notificationCenter.sendQuickReply(item, reply)
-                        gestureHudText = "💬 已傳送回覆：$reply"
+                        gestureHudText = DxCarI18n.tr(
+                            "💬 已傳送回覆：$reply",
+                            "💬 已发送回复：$reply",
+                            "💬 Sent reply: $reply",
+                            "💬 返信を送信しました：$reply"
+                        )
                     },
                     onVoiceReply = { item ->
                         app.notificationCenter.pausePopupDismiss()
@@ -1373,7 +1532,12 @@ fun DxCarRootScreen(
                     onReadAloud = { app.notificationCenter.readMessageAloud(it) },
                     onQuickReply = { item, reply ->
                         app.notificationCenter.sendQuickReply(item, reply)
-                        gestureHudText = "💬 已傳送回覆：$reply"
+                        gestureHudText = DxCarI18n.tr(
+                            "💬 已傳送回覆：$reply",
+                            "💬 已发送回复：$reply",
+                            "💬 Sent reply: $reply",
+                            "💬 返信を送信しました：$reply"
+                        )
                     },
                     onMarkRead = { app.notificationCenter.markMessageRead(it) },
                     onClearAll = { app.notificationCenter.clearAllMessages() },
@@ -1395,7 +1559,12 @@ fun DxCarRootScreen(
                     onSelectToken = { token, label ->
                         app.preferences.setCustomShortcutSlot(slotIdx, token)
                         pickingShortcutSlotIndex = null
-                        gestureHudText = "✓ 已加入「$label」至第 ${slotIdx + 1} 格"
+                        gestureHudText = DxCarI18n.tr(
+                            "✓ 已加入「$label」至第 ${slotIdx + 1} 格",
+                            "✓ 已添加「$label」至第 ${slotIdx + 1} 格",
+                            "✓ Added \"$label\" to Slot ${slotIdx + 1}",
+                            "✓「$label」をスロット ${slotIdx + 1} に追加しました"
+                        )
                     },
                     onDismiss = { pickingShortcutSlotIndex = null }
                 )
@@ -1412,7 +1581,12 @@ fun DxCarRootScreen(
                     onSaveShortcut = { shortcut ->
                         app.preferences.addSplitShortcut(shortcut)
                         showSplitCreator = false
-                        gestureHudText = "✓ 創建分屏捷徑成功：${shortcut.label} (${shortcut.ratio.label})"
+                        gestureHudText = DxCarI18n.tr(
+                            "✓ 創建分屏捷徑成功：${shortcut.label} (${shortcut.ratio.label})",
+                            "✓ 创建分屏快捷方式成功：${shortcut.label} (${shortcut.ratio.label})",
+                            "✓ Saved split shortcut: ${shortcut.label} (${shortcut.ratio.label})",
+                            "✓ 分割ショートカットを作成：${shortcut.label} (${shortcut.ratio.label})"
+                        )
                     },
                     onTestLaunchShortcut = ::dispatchSplitShortcutWithDockOffsets,
                     onPickSystemShortcut = onPickStockSystemShortcut,
@@ -1939,17 +2113,28 @@ private fun CoolwalkSplitDashboard(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
+                            val pct = (primaryRatio * 100).toInt()
                             Icon(Icons.Rounded.Map, contentDescription = null, tint = colors.accent, modifier = Modifier.size(54.dp))
                             Spacer(Modifier.height(10.dp))
                             Text(
-                                text = "真實 Google 地圖本體貼合模式（${(primaryRatio * 100).toInt()}% 比例）",
+                                text = str(
+                                    "真實 Google 地圖本體貼合模式（$pct% 比例）",
+                                    "真实 Google 地图本体贴合模式（$pct% 比例）",
+                                    "Real Google Maps Freeform Mode ($pct% Ratio)",
+                                    "Google マップ本体フィットモード（$pct% 比率）"
+                                ),
                                 color = colors.primaryText,
                                 fontSize = 17.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                text = "點擊下方按鈕即以 Freeform 貼合開啟，或使用 AOSP 原生可拖動分割模式",
+                                text = str(
+                                    "點擊下方按鈕即以 Freeform 貼合開啟，或使用 AOSP 原生可拖動分割模式",
+                                    "点击下方按钮即以 Freeform 贴合开启，或使用 AOSP 原生可拖动分屏模式",
+                                    "Tap below to snap real Google Maps via Freeform, or launch AOSP native draggable split-screen",
+                                    "下のボタンで Freeform フィット起動、または AOSP ネイティブ分割モードを開始します"
+                                ),
                                 color = colors.secondaryText,
                                 fontSize = 12.sp
                             )
@@ -1960,13 +2145,13 @@ private fun CoolwalkSplitDashboard(
                                     colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
                                     shape = RoundedCornerShape(16.dp)
                                 ) {
-                                    Text("貼合開啟真實 Google 地圖")
+                                    Text(str("貼合開啟真實 Google 地圖", "贴合开启真实 Google 地图", "Open Fitted Google Maps", "Google マップをフィット起動"))
                                 }
                                 OutlinedButton(onClick = onLaunchRealMapsSplit, shape = RoundedCornerShape(16.dp)) {
-                                    Text("AOSP 原生分割模式")
+                                    Text(str("AOSP 原生分割模式", "AOSP 原生分屏模式", "AOSP Native Split", "AOSP ネイティブ分割"))
                                 }
                                 OutlinedButton(onClick = onSwitchToBuiltinMap, shape = RoundedCornerShape(16.dp)) {
-                                    Text("切回內建即時地圖")
+                                    Text(str("切回內建即時地圖", "切回内置实时地图", "Switch to Built-in Map", "内蔵ライブマップに戻す"))
                                 }
                             }
                         }

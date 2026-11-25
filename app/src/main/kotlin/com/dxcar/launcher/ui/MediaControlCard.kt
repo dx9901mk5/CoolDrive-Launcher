@@ -63,9 +63,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.dxcar.launcher.data.SplitScreenShortcut
+import com.dxcar.launcher.i18n.DxCarI18n.str
 import com.dxcar.launcher.media.ActiveMediaState
 import com.dxcar.launcher.system.InstalledAppInfo
 import com.dxcar.launcher.theme.LocalDxCarColors
+import com.dxcar.launcher.weather.LocalWeatherRepository
 import com.dxcar.launcher.weather.LocalWeatherState
 
 /**
@@ -112,20 +114,55 @@ fun MediaControlCard(
         0f
     }
 
-    // Filter out redundant app-name or idle placeholder strings so ONLY real track title & artist appear
-    val cleanTitle = media.title.trim().takeIf {
-        it.isNotEmpty() &&
-            !it.equals(media.appName.trim(), ignoreCase = true) &&
-            it != "目前沒有播放中的媒體" &&
-            it != "媒體播放器"
-    }.orEmpty()
+    val appLabel = media.appName.trim()
+    val rawTitle = media.title.trim()
+    val rawArtist = media.artist.trim()
 
-    val cleanArtist = media.artist.trim().takeIf {
-        it.isNotEmpty() &&
-            !it.equals(media.appName.trim(), ignoreCase = true) &&
-            !it.equals(cleanTitle, ignoreCase = true) &&
-            !it.startsWith("開啟音樂 App")
-    }.orEmpty()
+    val isRememberedFallbackTitle = media.isRememberedLastApp && (
+        !media.hasSavedTrackTitle ||
+            rawTitle.startsWith("點擊 ▶ 播放") ||
+            rawTitle.startsWith("点击 ▶ 播放") ||
+            rawTitle.startsWith("Tap ▶ to play") ||
+            rawTitle.startsWith("▶ をタップして")
+        )
+
+    val isRememberedFallbackArtist = media.isRememberedLastApp && (
+        !media.hasSavedTrackArtist ||
+            rawArtist.startsWith("預設音樂播放器：") ||
+            rawArtist.startsWith("默认音乐播放器：") ||
+            rawArtist.startsWith("Default player:") ||
+            rawArtist.startsWith("デフォルト音楽アプリ：")
+        )
+
+    // Filter out redundant app-name or idle placeholder strings, and dynamically localize remembered/fallback prompts
+    val cleanTitle = when {
+        isRememberedFallbackTitle && appLabel.isNotEmpty() -> str(
+            "點擊 ▶ 播放 $appLabel",
+            "点击 ▶ 播放 $appLabel",
+            "Tap ▶ to play $appLabel",
+            "▶ をタップして $appLabel を再生"
+        )
+        !media.hasSession && !media.isRememberedLastApp && rawTitle in IDLE_MEDIA_TITLES -> ""
+        rawTitle.isNotEmpty() &&
+            !rawTitle.equals(appLabel, ignoreCase = true) &&
+            rawTitle !in IDLE_MEDIA_TITLES -> rawTitle
+        else -> ""
+    }
+
+    val cleanArtist = when {
+        isRememberedFallbackArtist && appLabel.isNotEmpty() -> str(
+            "預設音樂播放器：$appLabel（點擊 ▶ 直接喚醒播放）",
+            "默认音乐播放器：$appLabel（点击 ▶ 直接唤醒播放）",
+            "Default player: $appLabel (Tap ▶ to wake & play)",
+            "デフォルト音楽アプリ：$appLabel（▶ で起動＆再生）"
+        )
+        !media.hasSession && !media.isRememberedLastApp && IDLE_MEDIA_ARTIST_PREFIXES.any { rawArtist.startsWith(it) } -> ""
+        rawArtist.isNotEmpty() &&
+            !rawArtist.equals(appLabel, ignoreCase = true) &&
+            !rawArtist.equals(cleanTitle, ignoreCase = true) &&
+            IDLE_MEDIA_ARTIST_PREFIXES.none { rawArtist.startsWith(it) } -> rawArtist
+        else -> ""
+    }
 
     Box(
         modifier = modifier
@@ -288,10 +325,11 @@ fun MediaControlCard(
                                 }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
+                                val openAppDesc = str("開啟播放 App", "开启播放 App", "Open media app", "再生アプリを開く")
                                 if (sourceIconBitmap != null) {
                                     Image(
                                         bitmap = sourceIconBitmap,
-                                        contentDescription = "開啟播放 App",
+                                        contentDescription = openAppDesc,
                                         modifier = Modifier
                                             .size(if (tightHeight) 22.dp else 25.dp)
                                             .clip(RoundedCornerShape(7.dp))
@@ -299,7 +337,7 @@ fun MediaControlCard(
                                 } else {
                                     Icon(
                                         imageVector = Icons.Rounded.MusicNote,
-                                        contentDescription = "開啟播放 App",
+                                        contentDescription = openAppDesc,
                                         tint = colors.accent,
                                         modifier = Modifier.size(19.dp)
                                     )
@@ -324,7 +362,7 @@ fun MediaControlCard(
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = if (media.isFavorited) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                                    contentDescription = "喜歡／點讚收藏",
+                                    contentDescription = str("喜歡／點讚收藏", "喜欢／点赞收藏", "Like / Favorite", "いいね／お気に入り"),
                                     tint = when {
                                         media.isFavorited -> heartPink
                                         media.canFavorite -> colors.primaryText
@@ -337,21 +375,25 @@ fun MediaControlCard(
 
                         TransportButton(
                             icon = Icons.Rounded.SkipPrevious,
-                            contentDescription = "上一首",
+                            contentDescription = str("上一首", "上一首", "Previous track", "前の曲"),
                             large = false,
                             compact = tightHeight,
                             onClick = onPrevious
                         )
                         TransportButton(
                             icon = if (media.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                            contentDescription = if (media.isPlaying) "暫停" else "播放／繼續播放",
+                            contentDescription = if (media.isPlaying) {
+                                str("暫停", "暂停", "Pause", "一時停止")
+                            } else {
+                                str("播放／繼續播放", "播放／继续播放", "Play / Resume", "再生／再開")
+                            },
                             large = true,
                             compact = tightHeight,
                             onClick = onPlayPause
                         )
                         TransportButton(
                             icon = Icons.Rounded.SkipNext,
-                            contentDescription = "下一首",
+                            contentDescription = str("下一首", "下一首", "Next track", "次の曲"),
                             large = false,
                             compact = tightHeight,
                             onClick = onNext
@@ -399,6 +441,13 @@ private fun OverlaidCornerWeatherBadge(
         else -> Icons.Rounded.Cloud to Color(0xFFCBD5E1)
     }
 
+    val displayCondition = LocalWeatherRepository.localizedConditionStr(weather.weatherCode, weather.hasData)
+    val displayLocation = when (weather.locationName) {
+        in LocalWeatherRepository.DEFAULT_LOCAL_LABELS -> str("當地天氣", "当地天气", "Local Weather", "現在地の天気")
+        in LocalWeatherRepository.CURRENT_LOC_LABELS -> str("目前位置", "当前位置", "Current Location", "現在地")
+        else -> weather.locationName
+    }
+
     Surface(
         color = Color(0xBF0F172A),
         shape = RoundedCornerShape(14.dp),
@@ -415,7 +464,7 @@ private fun OverlaidCornerWeatherBadge(
         ) {
             Icon(
                 imageVector = icon,
-                contentDescription = weather.conditionText,
+                contentDescription = displayCondition,
                 tint = iconTint,
                 modifier = Modifier.size(if (compact) 15.dp else 17.dp)
             )
@@ -426,9 +475,9 @@ private fun OverlaidCornerWeatherBadge(
                 fontWeight = FontWeight.ExtraBold,
                 maxLines = 1
             )
-            if (weather.conditionText.isNotBlank()) {
+            if (displayCondition.isNotBlank()) {
                 Text(
-                    text = weather.conditionText,
+                    text = displayCondition,
                     color = Color.White.copy(alpha = 0.90f),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -436,7 +485,7 @@ private fun OverlaidCornerWeatherBadge(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            if (weather.locationName.isNotBlank()) {
+            if (displayLocation.isNotBlank()) {
                 Icon(
                     imageVector = Icons.Rounded.LocationOn,
                     contentDescription = null,
@@ -444,7 +493,7 @@ private fun OverlaidCornerWeatherBadge(
                     modifier = Modifier.size(11.dp)
                 )
                 Text(
-                    text = weather.locationName,
+                    text = displayLocation,
                     color = Color.White.copy(alpha = 0.85f),
                     fontSize = 10.5.sp,
                     fontWeight = FontWeight.Medium,
@@ -476,7 +525,7 @@ private fun AlbumCoverFrame(
             artBitmap != null -> {
                 Image(
                     bitmap = artBitmap,
-                    contentDescription = "專輯封面（點擊交換左右視窗）",
+                    contentDescription = str("專輯封面（點擊交換左右視窗）", "专辑封面（点击交换左右窗口）", "Album art (tap to swap panes)", "アルバムアート（タップで左右画面を入替）"),
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -484,7 +533,7 @@ private fun AlbumCoverFrame(
             appIconBitmap != null -> {
                 Image(
                     bitmap = appIconBitmap,
-                    contentDescription = "播放器圖示（點擊交換左右視窗）",
+                    contentDescription = str("播放器圖示（點擊交換左右視窗）", "播放器图标（点击交换左右窗口）", "Player icon (tap to swap panes)", "プレーヤーアイコン（タップで左右画面を入替）"),
                     modifier = Modifier
                         .size(64.dp)
                         .clip(RoundedCornerShape(18.dp))
@@ -501,6 +550,24 @@ private fun AlbumCoverFrame(
         }
     }
 }
+
+private val IDLE_MEDIA_TITLES = setOf(
+    "目前沒有播放中的媒體",
+    "当前没有播放中的媒体",
+    "No Media Playing",
+    "再生中のメディアはありません",
+    "媒體播放器",
+    "媒体播放器",
+    "Media Player",
+    "メディアプレーヤー"
+)
+
+private val IDLE_MEDIA_ARTIST_PREFIXES = listOf(
+    "開啟音樂 App",
+    "开启音乐 App",
+    "Music apps are remembered",
+    "音楽アプリを起動すると"
+)
 
 @Composable
 private fun TransportButton(

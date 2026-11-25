@@ -3,10 +3,14 @@ package com.dxcar.launcher.map
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import androidx.compose.runtime.Composable
 import com.dxcar.launcher.data.LauncherPreferences
 import com.dxcar.launcher.data.MapEngineStyle
 import com.dxcar.launcher.data.OfflineRegionRecord
 import com.dxcar.launcher.data.OfflineUpdatePolicy
+import com.dxcar.launcher.i18n.DxCarI18n
+import com.dxcar.launcher.i18n.DxCarI18n.str
+import com.dxcar.launcher.i18n.EffectiveLanguage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -49,7 +53,10 @@ data class DetectedOfflineLocationInfo(
 data class OfflineUpdateSuggestion(
     val regionId: String,
     val regionTitleZh: String,
-    val reasonZh: String
+    val reasonZh: String,
+    val daysAgo: Long = 0L,
+    val policyDays: Int = 0,
+    val isUncachedArea: Boolean = false
 )
 
 data class OfflineMapUiState(
@@ -209,11 +216,20 @@ class OfflineMapManager(
             val expired = records.firstOrNull { (now - it.downloadedAtMs) >= maxAgeMs }
             if (expired != null) {
                 val daysAgo = ((now - expired.downloadedAtMs) / 86_400_000L).coerceAtLeast(1L)
+                val locTitle = presetTitleTr(expired.regionId, expired.titleZh)
                 _state.value = _state.value.copy(
                     updateSuggestion = OfflineUpdateSuggestion(
                         regionId = expired.regionId,
-                        regionTitleZh = expired.titleZh,
-                        reasonZh = "「${expired.titleZh}」離線地圖已下載 $daysAgo 天（超過設定的 ${policy.days} 天），建議連網時更新"
+                        regionTitleZh = locTitle,
+                        reasonZh = DxCarI18n.tr(
+                            "「$locTitle」離線地圖已下載 $daysAgo 天（超過設定的 ${policy.days} 天），建議連網時更新",
+                            "「$locTitle」离线地图已下载 $daysAgo 天（超过设置的 ${policy.days} 天），建议联网时更新",
+                            "\"$locTitle\" offline map is $daysAgo days old (over ${policy.days}-day limit). Update recommended.",
+                            "「$locTitle」オフライン地図は保存から $daysAgo 日経過（設定 ${policy.days} 日超過）。更新を推奨します"
+                        ),
+                        daysAgo = daysAgo,
+                        policyDays = policy.days,
+                        isUncachedArea = false
                     )
                 )
                 return
@@ -231,7 +247,13 @@ class OfflineMapManager(
                     updateSuggestion = OfflineUpdateSuggestion(
                         regionId = TOKEN_AUTO_LOCAL_REGION,
                         regionTitleZh = detected.localRegionTitleZh,
-                        reasonZh = "偵測到車輛進入「${detected.localRegionTitleZh}」尚未離線快取，可一鍵下載所在區域地圖"
+                        reasonZh = DxCarI18n.tr(
+                            "偵測到車輛進入「${detected.localRegionTitleZh}」尚未離線快取，可一鍵下載所在區域地圖",
+                            "检测到车辆进入「${detected.localRegionTitleZh}」尚未离线缓存，可一键下载所在区域地图",
+                            "Entered \"${detected.localRegionTitleZh}\" without offline cache. Download local map in one tap.",
+                            "オフライン未保存の「${detected.localRegionTitleZh}」に入りました。ワンタップで周辺地図を保存できます"
+                        ),
+                        isUncachedArea = true
                     )
                 )
                 return
@@ -345,7 +367,12 @@ class OfflineMapManager(
             _state.value = OfflineMapUiState(
                 progress = 1f,
                 statusMessage = if (activeBatchTotal > 1) {
-                    "✓ 已完成全部 $activeBatchTotal 區離線地圖下載！"
+                    DxCarI18n.tr(
+                        "✓ 已完成全部 $activeBatchTotal 區離線地圖下載！",
+                        "✓ 已完成全部 $activeBatchTotal 区离线地图下载！",
+                        "✓ Completed all $activeBatchTotal offline map regions!",
+                        "✓ 全 $activeBatchTotal エリアのオフライン地図ダウンロードが完了しました！"
+                    )
                 } else {
                     _state.value.statusMessage
                 }
@@ -355,7 +382,17 @@ class OfflineMapManager(
 
         val safeBatchTotal = activeBatchTotal.coerceAtLeast(1)
         val stepIdx = activeBatchCompleted + 1
-        val stepPrefix = if (safeBatchTotal > 1) "[全區下載 $stepIdx/$safeBatchTotal] " else ""
+        val stepPrefix = if (safeBatchTotal > 1) {
+            DxCarI18n.tr(
+                "[全區下載 $stepIdx/$safeBatchTotal] ",
+                "[全区下载 $stepIdx/$safeBatchTotal] ",
+                "[Batch $stepIdx/$safeBatchTotal] ",
+                "[一括保存 $stepIdx/$safeBatchTotal] "
+            )
+        } else {
+            ""
+        }
+        val pTitle = presetTitleTr(preset.id, preset.titleZh)
 
         val (minLat, maxLat, minLon, maxLon) = if (preset.isDynamicAroundGps && lastBatchLat != 0.0 && lastBatchLon != 0.0) {
             val dLat = 0.16
@@ -372,13 +409,18 @@ class OfflineMapManager(
 
         _state.value = _state.value.copy(
             downloadingRegionId = preset.id,
-            downloadingTitleZh = preset.titleZh,
+            downloadingTitleZh = pTitle,
             progress = initialOverallPct,
             completedTiles = 0L,
             requiredTiles = 0L,
             batchIndex = stepIdx,
             batchTotal = safeBatchTotal,
-            statusMessage = "${stepPrefix}正在連線圖磚伺服器「${preset.titleZh}」 (0%)…"
+            statusMessage = DxCarI18n.tr(
+                "${stepPrefix}正在連線圖磚伺服器「$pTitle」 (0%)…",
+                "${stepPrefix}正在连接图砖服务器「$pTitle」 (0%)…",
+                "${stepPrefix}Connecting to tile server for \"$pTitle\" (0%)…",
+                "${stepPrefix}タイルサーバーに接続中「$pTitle」 (0%)…"
+            )
         )
 
         runCatching {
@@ -420,6 +462,7 @@ class OfflineMapManager(
                                             0f
                                         }
                                         val sizeMb = status.completedResourceSize / (1024f * 1024f)
+                                        val liveTitle = presetTitleTr(preset.id, preset.titleZh)
 
                                         if (status.isComplete && req > 0L) {
                                             if (!completedOnce.compareAndSet(false, true)) return@post
@@ -447,12 +490,23 @@ class OfflineMapManager(
                                             if (pendingQueue.isNotEmpty()) {
                                                 startNextInQueue()
                                             } else {
+                                                val sizeStr = "%.1f".format(DxCarI18n.currentLocale(), sizeMb.coerceAtLeast(0.1f))
                                                 _state.value = OfflineMapUiState(
                                                     progress = 1f,
                                                     statusMessage = if (safeBatchTotal > 1) {
-                                                        "✓ 所在國家／區域共 $safeBatchTotal 區離線地圖已全數下載完成 (100%)！"
+                                                        DxCarI18n.tr(
+                                                            "✓ 所在國家／區域共 $safeBatchTotal 區離線地圖已全數下載完成 (100%)！",
+                                                            "✓ 所在国家／区域共 $safeBatchTotal 区离线地图已全部下载完成 (100%)！",
+                                                            "✓ All $safeBatchTotal offline map regions downloaded (100%)!",
+                                                            "✓ 全 $safeBatchTotal エリアのオフライン地図ダウンロードが完了しました (100%)！"
+                                                        )
                                                     } else {
-                                                        "✓ 「${preset.titleZh}」離線地圖下載完成 100%（約 %.1f MB）".format(sizeMb.coerceAtLeast(0.1f))
+                                                        DxCarI18n.tr(
+                                                            "✓ 「$liveTitle」離線地圖下載完成 100%（約 $sizeStr MB）",
+                                                            "✓ 「$liveTitle」离线地图下载完成 100%（约 $sizeStr MB）",
+                                                            "✓ \"$liveTitle\" offline map downloaded 100% (~$sizeStr MB)",
+                                                            "✓ 「$liveTitle」オフライン地図ダウンロード完了 100%（約 $sizeStr MB）"
+                                                        )
                                                     },
                                                     updateSuggestion = null
                                                 )
@@ -461,10 +515,31 @@ class OfflineMapManager(
                                             val overallPct = ((activeBatchCompleted + regionPct) / safeBatchTotal.toFloat()).coerceIn(0f, 0.99f)
                                             val displayPctInt = (overallPct * 100f).toInt()
                                             val regionPctInt = (regionPct * 100f).toInt()
-                                            val detailText = if (req > 0L) {
-                                                "${stepPrefix}下載中 ${preset.titleZh}：$regionPctInt% ($comp / $req 圖磚 · %.1f MB)".format(sizeMb)
+                                            val liveStepPrefix = if (safeBatchTotal > 1) {
+                                                DxCarI18n.tr(
+                                                    "[全區下載 $stepIdx/$safeBatchTotal] ",
+                                                    "[全区下载 $stepIdx/$safeBatchTotal] ",
+                                                    "[Batch $stepIdx/$safeBatchTotal] ",
+                                                    "[一括保存 $stepIdx/$safeBatchTotal] "
+                                                )
                                             } else {
-                                                "${stepPrefix}正在計算「${preset.titleZh}」圖磚清單 ($displayPctInt%)…"
+                                                ""
+                                            }
+                                            val sizeStr = "%.1f".format(DxCarI18n.currentLocale(), sizeMb)
+                                            val detailText = if (req > 0L) {
+                                                DxCarI18n.tr(
+                                                    "${liveStepPrefix}下載中 $liveTitle：$regionPctInt% ($comp / $req 圖磚 · $sizeStr MB)",
+                                                    "${liveStepPrefix}下载中 $liveTitle：$regionPctInt% ($comp / $req 图砖 · $sizeStr MB)",
+                                                    "${liveStepPrefix}Downloading $liveTitle: $regionPctInt% ($comp / $req tiles · $sizeStr MB)",
+                                                    "${liveStepPrefix}ダウンロード中 $liveTitle：$regionPctInt% ($comp / $req タイル · $sizeStr MB)"
+                                                )
+                                            } else {
+                                                DxCarI18n.tr(
+                                                    "${liveStepPrefix}正在計算「$liveTitle」圖磚清單 ($displayPctInt%)…",
+                                                    "${liveStepPrefix}正在计算「$liveTitle」图砖清单 ($displayPctInt%)…",
+                                                    "${liveStepPrefix}Calculating tiles for \"$liveTitle\" ($displayPctInt%)…",
+                                                    "${liveStepPrefix}「$liveTitle」のタイルを計算中 ($displayPctInt%)…"
+                                                )
                                             }
                                             _state.value = _state.value.copy(
                                                 progress = overallPct,
@@ -485,7 +560,12 @@ class OfflineMapManager(
                                     pendingQueue.clear()
                                     _state.value = _state.value.copy(
                                         downloadingRegionId = null,
-                                        statusMessage = "下載中斷：${error.message}（請確認網路連線後重試）"
+                                        statusMessage = DxCarI18n.tr(
+                                            "下載中斷：${error.message}（請確認網路連線後重試）",
+                                            "下载中断：${error.message}（请确认网络连接后重试）",
+                                            "Download interrupted: ${error.message} (Check network and retry)",
+                                            "ダウンロード中断：${error.message}（通信環境を確認して再試行してください）"
+                                        )
                                     )
                                 }
                             }
@@ -498,7 +578,12 @@ class OfflineMapManager(
                                     pendingQueue.clear()
                                     _state.value = _state.value.copy(
                                         downloadingRegionId = null,
-                                        statusMessage = "已達圖磚儲存上限 ($limit)，已保存目前已下載範圍"
+                                        statusMessage = DxCarI18n.tr(
+                                            "已達圖磚儲存上限 ($limit)，已保存目前已下載範圍",
+                                            "已达图砖存储上限 ($limit)，已保存当前已下载范围",
+                                            "Tile limit reached ($limit). Downloaded area saved.",
+                                            "タイル保存上限 ($limit) に達しました。保存済み範囲を維持します"
+                                        )
                                     )
                                 }
                             }
@@ -511,7 +596,12 @@ class OfflineMapManager(
                             pendingQueue.clear()
                             _state.value = _state.value.copy(
                                 downloadingRegionId = null,
-                                statusMessage = "建立離線區域失敗：$error"
+                                statusMessage = DxCarI18n.tr(
+                                    "建立離線區域失敗：$error",
+                                    "创建离线区域失败：$error",
+                                    "Failed to create offline region: $error",
+                                    "オフライン領域の作成に失敗：$error"
+                                )
                             )
                         }
                     }
@@ -519,9 +609,20 @@ class OfflineMapManager(
             )
         }.onFailure { e ->
             pendingQueue.clear()
+            val errMsg = e.localizedMessage ?: DxCarI18n.tr(
+                "請稍後再試",
+                "请稍后再试",
+                "Please try again later",
+                "しばらくしてから再試行してください"
+            )
             _state.value = _state.value.copy(
                 downloadingRegionId = null,
-                statusMessage = "離線引擎尚未就緒：${e.localizedMessage ?: "請稍後再試"}"
+                statusMessage = DxCarI18n.tr(
+                    "離線引擎尚未就緒：$errMsg",
+                    "离线引擎尚未就绪：$errMsg",
+                    "Offline engine not ready: $errMsg",
+                    "オフラインエンジン準備中：$errMsg"
+                )
             )
         }
     }
@@ -536,7 +637,12 @@ class OfflineMapManager(
         _state.value = _state.value.copy(
             downloadingRegionId = null,
             progress = 0f,
-            statusMessage = "已取消離線地圖下載"
+            statusMessage = DxCarI18n.tr(
+                "已取消離線地圖下載",
+                "已取消离线地图下载",
+                "Offline map download cancelled",
+                "オフライン地図のダウンロードをキャンセルしました"
+            )
         )
     }
 
@@ -560,7 +666,15 @@ class OfflineMapManager(
                 })
             }
         }
-        _state.value = _state.value.copy(statusMessage = "已移除「${target?.titleZh ?: regionId}」離線地圖")
+        val removedTitle = presetTitleTr(regionId, target?.titleZh ?: regionId)
+        _state.value = _state.value.copy(
+            statusMessage = DxCarI18n.tr(
+                "已移除「$removedTitle」離線地圖",
+                "已移除「$removedTitle」离线地图",
+                "Removed \"$removedTitle\" offline map",
+                "「$removedTitle」オフライン地図を削除しました"
+            )
+        )
     }
 
     private fun resolveOfflineCapableStyleUri(style: MapEngineStyle): String {
@@ -582,26 +696,123 @@ class OfflineMapManager(
         const val TOKEN_AUTO_LOCAL_REGION = "__auto_current_local_region__"
         const val TOKEN_AUTO_ENTIRE_COUNTRY = "__auto_entire_current_country__"
 
-        fun describeDetectedLocation(lat: Double, lon: Double): DetectedOfflineLocationInfo {
+        private fun trLang(
+            lang: EffectiveLanguage,
+            zhTw: String,
+            zhCn: String,
+            en: String,
+            ja: String
+        ): String = when (lang) {
+            EffectiveLanguage.ZH_TW -> zhTw
+            EffectiveLanguage.ZH_CN -> zhCn
+            EffectiveLanguage.EN -> en
+            EffectiveLanguage.JA -> ja
+        }
+
+        fun presetTitleTr(
+            id: String,
+            fallbackZh: String = "",
+            lang: EffectiveLanguage = DxCarI18n.current()
+        ): String = when (id) {
+            "current_gps_20km" -> trLang(lang, "目前車機周邊 (30km 高精細)", "当前车机周边 (30km 高精细)", "Around Vehicle (30km HD)", "現在地周辺 (30km 高精細)")
+            "tw_north" -> trLang(lang, "北北基桃地區", "北北基桃地区", "Northern Taiwan (Taipei/Taoyuan)", "台湾北部（台北・新北・基隆・桃園）")
+            "tw_hsinchu_miaoli" -> trLang(lang, "竹苗地區", "竹苗地区", "Hsinchu & Miaoli", "新竹・苗栗エリア")
+            "tw_central" -> trLang(lang, "中彰投地區", "中彰投地区", "Central Taiwan (Taichung)", "台湾中部（台中・彰化・南投）")
+            "tw_yunlin_chiayi_tainan" -> trLang(lang, "雲嘉南地區", "云嘉南地区", "Yunlin, Chiayi & Tainan", "雲林・嘉義・台南エリア")
+            "tw_kaohsiung_pingtung" -> trLang(lang, "高屏地區", "高屏地区", "Kaohsiung & Pingtung", "高雄・屏東エリア")
+            "tw_east" -> trLang(lang, "宜花東地區", "宜花东地区", "Eastern Taiwan (Yilan/Hualien/Taitung)", "台湾東部（宜蘭・花蓮・台東）")
+            "tw_islands" -> trLang(lang, "澎金馬離島地區", "澎金马离岛地区", "Outlying Islands (Penghu/Kinmen/Matsu)", "離島エリア（澎湖・金門・馬祖）")
+            "country_hk_mo" -> trLang(lang, "港澳全境地圖", "港澳全境地图", "Hong Kong & Macau", "香港・マカオ全域地図")
+            "country_jp_main" -> trLang(lang, "日本全國主要幹道圖資", "日本全国主要干道图资", "Japan Nationwide Trunk Roads", "日本全国の主要幹線道路")
+            "country_kr_main" -> trLang(lang, "韓國全國主要幹道圖資", "韩国全国主要干道图资", "South Korea Nationwide Trunk Roads", "韓国全国の主要幹線道路")
+            "country_dynamic_wide" -> trLang(lang, "目前所在國家／廣域路網", "当前所在国家／广域路网", "Current Country / Wide Region", "現在の国・広域道路網")
+            else -> if (lang == EffectiveLanguage.ZH_CN) DxCarI18n.toSimplifiedChinese(fallbackZh) else fallbackZh
+        }
+
+        fun presetSubtitleTr(
+            id: String,
+            fallbackZh: String = "",
+            lang: EffectiveLanguage = DxCarI18n.current()
+        ): String = when (id) {
+            "current_gps_20km" -> trLang(lang, "依當前 GPS 自動框選最常用街道生活圈（支援街巷級縮放）", "按当前 GPS 自动框选最常用街道生活圈（支持街巷级缩放）", "Auto-selects local streets around current GPS (street-level zoom)", "現在のGPS周辺エリアを自動選択（街路レベルのズーム対応）")
+            "tw_north" -> trLang(lang, "台北 · 新北 · 基隆 · 桃園主要路網", "台北 · 新北 · 基隆 · 桃园主要路网", "Taipei · New Taipei · Keelung · Taoyuan road network", "台北・新北・基隆・桃園の主要道路網")
+            "tw_hsinchu_miaoli" -> trLang(lang, "新竹縣市 · 苗栗主要路網", "新竹县市 · 苗栗主要路网", "Hsinchu City/County · Miaoli road network", "新竹市・新竹県・苗栗の主要道路網")
+            "tw_central" -> trLang(lang, "台中 · 彰化 · 南投主要路網", "台中 · 彰化 · 南投主要路网", "Taichung · Changhua · Nantou road network", "台中・彰化・南投の主要道路網")
+            "tw_yunlin_chiayi_tainan" -> trLang(lang, "雲林 · 嘉義 · 台南主要路網", "云林 · 嘉义 · 台南主要路网", "Yunlin · Chiayi · Tainan road network", "雲林・嘉義・台南の主要道路網")
+            "tw_kaohsiung_pingtung" -> trLang(lang, "高雄 · 屏東 · 墾丁主要路網", "高雄 · 屏东 · 垦丁主要路网", "Kaohsiung · Pingtung · Kenting road network", "高雄・屏東・墾丁の主要道路網")
+            "tw_east" -> trLang(lang, "宜蘭 · 花蓮 · 台東山海線", "宜兰 · 花莲 · 台东山海线", "Yilan · Hualien · Taitung coastal & mountain routes", "宜蘭・花蓮・台東の山海ルート")
+            "tw_islands" -> trLang(lang, "澎湖 · 金門 · 馬祖主要路網", "澎湖 · 金门 · 马祖主要路网", "Penghu · Kinmen · Matsu road network", "澎湖・金門・馬祖の主要道路網")
+            "country_hk_mo" -> trLang(lang, "香港 · 九龍 · 新界 · 澳門完整路網", "香港 · 九龙 · 新界 · 澳门完整路网", "Hong Kong · Kowloon · New Territories · Macau network", "香港・九龍・新界・マカオの全道路網")
+            "country_jp_main" -> trLang(lang, "日本全境高速與幹線路網", "日本全境高速与干线路网", "Japan expressways & national trunk network", "日本全国の高速道路・主要国道網")
+            "country_kr_main" -> trLang(lang, "韓國全境高速與幹線路網", "韩国全境高速与干线路网", "South Korea expressways & national trunk network", "韓国全国の高速道路・幹線道路網")
+            "country_dynamic_wide" -> trLang(lang, "依當前國家座標自動框選廣域幹道", "按当前国家坐标自动框选广域干道", "Auto-selected wide-area trunk roads around current country", "現在地の座標から広域幹線網を自動選択")
+            else -> if (lang == EffectiveLanguage.ZH_CN) DxCarI18n.toSimplifiedChinese(fallbackZh) else fallbackZh
+        }
+
+        @Composable
+        fun presetTitleStr(id: String, fallbackZh: String = ""): String = when (id) {
+            "current_gps_20km" -> str("目前車機周邊 (30km 高精細)", "当前车机周边 (30km 高精细)", "Around Vehicle (30km HD)", "現在地周辺 (30km 高精細)")
+            "tw_north" -> str("北北基桃地區", "北北基桃地区", "Northern Taiwan (Taipei/Taoyuan)", "台湾北部（台北・新北・基隆・桃園）")
+            "tw_hsinchu_miaoli" -> str("竹苗地區", "竹苗地区", "Hsinchu & Miaoli", "新竹・苗栗エリア")
+            "tw_central" -> str("中彰投地區", "中彰投地区", "Central Taiwan (Taichung)", "台湾中部（台中・彰化・南投）")
+            "tw_yunlin_chiayi_tainan" -> str("雲嘉南地區", "云嘉南地区", "Yunlin, Chiayi & Tainan", "雲林・嘉義・台南エリア")
+            "tw_kaohsiung_pingtung" -> str("高屏地區", "高屏地区", "Kaohsiung & Pingtung", "高雄・屏東エリア")
+            "tw_east" -> str("宜花東地區", "宜花东地区", "Eastern Taiwan (Yilan/Hualien/Taitung)", "台湾東部（宜蘭・花蓮・台東）")
+            "tw_islands" -> str("澎金馬離島地區", "澎金马离岛地区", "Outlying Islands (Penghu/Kinmen/Matsu)", "離島エリア（澎湖・金門・馬祖）")
+            "country_hk_mo" -> str("港澳全境地圖", "港澳全境地图", "Hong Kong & Macau", "香港・マカオ全域地図")
+            "country_jp_main" -> str("日本全國主要幹道圖資", "日本全国主要干道图资", "Japan Nationwide Trunk Roads", "日本全国の主要幹線道路")
+            "country_kr_main" -> str("韓國全國主要幹道圖資", "韩国全国主要干道图资", "South Korea Nationwide Trunk Roads", "韓国全国の主要幹線道路")
+            "country_dynamic_wide" -> str("目前所在國家／廣域路網", "当前所在国家／广域路网", "Current Country / Wide Region", "現在の国・広域道路網")
+            else -> str(fallbackZh, DxCarI18n.toSimplifiedChinese(fallbackZh), fallbackZh, fallbackZh)
+        }
+
+        @Composable
+        fun presetSubtitleStr(id: String, fallbackZh: String = ""): String = when (id) {
+            "current_gps_20km" -> str("依當前 GPS 自動框選最常用街道生活圈（支援街巷級縮放）", "按当前 GPS 自动框选最常用街道生活圈（支持街巷级缩放）", "Auto-selects local streets around current GPS (street-level zoom)", "現在のGPS周辺エリアを自動選択（街路レベルのズーム対応）")
+            "tw_north" -> str("台北 · 新北 · 基隆 · 桃園主要路網", "台北 · 新北 · 基隆 · 桃园主要路网", "Taipei · New Taipei · Keelung · Taoyuan road network", "台北・新北・基隆・桃園の主要道路網")
+            "tw_hsinchu_miaoli" -> str("新竹縣市 · 苗栗主要路網", "新竹县市 · 苗栗主要路网", "Hsinchu City/County · Miaoli road network", "新竹市・新竹県・苗栗の主要道路網")
+            "tw_central" -> str("台中 · 彰化 · 南投主要路網", "台中 · 彰化 · 南投主要路网", "Taichung · Changhua · Nantou road network", "台中・彰化・南投の主要道路網")
+            "tw_yunlin_chiayi_tainan" -> str("雲林 · 嘉義 · 台南主要路網", "云林 · 嘉义 · 台南主要路网", "Yunlin · Chiayi · Tainan road network", "雲林・嘉義・台南の主要道路網")
+            "tw_kaohsiung_pingtung" -> str("高雄 · 屏東 · 墾丁主要路網", "高雄 · 屏东 · 垦丁主要路网", "Kaohsiung · Pingtung · Kenting road network", "高雄・屏東・墾丁の主要道路網")
+            "tw_east" -> str("宜蘭 · 花蓮 · 台東山海線", "宜兰 · 花莲 · 台东山海线", "Yilan · Hualien · Taitung coastal & mountain routes", "宜蘭・花蓮・台東の山海ルート")
+            "tw_islands" -> str("澎湖 · 金門 · 馬祖主要路網", "澎湖 · 金门 · 马祖主要路网", "Penghu · Kinmen · Matsu road network", "澎湖・金門・馬祖の主要道路網")
+            "country_hk_mo" -> str("香港 · 九龍 · 新界 · 澳門完整路網", "香港 · 九龙 · 新界 · 澳门完整路网", "Hong Kong · Kowloon · New Territories · Macau network", "香港・九龍・新界・マカオの全道路網")
+            "country_jp_main" -> str("日本全境高速與幹線路網", "日本全境高速与干线路网", "Japan expressways & national trunk network", "日本全国の高速道路・主要国道網")
+            "country_kr_main" -> str("韓國全境高速與幹線路網", "韩国全境高速与干线路网", "South Korea expressways & national trunk network", "韓国全国の高速道路・幹線道路網")
+            "country_dynamic_wide" -> str("依當前國家座標自動框選廣域幹道", "按当前国家坐标自动框选广域干道", "Auto-selected wide-area trunk roads around current country", "現在地の座標から広域幹線網を自動選択")
+            else -> str(fallbackZh, DxCarI18n.toSimplifiedChinese(fallbackZh), fallbackZh, fallbackZh)
+        }
+
+        fun describeDetectedLocation(
+            lat: Double,
+            lon: Double,
+            lang: EffectiveLanguage = DxCarI18n.current()
+        ): DetectedOfflineLocationInfo {
             val effLat = if (lat != 0.0) lat else 25.0330
             val effLon = if (lon != 0.0) lon else 121.5654
 
             val inTaiwan = effLat in 21.6..26.5 && effLon in 118.0..122.4
             if (inTaiwan) {
-                val (regId, regTitle) = when {
-                    effLon < 119.95 -> "tw_islands" to "澎金馬離島地區"
-                    effLon >= 121.32 && effLat < 24.82 -> "tw_east" to "宜花東地區"
-                    effLat >= 24.78 -> "tw_north" to "北北基桃地區"
-                    effLat >= 24.35 -> "tw_hsinchu_miaoli" to "竹苗地區"
-                    effLat >= 23.78 -> "tw_central" to "中彰投地區"
-                    effLat >= 22.88 -> "tw_yunlin_chiayi_tainan" to "雲嘉南地區"
-                    else -> "tw_kaohsiung_pingtung" to "高屏地區"
+                val regId = when {
+                    effLon < 119.95 -> "tw_islands"
+                    effLon >= 121.32 && effLat < 24.82 -> "tw_east"
+                    effLat >= 24.78 -> "tw_north"
+                    effLat >= 24.35 -> "tw_hsinchu_miaoli"
+                    effLat >= 23.78 -> "tw_central"
+                    effLat >= 22.88 -> "tw_yunlin_chiayi_tainan"
+                    else -> "tw_kaohsiung_pingtung"
                 }
                 return DetectedOfflineLocationInfo(
                     localRegionId = regId,
-                    localRegionTitleZh = regTitle,
+                    localRegionTitleZh = presetTitleTr(regId, lang = lang),
                     countryCode = "TW",
-                    countryTitleZh = "台灣全境（本島＋離島全 7 區）",
+                    countryTitleZh = trLang(
+                        lang,
+                        "台灣全境（本島＋離島全 7 區）",
+                        "台湾全境（本岛＋离岛全 7 区）",
+                        "All Taiwan (7 Regions + Islands)",
+                        "台湾全域（本島＋離島 全7エリア）"
+                    ),
                     totalCountryZones = 7
                 )
             }
@@ -609,9 +820,9 @@ class OfflineMapManager(
             if (effLat in 22.05..22.60 && effLon in 113.5..114.5) {
                 return DetectedOfflineLocationInfo(
                     localRegionId = "current_gps_20km",
-                    localRegionTitleZh = "港澳周邊生活圈",
+                    localRegionTitleZh = trLang(lang, "港澳周邊生活圈", "港澳周边生活圈", "HK & Macau Local Area", "香港・マカオ周辺エリア"),
                     countryCode = "HK_MO",
-                    countryTitleZh = "香港／澳門全境",
+                    countryTitleZh = trLang(lang, "香港／澳門全境", "香港／澳门全境", "All Hong Kong & Macau", "香港・マカオ全域"),
                     totalCountryZones = 1
                 )
             }
@@ -619,9 +830,9 @@ class OfflineMapManager(
             if (effLat in 24.0..45.8 && effLon in 122.9..146.0) {
                 return DetectedOfflineLocationInfo(
                     localRegionId = "current_gps_20km",
-                    localRegionTitleZh = "日本當前周邊 (30km)",
+                    localRegionTitleZh = trLang(lang, "日本當前周邊 (30km)", "日本当前周边 (30km)", "Japan Local (30km)", "日本 現在地周辺 (30km)"),
                     countryCode = "JP",
-                    countryTitleZh = "日本全國主要路網＋周邊",
+                    countryTitleZh = trLang(lang, "日本全國主要路網＋周邊", "日本全国主要路网＋周边", "All Japan Trunk Roads + Local", "日本全国主要道路＋周辺"),
                     totalCountryZones = 2
                 )
             }
@@ -629,18 +840,18 @@ class OfflineMapManager(
             if (effLat in 33.0..38.7 && effLon in 124.5..131.0) {
                 return DetectedOfflineLocationInfo(
                     localRegionId = "current_gps_20km",
-                    localRegionTitleZh = "韓國當前周邊 (30km)",
+                    localRegionTitleZh = trLang(lang, "韓國當前周邊 (30km)", "韩国当前周边 (30km)", "Korea Local (30km)", "韓国 現在地周辺 (30km)"),
                     countryCode = "KR",
-                    countryTitleZh = "韓國全國主要路網＋周邊",
+                    countryTitleZh = trLang(lang, "韓國全國主要路網＋周邊", "韩国全国主要路网＋周边", "All Korea Trunk Roads + Local", "韓国全国主要道路＋周辺"),
                     totalCountryZones = 2
                 )
             }
 
             return DetectedOfflineLocationInfo(
                 localRegionId = "current_gps_20km",
-                localRegionTitleZh = "目前所在區域 (周邊 30km)",
+                localRegionTitleZh = trLang(lang, "目前所在區域 (周邊 30km)", "当前所在区域 (周边 30km)", "Current Area (30km)", "現在地エリア (周辺 30km)"),
                 countryCode = "GLOBAL",
-                countryTitleZh = "目前所在國家／廣域全區",
+                countryTitleZh = trLang(lang, "目前所在國家／廣域全區", "当前所在国家／广域全区", "Current Country / Wide Area", "現在の国・広域エリア"),
                 totalCountryZones = 2
             )
         }

@@ -60,6 +60,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dxcar.launcher.data.SplitScreenShortcut
+import com.dxcar.launcher.i18n.DxCarI18n
+import com.dxcar.launcher.i18n.DxCarI18n.str
 import com.dxcar.launcher.system.AppCategory
 import com.dxcar.launcher.system.InstalledAppInfo
 import com.dxcar.launcher.theme.LocalDxCarColors
@@ -80,13 +82,41 @@ private data class BuiltInShortcutMeta(
     val tint: Color
 )
 
+@Composable
 private fun builtInShortcuts(accent: Color): List<BuiltInShortcutMeta> = listOf(
-    BuiltInShortcutMeta(BuiltInShortcutTokens.SPLIT_GMAPS, "分割G地圖", Icons.Rounded.Splitscreen, Color(0xFF34A853)),
+    BuiltInShortcutMeta(BuiltInShortcutTokens.SPLIT_GMAPS, str("分割G地圖", "分屏G地图", "Split G Maps", "分割Gマップ"), Icons.Rounded.Splitscreen, Color(0xFF34A853)),
     BuiltInShortcutMeta(BuiltInShortcutTokens.YOUTUBE, "YouTube", Icons.Rounded.PlayArrow, Color(0xFFEF4444)),
-    BuiltInShortcutMeta(BuiltInShortcutTokens.DIALER, "藍牙電話", Icons.Rounded.Phone, Color(0xFF38BDF8)),
-    BuiltInShortcutMeta(BuiltInShortcutTokens.DAY_NIGHT, "切換日夜", Icons.Rounded.DarkMode, Color(0xFFF59E0B)),
-    BuiltInShortcutMeta(BuiltInShortcutTokens.SETTINGS, "啟動器設定", Icons.Rounded.Settings, accent)
+    BuiltInShortcutMeta(BuiltInShortcutTokens.DIALER, str("藍牙電話", "蓝牙电话", "BT Phone", "Bluetooth電話"), Icons.Rounded.Phone, Color(0xFF38BDF8)),
+    BuiltInShortcutMeta(BuiltInShortcutTokens.DAY_NIGHT, str("切換日夜", "切换日夜", "Day / Night", "昼夜切替"), Icons.Rounded.DarkMode, Color(0xFFF59E0B)),
+    BuiltInShortcutMeta(BuiltInShortcutTokens.SETTINGS, str("啟動器設定", "启动器设置", "Launcher Settings", "ランチャー設定"), Icons.Rounded.Settings, accent)
 )
+
+@Composable
+private fun localizedAppCategoryLabel(cat: AppCategory): String {
+    val zhTw = cat.labelZh
+    val zhCn = DxCarI18n.toSimplifiedChinese(zhTw)
+    return when {
+        cat == AppCategory.ALL || zhTw.contains("全部") ->
+            str(zhTw, "全部", "All", "すべて")
+        cat.name.contains("NAV", ignoreCase = true) || cat.name.contains("MAP", ignoreCase = true) || zhTw.contains("導航") || zhTw.contains("地圖") ->
+            str(zhTw, zhCn, "Navigation", "ナビ・地図")
+        zhTw.contains("音樂") && zhTw.contains("影音") ->
+            str(zhTw, zhCn, "Music & Media", "音楽・動画")
+        cat.name.contains("MUSIC", ignoreCase = true) || zhTw == "音樂" ->
+            str(zhTw, zhCn, "Music", "音楽")
+        cat.name.contains("VIDEO", ignoreCase = true) || zhTw.contains("影片") ->
+            str(zhTw, zhCn, "Video", "動画")
+        cat.name.contains("MEDIA", ignoreCase = true) || zhTw.contains("影音") || zhTw.contains("媒體") ->
+            str(zhTw, zhCn, "Media", "メディア")
+        cat.name.contains("COMM", ignoreCase = true) || cat.name.contains("SOCIAL", ignoreCase = true) || zhTw.contains("通訊") || zhTw.contains("社交") ->
+            str(zhTw, zhCn, "Comms", "通話・SNS")
+        cat.name.contains("TOOL", ignoreCase = true) || cat.name.contains("SYS", ignoreCase = true) || zhTw.contains("工具") || zhTw.contains("系統") ->
+            str(zhTw, zhCn, "Tools", "ツール")
+        cat.name.contains("OTHER", ignoreCase = true) || zhTw.contains("其他") ->
+            str(zhTw, zhCn, "Other", "その他")
+        else -> str(zhTw, zhCn, cat.name.lowercase().replaceFirstChar { it.uppercase() }, zhTw)
+    }
+}
 
 /**
  * Adaptive 6-slot App Shortcut grid:
@@ -107,9 +137,11 @@ fun CustomSixShortcutsSection(
     val colors = LocalDxCarColors.current
     val byPkg = remember(installedApps) { installedApps.associateBy { it.packageName } }
     val splitById = remember(splitShortcuts) { splitShortcuts.associateBy { it.id } }
-    val builtins = remember(colors.accent) { builtInShortcuts(colors.accent).associateBy { it.token } }
+    val builtins = builtInShortcuts(colors.accent).associateBy { it.token }
     val normalizedSlots = remember(slots) { List(6) { idx -> slots.getOrElse(idx) { "" } } }
     val allEmpty = remember(normalizedSlots) { normalizedSlots.all { it.isBlank() } }
+    val defaultSplitLabel = str("分屏捷徑", "分屏快捷方式", "Split Shortcut", "分割ショートカット")
+    val addCustomAppDesc = str("新增自訂 App", "新增自定义 App", "Add custom app", "カスタムアプリを追加")
 
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         val twoRows = maxWidth < 295.dp
@@ -119,7 +151,12 @@ fun CustomSixShortcutsSection(
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (allEmpty) {
                 Text(
-                    text = "自訂捷徑（點 ＋ 新增 · 長按移除）",
+                    text = str(
+                        "自訂捷徑（點 ＋ 新增 · 長按移除）",
+                        "自定义快捷方式（点 ＋ 新增 · 长按移除）",
+                        "Custom Shortcuts (Tap + to add · Long-press to remove)",
+                        "カスタムショートカット（＋で追加・長押しで削除）"
+                    ),
                     color = colors.secondaryText,
                     fontSize = 10.sp,
                     modifier = Modifier.padding(start = 2.dp)
@@ -179,7 +216,7 @@ fun CustomSixShortcutsSection(
                                     ) {
                                         Icon(
                                             imageVector = Icons.Rounded.Add,
-                                            contentDescription = "新增自訂 App",
+                                            contentDescription = addCustomAppDesc,
                                             tint = colors.secondaryText,
                                             modifier = Modifier.size((tileDp * 0.44f).dp)
                                         )
@@ -220,7 +257,7 @@ fun CustomSixShortcutsSection(
                                             .bouncyCombinedClickable(
                                                 pressedScale = 0.86f,
                                                 onClick = { onSlotLaunch(curToken) },
-                                                onLongClick = { onSlotRemove(index, splitSc.label.ifBlank { "分屏捷徑" }) }
+                                                onLongClick = { onSlotRemove(index, splitSc.label.ifBlank { defaultSplitLabel }) }
                                             )
                                     ) {
                                         DualSplitShortcutIcon(
@@ -311,8 +348,9 @@ fun AppPickerDialog(
 ) {
     val colors = LocalDxCarColors.current
     var selectedCategory by remember { mutableStateOf(AppCategory.ALL) }
-    val builtins = remember(colors.accent) { builtInShortcuts(colors.accent) }
+    val builtins = builtInShortcuts(colors.accent)
     val appsByPkg = remember(apps) { apps.associateBy { it.packageName } }
+    val defaultSplitLabel = str("分屏捷徑", "分屏快捷方式", "Split Shortcut", "分割ショートカット")
 
     val filtered = remember(apps, selectedCategory) {
         if (selectedCategory == AppCategory.ALL) apps
@@ -348,19 +386,29 @@ fun AppPickerDialog(
                 ) {
                     Column {
                         Text(
-                            text = "選擇要放入第 ${slotIndex + 1} 格的 App",
+                            text = str(
+                                "選擇要放入第 ${slotIndex + 1} 格的 App",
+                                "选择要放入第 ${slotIndex + 1} 格的 App",
+                                "Select App for Slot ${slotIndex + 1}",
+                                "スロット ${slotIndex + 1} に配置するアプリを選択"
+                            ),
                             color = colors.primaryText,
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "點選下方圖示即可加入捷徑列 · 事後長按圖示即可移除",
+                            text = str(
+                                "點選下方圖示即可加入捷徑列 · 事後長按圖示即可移除",
+                                "点选下方图标即可加入快捷栏 · 事后长按图标即可移除",
+                                "Tap an icon below to add · Long-press anytime to remove",
+                                "下のアイコンをタップして追加 · 長押しでいつでも削除可能"
+                            ),
                             color = colors.secondaryText,
                             fontSize = 12.sp
                         )
                     }
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.primaryText)
+                        Icon(Icons.Rounded.Close, contentDescription = str("關閉", "关闭", "Close", "閉じる"), tint = colors.primaryText)
                     }
                 }
 
@@ -382,7 +430,7 @@ fun AppPickerDialog(
                                 .bouncyClickable(pressedScale = 0.90f) { selectedCategory = cat }
                         ) {
                             Text(
-                                text = cat.labelZh,
+                                text = localizedAppCategoryLabel(cat),
                                 color = if (selected) colors.onAccent else colors.secondaryText,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -415,7 +463,7 @@ fun AppPickerDialog(
                                     .bouncyClickable(pressedScale = 0.89f) {
                                         onSelectToken(
                                             "${BuiltInShortcutTokens.SPLIT_PREFIX}${sc.id}",
-                                            sc.label.ifBlank { "分屏捷徑" }
+                                            sc.label.ifBlank { defaultSplitLabel }
                                         )
                                     }
                             ) {
@@ -430,7 +478,7 @@ fun AppPickerDialog(
                                     )
                                     Spacer(Modifier.height(8.dp))
                                     Text(
-                                        text = sc.label.ifBlank { "分屏捷徑" },
+                                        text = sc.label.ifBlank { defaultSplitLabel },
                                         color = colors.primaryText,
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.SemiBold,

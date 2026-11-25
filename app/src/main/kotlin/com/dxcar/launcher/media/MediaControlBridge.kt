@@ -18,6 +18,7 @@ import android.view.KeyEvent
 import com.dxcar.launcher.DxCarApp
 import com.dxcar.launcher.comms.BoxNotificationListenerService
 import com.dxcar.launcher.data.LauncherPreferences
+import com.dxcar.launcher.i18n.DxCarI18n
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -40,10 +41,15 @@ data class ActiveMediaState(
     val hasSession: Boolean = false,
     val isRememberedLastApp: Boolean = false,
     val packageName: String = "",
-    val appName: String = "媒體播放器",
+    val appName: String = DxCarI18n.tr("媒體播放器", "媒体播放器", "Media Player", "メディアプレーヤー"),
     val appIcon: Bitmap? = null,
-    val title: String = "目前沒有播放中的媒體",
-    val artist: String = "開啟音樂 App 後自動記憶，下次可直接點擊 ▶ 繼續播放",
+    val title: String = DxCarI18n.tr("目前沒有播放中的媒體", "当前没有播放中的媒体", "No Media Playing", "再生中のメディアはありません"),
+    val artist: String = DxCarI18n.tr(
+        "開啟音樂 App 後自動記憶，下次可直接點擊 ▶ 繼續播放",
+        "开启音乐 App 后自动记忆，下次可直接点击 ▶ 继续播放",
+        "Music apps are remembered automatically — tap ▶ next time to resume",
+        "音楽アプリを起動すると自動記憶され、次回から ▶ で直接再生できます"
+    ),
     val album: String = "",
     val albumArt: Bitmap? = null,
     val isPlaying: Boolean = false,
@@ -51,7 +57,9 @@ data class ActiveMediaState(
     val isFavorited: Boolean = false,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
-    val availableSessions: List<MediaSessionSummary> = emptyList()
+    val availableSessions: List<MediaSessionSummary> = emptyList(),
+    val hasSavedTrackTitle: Boolean = false,
+    val hasSavedTrackArtist: Boolean = false
 )
 
 class MediaControlBridge(
@@ -71,6 +79,7 @@ class MediaControlBridge(
     private var selectedController: MediaController? = null
     private var preferredPackage: String? = null
     private var listenerRegistered = false
+    private var languageObserverStarted = false
     private val appIconCache = ConcurrentHashMap<String, Bitmap>()
 
     private val controllerCallback = object : MediaController.Callback() {
@@ -87,6 +96,14 @@ class MediaControlBridge(
     fun start() {
         publishSelectedState()
         refreshSessions()
+        if (!languageObserverStarted) {
+            languageObserverStarted = true
+            scope.launch {
+                DxCarI18n.effectiveLanguage.collect {
+                    publishSelectedState()
+                }
+            }
+        }
         scope.launch {
             while (isActive) {
                 if (_mediaState.value.isPlaying && _mediaState.value.durationMs > 0) {
@@ -193,15 +210,27 @@ class MediaControlBridge(
                 val label = cfg.lastMediaAppName.takeIf { it.isNotBlank() && fallbackPkg == cfg.lastMediaPackage }
                     ?: resolveAppLabel(fallbackPkg)
                 val icon = resolveAppIcon(fallbackPkg)
-                val savedTitle = if (fallbackPkg == cfg.lastMediaPackage && cfg.lastMediaTitle.isNotBlank()) {
+                val hasSavedTitle = fallbackPkg == cfg.lastMediaPackage && cfg.lastMediaTitle.isNotBlank()
+                val hasSavedArtist = fallbackPkg == cfg.lastMediaPackage && cfg.lastMediaArtist.isNotBlank()
+                val savedTitle = if (hasSavedTitle) {
                     cfg.lastMediaTitle
                 } else {
-                    "點擊 ▶ 播放 $label"
+                    DxCarI18n.tr(
+                        "點擊 ▶ 播放 $label",
+                        "点击 ▶ 播放 $label",
+                        "Tap ▶ to play $label",
+                        "▶ をタップして $label を再生"
+                    )
                 }
-                val savedArtist = if (fallbackPkg == cfg.lastMediaPackage && cfg.lastMediaArtist.isNotBlank()) {
+                val savedArtist = if (hasSavedArtist) {
                     "${cfg.lastMediaArtist} · $label"
                 } else {
-                    "預設音樂播放器：$label（點擊 ▶ 直接喚醒播放）"
+                    DxCarI18n.tr(
+                        "預設音樂播放器：$label（點擊 ▶ 直接喚醒播放）",
+                        "默认音乐播放器：$label（点击 ▶ 直接唤醒播放）",
+                        "Default player: $label (Tap ▶ to wake & play)",
+                        "デフォルト音楽アプリ：$label（▶ で起動＆再生）"
+                    )
                 }
                 _mediaState.value = ActiveMediaState(
                     hasSession = false,
@@ -211,7 +240,9 @@ class MediaControlBridge(
                     appIcon = icon,
                     title = savedTitle,
                     artist = savedArtist,
-                    availableSessions = summaries
+                    availableSessions = summaries,
+                    hasSavedTrackTitle = hasSavedTitle,
+                    hasSavedTrackArtist = hasSavedArtist
                 )
             } else {
                 _mediaState.value = ActiveMediaState(availableSessions = summaries)
@@ -334,7 +365,12 @@ class MediaControlBridge(
     }
 
     fun toggleFavoriteOrLike(): Pair<Boolean, String> {
-        val controller = selectedController ?: return false to "請先點擊 ▶ 開始播放音樂後再收藏"
+        val controller = selectedController ?: return false to DxCarI18n.tr(
+            "請先點擊 ▶ 開始播放音樂後再收藏",
+            "请先点击 ▶ 开始播放音乐后再收藏",
+            "Tap ▶ to start playing music before liking",
+            "先に ▶ をタップして音楽を再生してからお気に入り登録してください"
+        )
         val pkg = controller.packageName
         val appLabel = resolveAppLabel(pkg)
         val pb = controller.playbackState
@@ -349,7 +385,21 @@ class MediaControlBridge(
             if (ok) {
                 val curFav = _mediaState.value.isFavorited
                 _mediaState.value = _mediaState.value.copy(isFavorited = !curFav)
-                return true to if (!curFav) "♥ 已收藏／點讚 ($appLabel)" else "♡ 已取消收藏 ($appLabel)"
+                return true to if (!curFav) {
+                    DxCarI18n.tr(
+                        "♥ 已收藏／點讚 ($appLabel)",
+                        "♥ 已收藏／点赞 ($appLabel)",
+                        "♥ Liked ($appLabel)",
+                        "♥ お気に入りに追加 ($appLabel)"
+                    )
+                } else {
+                    DxCarI18n.tr(
+                        "♡ 已取消收藏 ($appLabel)",
+                        "♡ 已取消收藏 ($appLabel)",
+                        "♡ Removed from Liked ($appLabel)",
+                        "♡ お気に入りを解除 ($appLabel)"
+                    )
+                }
             }
         }
 
@@ -357,7 +407,12 @@ class MediaControlBridge(
         if (listener != null && listener.executeFavoriteNotificationAction(pkg)) {
             val curFav = _mediaState.value.isFavorited
             _mediaState.value = _mediaState.value.copy(isFavorited = !curFav)
-            return true to "♥ 已觸發 $appLabel 紅心／喜歡"
+            return true to DxCarI18n.tr(
+                "♥ 已觸發 $appLabel 紅心／喜歡",
+                "♥ 已触发 $appLabel 红心／喜欢",
+                "♥ Triggered Like in $appLabel",
+                "♥ $appLabel の「いいね」を送信しました"
+            )
         }
 
         val ratingType = controller.ratingType
@@ -379,11 +434,30 @@ class MediaControlBridge(
             }.getOrDefault(false)
             if (ok) {
                 _mediaState.value = _mediaState.value.copy(isFavorited = nextLiked)
-                return true to if (nextLiked) "♥ 已點讚 ($appLabel)" else "♡ 已取消讚 ($appLabel)"
+                return true to if (nextLiked) {
+                    DxCarI18n.tr(
+                        "♥ 已點讚 ($appLabel)",
+                        "♥ 已点赞 ($appLabel)",
+                        "♥ Liked ($appLabel)",
+                        "♥ 高評価しました ($appLabel)"
+                    )
+                } else {
+                    DxCarI18n.tr(
+                        "♡ 已取消讚 ($appLabel)",
+                        "♡ 已取消赞 ($appLabel)",
+                        "♡ Unliked ($appLabel)",
+                        "♡ 高評価を解除しました ($appLabel)"
+                    )
+                }
             }
         }
 
-        return false to "$appLabel 目前未開放背景紅心接口，可點上方開啟 App 收藏"
+        return false to DxCarI18n.tr(
+            "$appLabel 目前未開放背景紅心接口，可點上方開啟 App 收藏",
+            "$appLabel 当前未开放后台红心接口，可点上方开启 App 收藏",
+            "$appLabel doesn't support background Like; tap the app icon to open & save",
+            "$appLabel はバックグラウンドのお気に入り操作に非対応です。アプリアイコンから開いてください"
+        )
     }
 
     fun selectSession(packageName: String) {

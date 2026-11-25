@@ -76,6 +76,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dxcar.launcher.i18n.DxCarI18n
+import com.dxcar.launcher.i18n.DxCarI18n.str
 import com.dxcar.launcher.layout.ResolvedDockPlacement
 import com.dxcar.launcher.system.InstalledAppInfo
 import com.dxcar.launcher.system.SystemStatus
@@ -160,7 +162,7 @@ fun CoolwalkDock(
                 if (onVoiceNavClick != null) {
                     SmallDockUtilityIcon(
                         icon = Icons.Rounded.Mic,
-                        contentDescription = "Gemini 語音輸入導航",
+                        contentDescription = str("Gemini 語音輸入導航", "Gemini 语音输入导航", "Gemini voice navigation", "Gemini 音声ナビ"),
                         tint = Color(0xFFA78BFA),
                         onClick = onVoiceNavClick
                     )
@@ -168,7 +170,7 @@ fun CoolwalkDock(
                 if (onToggle3DCursor != null) {
                     SmallDockUtilityIcon(
                         icon = Icons.Rounded.ViewInAr,
-                        contentDescription = "開啟 3D 類滑鼠指標",
+                        contentDescription = str("開啟 3D 類滑鼠指標", "开启 3D 类鼠标指针", "Toggle 3D cursor", "3Dポインター切替"),
                         tint = if (is3DCursorActive) Color(0xFF22C55E) else colors.accent,
                         onClick = onToggle3DCursor
                     )
@@ -176,7 +178,11 @@ fun CoolwalkDock(
                 if (isOverlayMode && onTogglePinOverlay != null) {
                     SmallDockUtilityIcon(
                         icon = Icons.Rounded.PushPin,
-                        contentDescription = if (isOverlayPinnedOpen) "取消釘選常駐" else "暫時釘選展開",
+                        contentDescription = if (isOverlayPinnedOpen) {
+                            str("取消釘選常駐", "取消固定常驻", "Unpin dock", "ピン留め解除")
+                        } else {
+                            str("暫時釘選展開", "暂时固定展开", "Pin dock open", "一時ピン留め")
+                        },
                         tint = if (isOverlayPinnedOpen) colors.accent else colors.secondaryText,
                         onClick = onTogglePinOverlay
                     )
@@ -184,7 +190,7 @@ fun CoolwalkDock(
                 if (isOverlayMode && onCollapseOverlay != null) {
                     SmallDockUtilityIcon(
                         icon = Icons.Rounded.ChevronLeft,
-                        contentDescription = "收合常駐列",
+                        contentDescription = str("收合常駐列", "收起常驻栏", "Collapse dock", "ドックを折りたたむ"),
                         tint = colors.secondaryText,
                         onClick = onCollapseOverlay
                     )
@@ -352,7 +358,7 @@ fun CoolwalkDock(
                         if (onVoiceNavClick != null) {
                             SmallDockUtilityIcon(
                                 icon = Icons.Rounded.Mic,
-                                contentDescription = "Gemini 語音輸入導航",
+                                contentDescription = str("Gemini 語音輸入導航", "Gemini 语音输入导航", "Gemini voice navigation", "Gemini 音声ナビ"),
                                 tint = Color(0xFFA78BFA),
                                 onClick = onVoiceNavClick
                             )
@@ -366,7 +372,7 @@ fun CoolwalkDock(
                             if (onToggle3DCursor != null) {
                                 SmallDockUtilityIcon(
                                     icon = Icons.Rounded.ViewInAr,
-                                    contentDescription = "開啟 3D 俯瞰類滑鼠指標",
+                                    contentDescription = str("開啟 3D 俯瞰類滑鼠指標", "开启 3D 俯瞰类鼠标指针", "Toggle 3D cursor", "3Dポインター切替"),
                                     tint = if (is3DCursorActive) Color(0xFF22C55E) else colors.accent,
                                     onClick = onToggle3DCursor
                                 )
@@ -374,7 +380,11 @@ fun CoolwalkDock(
                             if (isOverlayMode && onTogglePinOverlay != null) {
                                 SmallDockUtilityIcon(
                                     icon = Icons.Rounded.PushPin,
-                                    contentDescription = if (isOverlayPinnedOpen) "取消釘選常駐" else "暫時釘選展開",
+                                    contentDescription = if (isOverlayPinnedOpen) {
+                                        str("取消釘選常駐", "取消固定常驻", "Unpin dock", "ピン留め解除")
+                                    } else {
+                                        str("暫時釘選展開", "暂时固定展开", "Pin dock open", "一時ピン留め")
+                                    },
                                     tint = if (isOverlayPinnedOpen) colors.accent else colors.secondaryText,
                                     onClick = onTogglePinOverlay
                                 )
@@ -382,7 +392,7 @@ fun CoolwalkDock(
                             if (isOverlayMode && onCollapseOverlay != null) {
                                 SmallDockUtilityIcon(
                                     icon = Icons.Rounded.ChevronLeft,
-                                    contentDescription = "收合常駐列",
+                                    contentDescription = str("收合常駐列", "收起常驻栏", "Collapse dock", "ドックを折りたたむ"),
                                     tint = colors.secondaryText,
                                     onClick = onCollapseOverlay
                                 )
@@ -464,7 +474,11 @@ private fun DockLauncherButton(
     ) {
         Icon(
             imageVector = if (showAppGridIcon) Icons.Rounded.Apps else Icons.Rounded.Home,
-            contentDescription = if (showAppGridIcon) "展開 App 選單" else "回到啟動器首頁",
+            contentDescription = if (showAppGridIcon) {
+                str("展開 App 選單", "展开 App 菜单", "Open app drawer", "アプリ一覧を開く")
+            } else {
+                str("回到啟動器首頁", "回到启动器首页", "Go to launcher home", "ホームに戻る")
+            },
             tint = if (highlighted) colors.onAccent else colors.primaryText,
             modifier = Modifier
                 .size(26.dp)
@@ -482,6 +496,11 @@ private fun DockAppIconTile(
     val colors = LocalDxCarColors.current
     val bitmapImage = remember(slot.installedApp?.icon) {
         slot.installedApp?.icon?.asImageBitmap()
+    }
+    val slotDesc = if (slot.id == "maps" && slot.installedApp == null) {
+        str("Google 地圖", "Google 地图", "Google Maps", "Google マップ")
+    } else {
+        slot.label
     }
 
     Box(
@@ -503,7 +522,7 @@ private fun DockAppIconTile(
         if (bitmapImage != null) {
             Image(
                 bitmap = bitmapImage,
-                contentDescription = slot.label,
+                contentDescription = slotDesc,
                 modifier = Modifier
                     .size((sizeDp - 12).dp)
                     .clip(RoundedCornerShape(10.dp))
@@ -511,7 +530,7 @@ private fun DockAppIconTile(
         } else {
             Icon(
                 imageVector = slot.fallbackIcon,
-                contentDescription = slot.label,
+                contentDescription = slotDesc,
                 tint = slot.fallbackTint,
                 modifier = Modifier.size((sizeDp * 0.54f).dp)
             )
@@ -552,7 +571,7 @@ private fun WifiStatusChip(
     ) {
         Icon(
             imageVector = if (connected) Icons.Rounded.Wifi else Icons.Rounded.WifiOff,
-            contentDescription = "點擊展開下拉快捷鍵 · 長按進 Wi-Fi 設定",
+            contentDescription = str("點擊展開下拉快捷鍵 · 長按進 Wi-Fi 設定", "点击展开下拉快捷键 · 长按进 Wi-Fi 设置", "Tap for quick controls · Long-press for Wi-Fi settings", "タップでクイック設定・長押しでWi-Fi設定"),
             tint = tint,
             modifier = Modifier.size(if (compact) 16.dp else 20.dp)
         )
@@ -612,7 +631,11 @@ private fun BluetoothStatusChip(
     ) {
         Icon(
             imageVector = icon,
-            contentDescription = if (connected) "藍牙已連線手機（點擊進入設定）" else "藍牙設定",
+            contentDescription = if (connected) {
+                str("藍牙已連線手機（點擊進入設定）", "蓝牙已连接手机（点击进入设置）", "Bluetooth phone connected (tap for settings)", "Bluetooth接続中（タップで設定）")
+            } else {
+                str("藍牙設定", "蓝牙设置", "Bluetooth settings", "Bluetooth設定")
+            },
             tint = tint,
             modifier = Modifier.size(if (compact) 17.dp else 20.dp)
         )
@@ -742,7 +765,7 @@ private fun NotificationBellButton(
         } else {
             Icon(
                 imageVector = Icons.Rounded.Notifications,
-                contentDescription = "訊息通知中心",
+                contentDescription = str("訊息通知中心", "消息通知中心", "Notification center", "通知センター"),
                 tint = colors.secondaryText,
                 modifier = Modifier.size(if (compact) 16.dp else 19.dp)
             )
@@ -866,7 +889,7 @@ private fun BackRecentsComboButton(
         Box(contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = if (showRecentsMorph) Icons.Rounded.Layers else Icons.AutoMirrored.Rounded.ArrowBack,
-                contentDescription = "點一下返回 · 長按 2.5 秒進入多工",
+                contentDescription = str("點一下返回 · 長按 2.5 秒進入多工", "点一下返回 · 长按 2.5 秒进入多任务", "Tap for Back · Hold 2.5s for Recents", "タップで戻る・2.5秒長押しで履歴"),
                 tint = if (showRecentsMorph) colors.accent else colors.primaryText,
                 modifier = Modifier.size(if (compact) 18.dp else 20.dp)
             )
@@ -947,7 +970,7 @@ fun buildRecentDockSlots(
     if (slots.isEmpty()) {
         slots += DockAppSlot(
             id = "maps",
-            label = "Google 地圖",
+            label = DxCarI18n.tr("Google 地圖", "Google 地图", "Google Maps", "Google マップ"),
             packageName = "com.google.android.apps.maps",
             fallbackIcon = Icons.Rounded.Map,
             fallbackTint = Color(0xFF34A853),

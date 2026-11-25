@@ -113,6 +113,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import com.dxcar.launcher.i18n.DxCarI18n
 import com.dxcar.launcher.i18n.DxCarI18n.str
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -131,7 +132,10 @@ import com.dxcar.launcher.theme.LocalDxCarColors
 private sealed interface DragRemoveTarget {
     val label: String
     data class SplitShortcutItem(val shortcut: SplitScreenShortcut) : DragRemoveTarget {
-        override val label: String get() = shortcut.label.ifBlank { "分屏捷徑" }
+        override val label: String
+            get() = shortcut.label.ifBlank {
+                DxCarI18n.tr("分屏捷徑", "分屏快捷方式", "Split Shortcut", "分割ショートカット")
+            }
     }
     data class FolderTarget(val folder: AppFolderItem) : DragRemoveTarget {
         override val label: String get() = folder.name
@@ -152,14 +156,22 @@ private fun suggestDefaultFolderName(a: InstalledAppInfo, b: InstalledAppInfo): 
     val musicWords = listOf("music", "spotify", "kkbox", "netease", "cloudmusic", "音樂", "網易", "podcast", "radio")
     val videoWords = listOf("youtube", "netflix", "disney", "bilibili", "twitch", "vlc", "video", "影", "視訊")
     return when {
-        a.category == AppCategory.NAVIGATION && b.category == AppCategory.NAVIGATION -> "導航地圖"
-        musicWords.any { combined.contains(it) } && a.category == AppCategory.MEDIA && b.category == AppCategory.MEDIA -> "音樂播放"
-        videoWords.any { combined.contains(it) } && a.category == AppCategory.MEDIA && b.category == AppCategory.MEDIA -> "影音娛樂"
-        a.category == AppCategory.MEDIA && b.category == AppCategory.MEDIA -> "影音音樂"
-        a.category == AppCategory.COMMUNICATION && b.category == AppCategory.COMMUNICATION -> "通訊社群"
-        a.category == AppCategory.SYSTEM && b.category == AppCategory.SYSTEM -> "系統工具"
-        a.category == AppCategory.NAVIGATION || b.category == AppCategory.NAVIGATION -> "行車常用"
-        else -> "常用工具"
+        a.category == AppCategory.NAVIGATION && b.category == AppCategory.NAVIGATION ->
+            DxCarI18n.tr("導航地圖", "导航地图", "Navigation", "ナビ・地図")
+        musicWords.any { combined.contains(it) } && a.category == AppCategory.MEDIA && b.category == AppCategory.MEDIA ->
+            DxCarI18n.tr("音樂播放", "音乐播放", "Music", "音楽")
+        videoWords.any { combined.contains(it) } && a.category == AppCategory.MEDIA && b.category == AppCategory.MEDIA ->
+            DxCarI18n.tr("影音娛樂", "影音娱乐", "Video & Media", "動画・エンタメ")
+        a.category == AppCategory.MEDIA && b.category == AppCategory.MEDIA ->
+            DxCarI18n.tr("影音音樂", "影音音乐", "Media & Music", "メディア・音楽")
+        a.category == AppCategory.COMMUNICATION && b.category == AppCategory.COMMUNICATION ->
+            DxCarI18n.tr("通訊社群", "通讯社交", "Social & Comms", "通話・SNS")
+        a.category == AppCategory.SYSTEM && b.category == AppCategory.SYSTEM ->
+            DxCarI18n.tr("系統工具", "系统工具", "System Tools", "システムツール")
+        a.category == AppCategory.NAVIGATION || b.category == AppCategory.NAVIGATION ->
+            DxCarI18n.tr("行車常用", "行车常用", "Driving Apps", "ドライブ定番")
+        else ->
+            DxCarI18n.tr("常用工具", "常用工具", "Utilities", "便利ツール")
     }
 }
 
@@ -337,7 +349,12 @@ fun AppDrawerScreen(
                             Box {
                                 Icon(
                                     imageVector = Icons.Rounded.Settings,
-                                    contentDescription = "DX-Car Launcher 設定",
+                                    contentDescription = str(
+                                        "DX-Car Launcher 設定",
+                                        "DX-Car Launcher 设置",
+                                        "DX-Car Launcher Settings",
+                                        "DX-Car Launcher 設定"
+                                    ),
                                     tint = colors.accent,
                                     modifier = Modifier.size(20.dp)
                                 )
@@ -366,14 +383,23 @@ fun AppDrawerScreen(
                     }
 
                     IconButton(onClick = onCloseDrawer) {
-                        Icon(Icons.Rounded.Close, contentDescription = "返回首頁", tint = colors.secondaryText)
+                        Icon(
+                            Icons.Rounded.Close,
+                            contentDescription = str("返回首頁", "返回首页", "Back to Home", "ホームへ戻る"),
+                            tint = colors.secondaryText
+                        )
                     }
                 }
             }
 
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "點擊啟動 · 長按 App 重疊到另一 App 可建立資料夾 · 往上拖曳至「✕ 移除」會詢問確認後解除安裝",
+                text = str(
+                    "點擊啟動 · 長按 App 重疊到另一 App 可建立資料夾 · 往上拖曳至「✕ 移除」會詢問確認後解除安裝",
+                    "点击启动 · 长按应用重叠到另一应用可新建文件夹 · 往上拖曳至「✕ 移除」会询问确认后卸载",
+                    "Tap to open · Hold & drop onto another app to create a folder · Drag up to '✕ Remove' to uninstall",
+                    "タップで起動 · 長押しで他のアプリに重ねるとフォルダ作成 · 上の「✕ 削除」へドラッグでアンインストール"
+                ),
                 color = colors.secondaryText,
                 fontSize = 12.sp
             )
@@ -390,8 +416,8 @@ fun AppDrawerScreen(
             ) {
                 item(key = "__dxcar_split_creator__") {
                     BuiltInDrawerTile(
-                        label = "分屏設定",
-                        subLabel = "AOSP 可拖動分屏",
+                        label = str("分屏設定", "分屏设置", "Split-Screen", "分割画面設定"),
+                        subLabel = str("AOSP 可拖動分屏", "AOSP 可拖动分屏", "AOSP Draggable Split", "AOSP 可変分割画面"),
                         icon = Icons.Rounded.Splitscreen,
                         tint = Color(0xFF22C55E),
                         badgeAlert = false,
@@ -401,8 +427,17 @@ fun AppDrawerScreen(
 
                 item(key = "__dxcar_settings__") {
                     BuiltInDrawerTile(
-                        label = "DX-Car Launcher 設定",
-                        subLabel = if (hasPendingUpdate) "有新版本" else "權限 · 風格 · 更新",
+                        label = str(
+                            "DX-Car Launcher 設定",
+                            "DX-Car Launcher 设置",
+                            "DX-Car Launcher Settings",
+                            "DX-Car Launcher 設定"
+                        ),
+                        subLabel = if (hasPendingUpdate) {
+                            str("有新版本", "有新版本", "Update Available", "新バージョンあり")
+                        } else {
+                            str("權限 · 風格 · 更新", "权限 · 风格 · 更新", "Permissions · Style · Update", "権限 · スタイル · 更新")
+                        },
                         icon = Icons.Rounded.Settings,
                         tint = colors.accent,
                         badgeAlert = hasPendingUpdate,
@@ -471,7 +506,9 @@ fun AppDrawerScreen(
                                     )
                                     Spacer(Modifier.height(10.dp))
                                     Text(
-                                        text = sc.label.ifBlank { "分屏捷徑" },
+                                        text = sc.label.ifBlank {
+                                            str("分屏捷徑", "分屏快捷方式", "Split Shortcut", "分割ショートカット")
+                                        },
                                         color = colors.primaryText,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.SemiBold,
@@ -553,7 +590,16 @@ fun AppDrawerScreen(
                                 )
                                 Spacer(Modifier.height(10.dp))
                                 Text(
-                                    text = if (isHoverTarget) "➕ 加入「${folder.name}」" else folder.name,
+                                    text = if (isHoverTarget) {
+                                        str(
+                                            "➕ 加入「${folder.name}」",
+                                            "➕ 加入「${folder.name}」",
+                                            "➕ Add to \"${folder.name}\"",
+                                            "➕「${folder.name}」に追加"
+                                        )
+                                    } else {
+                                        folder.name
+                                    },
                                     color = if (isHoverTarget) colors.accent else colors.primaryText,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
@@ -633,7 +679,11 @@ fun AppDrawerScreen(
                             )
                             Spacer(Modifier.height(10.dp))
                             Text(
-                                text = if (isHoverFolderTarget) "➕ 放開建立資料夾" else app.label,
+                                text = if (isHoverFolderTarget) {
+                                    str("➕ 放開建立資料夾", "➕ 松开新建文件夹", "➕ Drop to Create Folder", "➕ 離してフォルダ作成")
+                                } else {
+                                    app.label
+                                },
                                 color = if (isHoverFolderTarget) colors.accent else colors.primaryText,
                                 fontSize = if (isHoverFolderTarget) 12.sp else 14.sp,
                                 fontWeight = if (isHoverFolderTarget) FontWeight.Bold else FontWeight.Medium,
@@ -687,16 +737,31 @@ fun AppDrawerScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.DeleteOutline,
-                        contentDescription = "移除",
+                        contentDescription = str("移除", "移除", "Remove", "削除"),
                         tint = Color.White,
                         modifier = Modifier.size(22.dp)
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
                         text = when {
-                            isHoveringRemove -> "放開後確認移除／解除安裝"
-                            hoveredOverlapKey != null -> "➕ 放開建立或加入資料夾"
-                            else -> "✕ 往上拖曳至此移除／解除安裝"
+                            isHoveringRemove -> str(
+                                "放開後確認移除／解除安裝",
+                                "松开后确认移除／卸载",
+                                "Release to Confirm Remove / Uninstall",
+                                "離して削除／アンインストールを確認"
+                            )
+                            hoveredOverlapKey != null -> str(
+                                "➕ 放開建立或加入資料夾",
+                                "➕ 松开新建或加入文件夹",
+                                "➕ Release to Create or Add to Folder",
+                                "➕ 離してフォルダ作成・追加"
+                            )
+                            else -> str(
+                                "✕ 往上拖曳至此移除／解除安裝",
+                                "✕ 往上拖曳至此移除／卸载",
+                                "✕ Drag Up Here to Remove / Uninstall",
+                                "✕ ここまで上にドラッグして削除／アンインストール"
+                            )
                         },
                         color = Color.White,
                         fontSize = 15.sp,
@@ -794,16 +859,31 @@ fun AppDrawerScreen(
                         when (target) {
                             is DragRemoveTarget.InstalledAppTarget -> {
                                 Text(
-                                    text = "確定要解除安裝「${target.app.label}」嗎？",
+                                    text = str(
+                                        "確定要解除安裝「${target.app.label}」嗎？",
+                                        "确定要卸载「${target.app.label}」吗？",
+                                        "Uninstall \"${target.app.label}\"?",
+                                        "「${target.app.label}」をアンインストールしますか？"
+                                    ),
                                     color = colors.primaryText,
                                     fontSize = 22.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
                                     text = if (target.app.isSystemApp) {
-                                        "此應用程式為車機系統預載軟體；若系統限制無法移除，可點擊「應用資訊」進行停用或強制停止。"
+                                        str(
+                                            "此應用程式為車機系統預載軟體；若系統限制無法移除，可點擊「應用資訊」進行停用或強制停止。",
+                                            "此应用为车机系统预装软件；若系统限制无法卸载，可点击「应用信息」进行停用或强行停止。",
+                                            "This is a pre-installed system app. If uninstall is restricted, tap \"App Info\" to disable or force stop it.",
+                                            "このアプリはシステムプリインストールアプリです。削除できない場合は「アプリ情報」から無効化または強制停止できます。"
+                                        )
                                     } else {
-                                        "點擊「確認解除安裝」後將開啟系統安裝管理員執行卸載。"
+                                        str(
+                                            "點擊「確認解除安裝」後將開啟系統安裝管理員執行卸載。",
+                                            "点击「确认卸载」后将开启系统安装管理器执行卸载。",
+                                            "Tap \"Uninstall\" to open the system package installer and remove this app.",
+                                            "「アンインストール」をタップするとシステムのインストーラーが開きます。"
+                                        )
                                     },
                                     color = colors.secondaryText,
                                     fontSize = 15.sp
@@ -817,7 +897,7 @@ fun AppDrawerScreen(
                                         onClick = { confirmRemoveTarget = null },
                                         shape = RoundedCornerShape(14.dp)
                                     ) {
-                                        Text("取消", fontSize = 15.sp)
+                                        Text(str("取消", "取消", "Cancel", "キャンセル"), fontSize = 15.sp)
                                     }
                                     Spacer(Modifier.width(10.dp))
                                     OutlinedButton(
@@ -828,7 +908,7 @@ fun AppDrawerScreen(
                                         },
                                         shape = RoundedCornerShape(14.dp)
                                     ) {
-                                        Text("應用資訊", fontSize = 15.sp)
+                                        Text(str("應用資訊", "应用信息", "App Info", "アプリ情報"), fontSize = 15.sp)
                                     }
                                     Spacer(Modifier.width(10.dp))
                                     Button(
@@ -843,20 +923,34 @@ fun AppDrawerScreen(
                                         ),
                                         shape = RoundedCornerShape(14.dp)
                                     ) {
-                                        Text("確認解除安裝", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            str("確認解除安裝", "确认卸载", "Uninstall", "アンインストール"),
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                 }
                             }
 
                             is DragRemoveTarget.SplitShortcutItem -> {
                                 Text(
-                                    text = "確定要移除分屏捷徑「${target.label}」嗎？",
+                                    text = str(
+                                        "確定要移除分屏捷徑「${target.label}」嗎？",
+                                        "确定要移除分屏快捷方式「${target.label}」吗？",
+                                        "Remove split shortcut \"${target.label}\"?",
+                                        "分割ショートカット「${target.label}」を削除しますか？"
+                                    ),
                                     color = colors.primaryText,
                                     fontSize = 21.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "僅移除此雙視窗捷徑，不會刪除原本的應用程式。",
+                                    text = str(
+                                        "僅移除此雙視窗捷徑，不會刪除原本的應用程式。",
+                                        "仅移除此双窗口快捷方式，不会删除原本的应用。",
+                                        "Only removes this split-screen shortcut; the apps themselves will not be uninstalled.",
+                                        "この分割ショートカットのみを削除します（元のアプリは削除されません）。"
+                                    ),
                                     color = colors.secondaryText,
                                     fontSize = 15.sp
                                 )
@@ -865,7 +959,7 @@ fun AppDrawerScreen(
                                     horizontalArrangement = Arrangement.End
                                 ) {
                                     OutlinedButton(onClick = { confirmRemoveTarget = null }, shape = RoundedCornerShape(14.dp)) {
-                                        Text("取消", fontSize = 15.sp)
+                                        Text(str("取消", "取消", "Cancel", "キャンセル"), fontSize = 15.sp)
                                     }
                                     Spacer(Modifier.width(10.dp))
                                     Button(
@@ -877,20 +971,30 @@ fun AppDrawerScreen(
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626), contentColor = Color.White),
                                         shape = RoundedCornerShape(14.dp)
                                     ) {
-                                        Text("確認移除", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                        Text(str("確認移除", "确认移除", "Remove", "削除する"), fontSize = 15.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
 
                             is DragRemoveTarget.FolderTarget -> {
                                 Text(
-                                    text = "確定要解散資料夾「${target.folder.name}」嗎？",
+                                    text = str(
+                                        "確定要解散資料夾「${target.folder.name}」嗎？",
+                                        "确定要解散文件夹「${target.folder.name}」吗？",
+                                        "Ungroup folder \"${target.folder.name}\"?",
+                                        "フォルダ「${target.folder.name}」を解除しますか？"
+                                    ),
                                     color = colors.primaryText,
                                     fontSize = 21.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "解散後資料夾內的應用程式不會被刪除，將全數回到應用程式清單。",
+                                    text = str(
+                                        "解散後資料夾內的應用程式不會被刪除，將全數回到應用程式清單。",
+                                        "解散后文件夹内的应用不会被删除，将全部回到应用列表。",
+                                        "Apps inside this folder will not be uninstalled and will return to the app drawer.",
+                                        "フォルダ内のアプリは削除されず、すべてアプリ一覧に戻ります。"
+                                    ),
                                     color = colors.secondaryText,
                                     fontSize = 15.sp
                                 )
@@ -899,7 +1003,7 @@ fun AppDrawerScreen(
                                     horizontalArrangement = Arrangement.End
                                 ) {
                                     OutlinedButton(onClick = { confirmRemoveTarget = null }, shape = RoundedCornerShape(14.dp)) {
-                                        Text("取消", fontSize = 15.sp)
+                                        Text(str("取消", "取消", "Cancel", "キャンセル"), fontSize = 15.sp)
                                     }
                                     Spacer(Modifier.width(10.dp))
                                     Button(
@@ -911,7 +1015,7 @@ fun AppDrawerScreen(
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626), contentColor = Color.White),
                                         shape = RoundedCornerShape(14.dp)
                                     ) {
-                                        Text("確認解散", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                        Text(str("確認解散", "确认解散", "Ungroup", "解除する"), fontSize = 15.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -927,7 +1031,14 @@ fun AppDrawerScreen(
         if (activeNamingState != null || activeRenamingFolder != null) {
             val initialText = activeNamingState?.suggestedName ?: activeRenamingFolder?.name.orEmpty()
             var folderNameInput by remember(activeNamingState, activeRenamingFolder) { mutableStateOf(initialText) }
-            val presetSuggestions = listOf("導航地圖", "音樂播放", "影音娛樂", "通訊社群", "行車常用", "常用工具")
+            val presetSuggestions = listOf(
+                str("導航地圖", "导航地图", "Navigation", "ナビ・地図"),
+                str("音樂播放", "音乐播放", "Music", "音楽"),
+                str("影音娛樂", "影音娱乐", "Video & Media", "動画・エンタメ"),
+                str("通訊社群", "通讯社交", "Social & Comms", "通話・SNS"),
+                str("行車常用", "行车常用", "Driving Apps", "ドライブ定番"),
+                str("常用工具", "常用工具", "Utilities", "便利ツール")
+            )
 
             Box(
                 modifier = Modifier
@@ -954,9 +1065,14 @@ fun AppDrawerScreen(
                     ) {
                         Text(
                             text = if (activeNamingState != null) {
-                                "建立新資料夾（已自動判定預設名稱）"
+                                str(
+                                    "建立新資料夾（已自動判定預設名稱）",
+                                    "新建文件夹（已自动判定默认名称）",
+                                    "Create Folder (Smart Name Suggested)",
+                                    "新しいフォルダを作成（おすすめ名を自動設定）"
+                                )
                             } else {
-                                "重新命名資料夾"
+                                str("重新命名資料夾", "重命名文件夹", "Rename Folder", "フォルダ名を変更")
                             },
                             color = colors.primaryText,
                             fontSize = 20.sp,
@@ -964,7 +1080,12 @@ fun AppDrawerScreen(
                         )
                         if (activeNamingState != null) {
                             Text(
-                                text = "包含：${activeNamingState.firstApp.label} ＋ ${activeNamingState.secondApp.label}",
+                                text = str(
+                                    "包含：${activeNamingState.firstApp.label} ＋ ${activeNamingState.secondApp.label}",
+                                    "包含：${activeNamingState.firstApp.label} ＋ ${activeNamingState.secondApp.label}",
+                                    "Apps: ${activeNamingState.firstApp.label} + ${activeNamingState.secondApp.label}",
+                                    "対象：${activeNamingState.firstApp.label} ＋ ${activeNamingState.secondApp.label}"
+                                ),
                                 color = colors.accent,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -974,7 +1095,7 @@ fun AppDrawerScreen(
                         OutlinedTextField(
                             value = folderNameInput,
                             onValueChange = { folderNameInput = it },
-                            label = { Text("資料夾名稱") },
+                            label = { Text(str("資料夾名稱", "文件夹名称", "Folder Name", "フォルダ名")) },
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = colors.primaryText,
@@ -1019,12 +1140,16 @@ fun AppDrawerScreen(
                                 },
                                 shape = RoundedCornerShape(14.dp)
                             ) {
-                                Text("取消", fontSize = 15.sp)
+                                Text(str("取消", "取消", "Cancel", "キャンセル"), fontSize = 15.sp)
                             }
                             Spacer(Modifier.width(10.dp))
                             Button(
                                 onClick = {
-                                    val finalName = folderNameInput.trim().ifBlank { initialText.ifBlank { "常用工具" } }
+                                    val finalName = folderNameInput.trim().ifBlank {
+                                        initialText.ifBlank {
+                                            DxCarI18n.tr("常用工具", "常用工具", "Utilities", "便利ツール")
+                                        }
+                                    }
                                     if (activeNamingState != null) {
                                         onCreateFolder(
                                             finalName,
@@ -1042,7 +1167,15 @@ fun AppDrawerScreen(
                                 colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
                                 shape = RoundedCornerShape(14.dp)
                             ) {
-                                Text(if (activeNamingState != null) "確認建立" else "儲存名稱", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    if (activeNamingState != null) {
+                                        str("確認建立", "确认新建", "Create", "作成する")
+                                    } else {
+                                        str("儲存名稱", "保存名称", "Save", "保存する")
+                                    },
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
                     }
@@ -1092,11 +1225,20 @@ fun AppDrawerScreen(
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 IconButton(onClick = { renamingFolder = activeFolder }) {
-                                    Icon(Icons.Rounded.Edit, contentDescription = "修改名稱", tint = colors.secondaryText, modifier = Modifier.size(20.dp))
+                                    Icon(
+                                        Icons.Rounded.Edit,
+                                        contentDescription = str("修改名稱", "修改名称", "Rename", "名前を変更"),
+                                        tint = colors.secondaryText,
+                                        modifier = Modifier.size(20.dp)
+                                    )
                                 }
                             }
                             IconButton(onClick = { openedFolderId = null }) {
-                                Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.primaryText)
+                                Icon(
+                                    Icons.Rounded.Close,
+                                    contentDescription = str("關閉", "关闭", "Close", "閉じる"),
+                                    tint = colors.primaryText
+                                )
                             }
                         }
 
@@ -1140,7 +1282,7 @@ fun AppDrawerScreen(
                                         )
                                         Spacer(Modifier.height(4.dp))
                                         Text(
-                                            text = "移出資料夾",
+                                            text = str("移出資料夾", "移出文件夹", "Remove from Folder", "フォルダから出す"),
                                             color = colors.accent,
                                             fontSize = 11.sp,
                                             modifier = Modifier.clickable {
@@ -1319,16 +1461,29 @@ fun QuickControlCenterOverlay(
                 ) {
                     Column {
                         Text(
-                            text = "下拉快捷控制面板  ·  ${systemStatus.time12h}",
+                            text = str(
+                                "下拉快捷控制面板  ·  ${systemStatus.time12h}",
+                                "下拉快捷控制面板  ·  ${systemStatus.time12h}",
+                                "Quick Control Center  ·  ${systemStatus.time12h}",
+                                "クイックコントロール  ·  ${systemStatus.time12h}"
+                            ),
                             color = colors.primaryText,
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        val netLabel = buildString {
-                            append(if (systemStatus.wifiConnected) "Wi-Fi：${systemStatus.wifiSsid.ifBlank { "已連線" }}" else "Wi-Fi：未連線")
-                            append("  ·  ")
-                            append(if (systemStatus.bluetoothConnected) "藍牙：${systemStatus.connectedBtName.ifBlank { "已配對連線" }}" else "藍牙：待連線")
+                        val wifiPart = if (systemStatus.wifiConnected) {
+                            val ssid = systemStatus.wifiSsid.ifBlank { str("已連線", "已连接", "Connected", "接続済み") }
+                            str("Wi-Fi：$ssid", "Wi-Fi：$ssid", "Wi-Fi: $ssid", "Wi-Fi：$ssid")
+                        } else {
+                            str("Wi-Fi：未連線", "Wi-Fi：未连接", "Wi-Fi: Disconnected", "Wi-Fi：未接続")
                         }
+                        val btPart = if (systemStatus.bluetoothConnected) {
+                            val btName = systemStatus.connectedBtName.ifBlank { str("已配對連線", "已配对连接", "Connected", "接続済み") }
+                            str("藍牙：$btName", "蓝牙：$btName", "Bluetooth: $btName", "Bluetooth：$btName")
+                        } else {
+                            str("藍牙：待連線", "蓝牙：待连接", "Bluetooth: Standby", "Bluetooth：未接続")
+                        }
+                        val netLabel = "$wifiPart  ·  $btPart"
                         Text(text = netLabel, color = colors.secondaryText, fontSize = 13.sp)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1342,11 +1497,15 @@ fun QuickControlCenterOverlay(
                             ) {
                                 Icon(Icons.Rounded.ExpandMore, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text("系統通知欄")
+                                Text(str("系統通知欄", "系统通知栏", "System Shade", "システム通知"))
                             }
                         }
                         IconButton(onClick = onDismiss) {
-                            Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.primaryText)
+                            Icon(
+                                Icons.Rounded.Close,
+                                contentDescription = str("關閉", "关闭", "Close", "閉じる"),
+                                tint = colors.primaryText
+                            )
                         }
                     }
                 }
@@ -1358,21 +1517,33 @@ fun QuickControlCenterOverlay(
                 ) {
                     QuickTile(
                         icon = Icons.Rounded.Wifi,
-                        label = if (systemStatus.wifiConnected) "Wi-Fi 設定" else "開啟 Wi-Fi",
+                        label = if (systemStatus.wifiConnected) {
+                            str("Wi-Fi 設定", "Wi-Fi 设置", "Wi-Fi Settings", "Wi-Fi 設定")
+                        } else {
+                            str("開啟 Wi-Fi", "开启 Wi-Fi", "Turn On Wi-Fi", "Wi-Fi をオン")
+                        },
                         active = systemStatus.wifiConnected,
                         onClick = { onDismiss(); onOpenWifiSettings() },
                         modifier = Modifier.weight(1f)
                     )
                     QuickTile(
                         icon = Icons.Rounded.Bluetooth,
-                        label = if (systemStatus.bluetoothConnected) "藍牙已連" else "藍牙設定",
+                        label = if (systemStatus.bluetoothConnected) {
+                            str("藍牙已連", "蓝牙已连", "BT Connected", "BT 接続中")
+                        } else {
+                            str("藍牙設定", "蓝牙设置", "Bluetooth", "Bluetooth 設定")
+                        },
                         active = systemStatus.bluetoothConnected,
                         onClick = { onDismiss(); onOpenBluetoothSettings() },
                         modifier = Modifier.weight(1f)
                     )
                     QuickTile(
                         icon = if (isNight) Icons.Rounded.DarkMode else Icons.Rounded.LightMode,
-                        label = if (isNight) "夜間模式" else "白天模式",
+                        label = if (isNight) {
+                            str("夜間模式", "夜间模式", "Night Mode", "夜間モード")
+                        } else {
+                            str("白天模式", "白天模式", "Day Mode", "昼間モード")
+                        },
                         active = isNight,
                         onClick = onToggleDayNight,
                         modifier = Modifier.weight(1f)
@@ -1380,7 +1551,7 @@ fun QuickControlCenterOverlay(
                     if (onToggle3DCursor != null) {
                         QuickTile(
                             icon = Icons.Rounded.ViewInAr,
-                            label = "3D 俯瞰游標",
+                            label = str("3D 俯瞰游標", "3D 俯瞰光标", "3D Cursor", "3D カーソル"),
                             active = false,
                             onClick = { onDismiss(); onToggle3DCursor() },
                             modifier = Modifier.weight(1f)
@@ -1388,14 +1559,14 @@ fun QuickControlCenterOverlay(
                     }
                     QuickTile(
                         icon = Icons.Rounded.SwapHoriz,
-                        label = "左右互換",
+                        label = str("左右互換", "左右互换", "Swap Sides", "左右入替"),
                         active = false,
                         onClick = { onSwapSplit(); onDismiss() },
                         modifier = Modifier.weight(1f)
                     )
                     QuickTile(
                         icon = Icons.Rounded.Settings,
-                        label = "啟動器設定",
+                        label = str("啟動器設定", "启动器设置", "Settings", "ランチャー設定"),
                         active = false,
                         onClick = { onDismiss(); onOpenSettings() },
                         modifier = Modifier.weight(1f)
@@ -1406,7 +1577,14 @@ fun QuickControlCenterOverlay(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.Brightness6, contentDescription = null, tint = colors.accent)
                     Spacer(Modifier.width(12.dp))
-                    Text("亮度", color = colors.primaryText, fontSize = 14.sp, modifier = Modifier.width(42.dp))
+                    Text(
+                        str("亮度", "亮度", "Brightness", "明るさ"),
+                        color = colors.primaryText,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.width(76.dp)
+                    )
                     Slider(
                         value = systemStatus.brightnessPercent / 100f,
                         onValueChange = { onBrightnessChange((it * 100).toInt()) },
@@ -1420,7 +1598,14 @@ fun QuickControlCenterOverlay(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = null, tint = colors.accent)
                     Spacer(Modifier.width(12.dp))
-                    Text("音量", color = colors.primaryText, fontSize = 14.sp, modifier = Modifier.width(42.dp))
+                    Text(
+                        str("音量", "音量", "Volume", "音量"),
+                        color = colors.primaryText,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.width(76.dp)
+                    )
                     Slider(
                         value = systemStatus.mediaVolumePercent / 100f,
                         onValueChange = { onVolumeChange((it * 100).toInt()) },
@@ -1864,7 +2049,12 @@ fun EmbeddedYoutubePlayerCard(
                         }
                         Spacer(Modifier.width(7.dp))
                         Text(
-                            text = "YouTube 視窗播放 · 720p",
+                            text = str(
+                                "YouTube 視窗播放 · 720p",
+                                "YouTube 窗口播放 · 720p",
+                                "YouTube Window · 720p",
+                                "YouTube ウィンドウ再生 · 720p"
+                            ),
                             color = colors.primaryText,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
@@ -1878,7 +2068,7 @@ fun EmbeddedYoutubePlayerCard(
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                                contentDescription = "上一頁",
+                                contentDescription = str("上一頁", "上一页", "Back", "戻る"),
                                 tint = colors.primaryText,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -1889,7 +2079,7 @@ fun EmbeddedYoutubePlayerCard(
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Home,
-                                contentDescription = "YouTube 首頁",
+                                contentDescription = str("YouTube 首頁", "YouTube 首页", "YouTube Home", "YouTube ホーム"),
                                 tint = colors.primaryText,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -1900,7 +2090,7 @@ fun EmbeddedYoutubePlayerCard(
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Refresh,
-                                contentDescription = "重新整理",
+                                contentDescription = str("重新整理", "刷新", "Reload", "再読み込み"),
                                 tint = colors.primaryText,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -2015,9 +2205,25 @@ fun EmbeddedYoutubePlayerCard(
                                                         isDoubleTapHolding = true
                                                         if (sideTapZone > 0) {
                                                             setPlaybackRateJs(2.0f)
-                                                            flashGestureHud(YtGestureHudZone.TOP, "⏩ 持續加速快轉中…")
+                                                            flashGestureHud(
+                                                                YtGestureHudZone.TOP,
+                                                                DxCarI18n.tr(
+                                                                    "⏩ 持續加速快轉中…",
+                                                                    "⏩ 持续加速快进中…",
+                                                                    "⏩ 2x Fast-Forwarding…",
+                                                                    "⏩ 倍速早送り中…"
+                                                                )
+                                                            )
                                                         } else {
-                                                            flashGestureHud(YtGestureHudZone.TOP, "⏪ 持續加速倒退中…")
+                                                            flashGestureHud(
+                                                                YtGestureHudZone.TOP,
+                                                                DxCarI18n.tr(
+                                                                    "⏪ 持續加速倒退中…",
+                                                                    "⏪ 持续加速快退中…",
+                                                                    "⏪ Rewinding…",
+                                                                    "⏪ 早戻し中…"
+                                                                )
+                                                            )
                                                         }
                                                     }
                                                     val heldElapsed = System.currentTimeMillis() - holdStartMs
@@ -2051,9 +2257,10 @@ fun EmbeddedYoutubePlayerCard(
                                         seekAbsoluteSec(target)
                                         val sign = if (deltaSec >= 0f) "+" else ""
                                         val durPart = if (totalDur > 1f) " / ${formatYtTime(totalDur)}" else ""
+                                        val secUnit = DxCarI18n.tr("秒", "秒", "s", "秒")
                                         flashGestureHud(
                                             YtGestureHudZone.CENTER,
-                                            "${if (deltaSec >= 0f) "⏩" else "⏪"} ${formatYtTime(target)}$durPart ($sign${deltaSec.toInt()}秒)"
+                                            "${if (deltaSec >= 0f) "⏩" else "⏪"} ${formatYtTime(target)}$durPart ($sign${deltaSec.toInt()}$secUnit)"
                                         )
                                         return true
                                     }
@@ -2101,7 +2308,15 @@ fun EmbeddedYoutubePlayerCard(
                                                 lastSideTapUpMs = nowUp
                                                 lastSideTapX = ev.x
                                                 lastSideTapY = ev.y
-                                                flashGestureHud(YtGestureHudZone.RIGHT, "⏩ +${accumulatedSeekSec} 秒")
+                                                flashGestureHud(
+                                                    YtGestureHudZone.RIGHT,
+                                                    DxCarI18n.tr(
+                                                        "⏩ +${accumulatedSeekSec} 秒",
+                                                        "⏩ +${accumulatedSeekSec} 秒",
+                                                        "⏩ +${accumulatedSeekSec}s",
+                                                        "⏩ +${accumulatedSeekSec}秒"
+                                                    )
+                                                )
                                             } else if (sideTapZone < 0) {
                                                 accumulatedSeekSec = if (nowUp - lastAccumulatedMs < 900L && accumulatedSeekSec < 0) {
                                                     accumulatedSeekSec - 10
@@ -2113,7 +2328,15 @@ fun EmbeddedYoutubePlayerCard(
                                                 lastSideTapUpMs = nowUp
                                                 lastSideTapX = ev.x
                                                 lastSideTapY = ev.y
-                                                flashGestureHud(YtGestureHudZone.LEFT, "⏪ ${accumulatedSeekSec} 秒")
+                                                flashGestureHud(
+                                                    YtGestureHudZone.LEFT,
+                                                    DxCarI18n.tr(
+                                                        "⏪ ${accumulatedSeekSec} 秒",
+                                                        "⏪ ${accumulatedSeekSec} 秒",
+                                                        "⏪ ${accumulatedSeekSec}s",
+                                                        "⏪ ${accumulatedSeekSec}秒"
+                                                    )
+                                                )
                                             }
                                         }
                                         return true
@@ -2334,7 +2557,12 @@ fun EmbeddedYoutubePlayerCard(
                 shape = RoundedCornerShape(16.dp)
             ) {
                 Text(
-                    text = "已進入右半邊全螢幕 · 下滑或點右下角按鈕可退出",
+                    text = str(
+                        "已進入右半邊全螢幕 · 下滑或點右下角按鈕可退出",
+                        "已进入右半边全屏 · 下滑或点右下角按钮可退出",
+                        "Right-pane fullscreen · Swipe down or tap bottom-right to exit",
+                        "右半分フルスクリーン · 下スワイプまたは右下ボタンで終了"
+                    ),
                     color = Color.White,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -2391,9 +2619,19 @@ fun BuiltInYoutubeFullscreenScreen(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Rounded.Close, contentDescription = "返回首頁", tint = colors.primaryText, modifier = Modifier.size(18.dp))
+                Icon(
+                    Icons.Rounded.Close,
+                    contentDescription = str("返回首頁", "返回首页", "Back to Home", "ホームへ戻る"),
+                    tint = colors.primaryText,
+                    modifier = Modifier.size(18.dp)
+                )
                 Spacer(Modifier.width(4.dp))
-                Text("返回分割首頁", color = colors.primaryText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    str("返回分割首頁", "返回分屏首页", "Back to Split Home", "分割ホームへ戻る"),
+                    color = colors.primaryText,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
     }

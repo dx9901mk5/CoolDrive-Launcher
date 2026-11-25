@@ -5,6 +5,10 @@ import android.content.Context
 import android.content.Intent
 import android.location.Geocoder
 import android.net.Uri
+import androidx.compose.runtime.Composable
+import com.dxcar.launcher.i18n.DxCarI18n
+import com.dxcar.launcher.i18n.DxCarI18n.str
+import com.dxcar.launcher.i18n.EffectiveLanguage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,8 +29,8 @@ import kotlin.math.roundToInt
 data class LocalWeatherState(
     val hasData: Boolean = false,
     val temperatureText: String = "--°C",
-    val conditionText: String = "讀取天氣中…",
-    val locationName: String = "當地天氣",
+    val conditionText: String = DxCarI18n.tr("讀取天氣中…", "读取天气中…", "Loading weather…", "天気を読み込み中…"),
+    val locationName: String = DxCarI18n.tr("當地天氣", "当地天气", "Local Weather", "現在地の天気"),
     val detailText: String = "",
     val weatherCode: Int = 1,
     val fromGoogleApp: Boolean = false,
@@ -55,10 +59,36 @@ class LocalWeatherRepository(private val context: Context) {
     private var lastFetchLat = 0.0
     private var lastFetchLon = 0.0
     private var lastNetworkFetchMs = 0L
+    private var languageObserverStarted = false
 
     fun start(initialLat: Double, initialLon: Double) {
         lastFetchLat = initialLat
         lastFetchLon = initialLon
+        if (!languageObserverStarted) {
+            languageObserverStarted = true
+            scope.launch {
+                DxCarI18n.effectiveLanguage.collect {
+                    val cur = _weather.value
+                    val nextLoc = when (cur.locationName) {
+                        in DEFAULT_LOCAL_LABELS -> DxCarI18n.tr("當地天氣", "当地天气", "Local Weather", "現在地の天気")
+                        in CURRENT_LOC_LABELS -> DxCarI18n.tr("目前位置", "当前位置", "Current Location", "現在地")
+                        else -> cur.locationName
+                    }
+                    val nextCond = if (!cur.hasData) {
+                        DxCarI18n.tr("讀取天氣中…", "读取天气中…", "Loading weather…", "天気を読み込み中…")
+                    } else {
+                        wmoCodeToLocalized(cur.weatherCode)
+                    }
+                    _weather.value = cur.copy(
+                        conditionText = nextCond,
+                        locationName = nextLoc
+                    )
+                    if (!cur.fromGoogleApp && (lastFetchLat != 0.0 || lastFetchLon != 0.0)) {
+                        fetchFallbackWeatherSync(lastFetchLat, lastFetchLon)
+                    }
+                }
+            }
+        }
         scope.launch {
             while (isActive) {
                 val cur = _weather.value
@@ -107,19 +137,24 @@ class LocalWeatherRepository(private val context: Context) {
         val tempVal = tempMatch.groupValues[1].toIntOrNull() ?: return false
         if (tempVal !in -35..55) return false
 
-        val condition = extractConditionZh(combined)
+        val rawCondition = extractConditionZh(combined)
+        val code = conditionToCode(rawCondition)
+        val condition = wmoCodeToLocalized(code)
         val locCandidate = extractLocationFromGoogleText(title, text, subText)
-            .ifBlank { _weather.value.locationName.takeIf { it != "當地天氣" }.orEmpty() }
-            .ifBlank { "目前位置" }
+            .ifBlank { _weather.value.locationName.takeIf { it !in DEFAULT_LOCAL_LABELS }.orEmpty() }
+            .ifBlank { DxCarI18n.tr("目前位置", "当前位置", "Current Location", "現在地") }
 
-        val code = conditionToCode(condition)
         val isGoogle = lowerPkg == GOOGLE_APP_PACKAGE || lowerPkg == GOOGLE_WEATHER_PACKAGE
         val next = LocalWeatherState(
             hasData = true,
             temperatureText = "${tempVal}°C",
             conditionText = condition,
             locationName = locCandidate,
-            detailText = if (isGoogle) "Google 天氣即時資訊" else "系統天氣同步",
+            detailText = if (isGoogle) {
+                DxCarI18n.tr("Google 天氣即時資訊", "Google 天气实时信息", "Google Live Weather", "Google リアルタイム天気")
+            } else {
+                DxCarI18n.tr("系統天氣同步", "系统天气同步", "System Weather Sync", "システム天気同期")
+            },
             weatherCode = code,
             fromGoogleApp = isGoogle,
             updatedAtMs = System.currentTimeMillis()
@@ -212,7 +247,7 @@ class LocalWeatherRepository(private val context: Context) {
                     parts += "${hi.roundToInt()}°/${lo.roundToInt()}°"
                 }
                 if (rainProb >= 0) {
-                    parts += "降雨 $rainProb%"
+                    parts += DxCarI18n.tr("降雨 $rainProb%", "降雨 $rainProb%", "Rain $rainProb%", "降水 $rainProb%")
                 }
                 detail = parts.joinToString(" · ")
             }
@@ -222,7 +257,7 @@ class LocalWeatherRepository(private val context: Context) {
             val next = LocalWeatherState(
                 hasData = true,
                 temperatureText = "${temp.roundToInt()}°C",
-                conditionText = wmoCodeToZh(code),
+                conditionText = wmoCodeToLocalized(code),
                 locationName = placeName,
                 detailText = detail,
                 weatherCode = code,
@@ -238,7 +273,7 @@ class LocalWeatherRepository(private val context: Context) {
     private fun resolveDistrictName(lat: Double, lon: Double): String {
         runCatching {
             if (Geocoder.isPresent()) {
-                val list = Geocoder(context, Locale.TAIWAN).getFromLocation(lat, lon, 1)
+                val list = Geocoder(context, DxCarI18n.currentLocale()).getFromLocation(lat, lon, 1)
                 val addr = list?.firstOrNull()
                 if (addr != null) {
                     val district = addr.subLocality ?: addr.locality ?: addr.subAdminArea ?: addr.adminArea
@@ -246,9 +281,15 @@ class LocalWeatherRepository(private val context: Context) {
                 }
             }
         }
+        val bdcLang = when (DxCarI18n.current()) {
+            EffectiveLanguage.ZH_TW -> "zh-TW"
+            EffectiveLanguage.ZH_CN -> "zh-CN"
+            EffectiveLanguage.EN -> "en"
+            EffectiveLanguage.JA -> "ja"
+        }
         return runCatching {
             val geoUrl = "https://api.bigdatacloud.net/data/reverse-geocode-client" +
-                "?latitude=$lat&longitude=$lon&localityLanguage=zh-TW"
+                "?latitude=$lat&longitude=$lon&localityLanguage=$bdcLang"
             val req = Request.Builder().url(geoUrl).build()
             httpClient.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@use ""
@@ -257,7 +298,9 @@ class LocalWeatherRepository(private val context: Context) {
                     .ifBlank { obj.optString("city") }
                     .ifBlank { obj.optString("principalSubdivision") }
             }
-        }.getOrDefault("").ifBlank { "當地天氣" }
+        }.getOrDefault("").ifBlank {
+            DxCarI18n.tr("當地天氣", "当地天气", "Local Weather", "現在地の天気")
+        }
     }
 
     private fun extractConditionZh(text: String): String {
@@ -301,30 +344,24 @@ class LocalWeatherRepository(private val context: Context) {
         else -> 0
     }
 
-    private fun wmoCodeToZh(code: Int): String = when (code) {
-        0 -> "晴朗"
-        1 -> "大致晴朗"
-        2 -> "晴時多雲"
-        3 -> "陰天"
-        45, 48 -> "有霧"
-        51, 53, 55, 56, 57 -> "毛毛雨"
-        61, 63, 80, 81 -> "陣雨"
-        65, 82 -> "大雨"
-        71, 73, 75, 77 -> "降雪"
-        95, 96, 99 -> "雷陣雨"
-        else -> "多雲"
-    }
-
     private fun loadCached(): LocalWeatherState {
         val has = prefs.getBoolean("has", false)
         if (!has) return LocalWeatherState()
+        val code = prefs.getInt("code", 1)
+        val defaultLoc = DxCarI18n.tr("當地天氣", "当地天气", "Local Weather", "現在地の天気")
+        val rawLoc = prefs.getString("loc", defaultLoc) ?: defaultLoc
+        val loc = when (rawLoc) {
+            in DEFAULT_LOCAL_LABELS -> defaultLoc
+            in CURRENT_LOC_LABELS -> DxCarI18n.tr("目前位置", "当前位置", "Current Location", "現在地")
+            else -> rawLoc
+        }
         return LocalWeatherState(
             hasData = true,
             temperatureText = prefs.getString("temp", "--°C") ?: "--°C",
-            conditionText = prefs.getString("cond", "多雲") ?: "多雲",
-            locationName = prefs.getString("loc", "當地天氣") ?: "當地天氣",
+            conditionText = wmoCodeToLocalized(code),
+            locationName = loc,
             detailText = prefs.getString("detail", "") ?: "",
-            weatherCode = prefs.getInt("code", 1),
+            weatherCode = code,
             fromGoogleApp = prefs.getBoolean("google", false),
             updatedAtMs = prefs.getLong("ts", 0L)
         )
@@ -346,6 +383,43 @@ class LocalWeatherRepository(private val context: Context) {
     companion object {
         const val GOOGLE_APP_PACKAGE = "com.google.android.googlequicksearchbox"
         private const val GOOGLE_WEATHER_PACKAGE = "com.google.android.apps.weather"
+
+        val DEFAULT_LOCAL_LABELS = setOf("當地天氣", "当地天气", "Local Weather", "現在地の天気")
+        val CURRENT_LOC_LABELS = setOf("目前位置", "当前位置", "Current Location", "現在地")
+
+        fun wmoCodeToLocalized(code: Int): String = when (code) {
+            0 -> DxCarI18n.tr("晴朗", "晴朗", "Clear", "快晴")
+            1 -> DxCarI18n.tr("大致晴朗", "大致晴朗", "Mostly Clear", "晴れ")
+            2 -> DxCarI18n.tr("晴時多雲", "晴间多云", "Partly Cloudy", "晴れ時々曇り")
+            3 -> DxCarI18n.tr("陰天", "阴天", "Overcast", "曇り")
+            45, 48 -> DxCarI18n.tr("有霧", "有雾", "Foggy", "霧")
+            51, 53, 55, 56, 57 -> DxCarI18n.tr("毛毛雨", "毛毛雨", "Drizzle", "霧雨")
+            61, 63, 80, 81 -> DxCarI18n.tr("陣雨", "阵雨", "Showers", "にわか雨")
+            65, 82 -> DxCarI18n.tr("大雨", "大雨", "Heavy Rain", "大雨")
+            71, 73, 75, 77 -> DxCarI18n.tr("降雪", "降雪", "Snow", "雪")
+            95, 96, 99 -> DxCarI18n.tr("雷陣雨", "雷阵雨", "Thunderstorm", "雷雨")
+            else -> DxCarI18n.tr("多雲", "多云", "Cloudy", "曇り")
+        }
+
+        @Composable
+        fun localizedConditionStr(code: Int, hasData: Boolean): String {
+            if (!hasData) {
+                return str("讀取天氣中…", "读取天气中…", "Loading weather…", "天気を読み込み中…")
+            }
+            return when (code) {
+                0 -> str("晴朗", "晴朗", "Clear", "快晴")
+                1 -> str("大致晴朗", "大致晴朗", "Mostly Clear", "晴れ")
+                2 -> str("晴時多雲", "晴间多云", "Partly Cloudy", "晴れ時々曇り")
+                3 -> str("陰天", "阴天", "Overcast", "曇り")
+                45, 48 -> str("有霧", "有雾", "Foggy", "霧")
+                51, 53, 55, 56, 57 -> str("毛毛雨", "毛毛雨", "Drizzle", "霧雨")
+                61, 63, 80, 81 -> str("陣雨", "阵雨", "Showers", "にわか雨")
+                65, 82 -> str("大雨", "大雨", "Heavy Rain", "大雨")
+                71, 73, 75, 77 -> str("降雪", "降雪", "Snow", "雪")
+                95, 96, 99 -> str("雷陣雨", "雷阵雨", "Thunderstorm", "雷雨")
+                else -> str("多雲", "多云", "Cloudy", "曇り")
+            }
+        }
 
         private val WEATHER_PACKAGES = setOf(
             GOOGLE_APP_PACKAGE,

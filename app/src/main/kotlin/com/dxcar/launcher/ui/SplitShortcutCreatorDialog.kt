@@ -67,6 +67,8 @@ import androidx.compose.ui.unit.sp
 import com.dxcar.launcher.data.SplitLaunchEngine
 import com.dxcar.launcher.data.SplitRatioPreset
 import com.dxcar.launcher.data.SplitScreenShortcut
+import com.dxcar.launcher.i18n.DxCarI18n
+import com.dxcar.launcher.i18n.DxCarI18n.str
 import com.dxcar.launcher.system.AppCategory
 import com.dxcar.launcher.system.InstalledAppInfo
 import com.dxcar.launcher.system.PermissionHelper
@@ -209,13 +211,21 @@ fun SplitShortcutCreatorDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = if (side == "LEFT") "選擇左側分割應用" else "選擇右側分割應用",
+                                text = if (side == "LEFT") {
+                                    str("選擇左側分割應用", "选择左侧分屏应用", "Select Left Split App", "左側の分割アプリを選択")
+                                } else {
+                                    str("選擇右側分割應用", "选择右侧分屏应用", "Select Right Split App", "右側の分割アプリを選択")
+                                },
                                 color = colors.primaryText,
                                 fontSize = 19.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             IconButton(onClick = { pickingSide = null }) {
-                                Icon(Icons.Rounded.Close, contentDescription = "返回", tint = colors.primaryText)
+                                Icon(
+                                    Icons.Rounded.Close,
+                                    contentDescription = str("返回", "返回", "Back", "戻る"),
+                                    tint = colors.primaryText
+                                )
                             }
                         }
 
@@ -226,6 +236,13 @@ fun SplitShortcutCreatorDialog(
                         ) {
                             AppCategory.entries.forEach { cat ->
                                 val selected = pickerCategory == cat
+                                val catLabel = when (cat) {
+                                    AppCategory.ALL -> str("全部", "全部", "All", "すべて")
+                                    AppCategory.NAVIGATION -> str("導航", "导航", "Nav", "ナビ")
+                                    AppCategory.MEDIA -> str("影音", "影音", "Media", "メディア")
+                                    AppCategory.COMMUNICATION -> str("通訊", "通讯", "Comms", "通話・連絡")
+                                    AppCategory.SYSTEM -> str("系統", "系统", "System", "システム")
+                                }
                                 Surface(
                                     color = if (selected) colors.accent else colors.cardSurfaceElevated,
                                     shape = RoundedCornerShape(14.dp),
@@ -234,7 +251,7 @@ fun SplitShortcutCreatorDialog(
                                         .bouncyClickable { pickerCategory = cat }
                                 ) {
                                     Text(
-                                        text = cat.labelZh,
+                                        text = catLabel,
                                         color = if (selected) colors.onAccent else colors.secondaryText,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold,
@@ -308,13 +325,22 @@ fun SplitShortcutCreatorDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "分屏設定 · 建立左右分割捷徑",
+                                text = str(
+                                    "分屏設定 · 建立左右分割捷徑",
+                                    "分屏设置 · 新建左右分屏快捷方式",
+                                    "Split-Screen · Create App Pair Shortcut",
+                                    "分割画面設定 · 左右分割ショートカット作成"
+                                ),
                                 color = colors.primaryText,
                                 fontSize = 19.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             IconButton(onClick = onDismiss) {
-                                Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.primaryText)
+                                Icon(
+                                    Icons.Rounded.Close,
+                                    contentDescription = str("關閉", "关闭", "Close", "閉じる"),
+                                    tint = colors.primaryText
+                                )
                             }
                         }
 
@@ -331,14 +357,48 @@ fun SplitShortcutCreatorDialog(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text(
-                                    text = "📥 讀取／匯入原車啟動器已創立好的分割視窗",
+                                    text = str(
+                                        "📥 讀取／匯入原車啟動器已創立好的分割視窗",
+                                        "📥 读取／导入原车启动器已创建好的分屏窗口",
+                                        "📥 Import Split-Screen Pairs from Stock Launcher",
+                                        "📥 純正ランチャーの作成済み分割画面を読み込み・インポート"
+                                    ),
                                     color = colors.primaryText,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold
                                 )
+                                val scanRes = stockScanResult
+                                val scanDescription = if (scanRes == null) {
+                                    str(
+                                        "可自動掃描原車桌面／系統已儲存的分屏組合（設為預設桌面後亦可讀取系統已釘選 App Pair），或直接挑選原車系統捷徑匯入！",
+                                        "可自动扫描原车桌面／系统已保存的分屏组合（设为默认桌面后亦可读取系统已固定 App Pair），或直接挑选原车系统快捷方式导入！",
+                                        "Scan your stock launcher or system for saved split-screen pairs (set as Default Home to also read pinned App Pairs), or pick a system shortcut directly.",
+                                        "純正ホームやシステムに保存された分割ペアを自動スキャン（デフォルトホーム設定でピン留めペアも読込可）、またはシステムショートカットを直接選択してインポートできます。"
+                                    )
+                                } else if (scanRes.discoveredShortcuts.isNotEmpty()) {
+                                    str(
+                                        scanRes.detailReportZh,
+                                        DxCarI18n.toSimplifiedChinese(scanRes.detailReportZh),
+                                        "✓ Found ${scanRes.discoveredShortcuts.size} saved split-screen pair(s) from stock launcher / system settings!",
+                                        "✓ 純正ランチャー／システム設定から ${scanRes.discoveredShortcuts.size} 件の分割ペアを検出しました！"
+                                    )
+                                } else if (scanRes.detailReportZh.contains("⚠️")) {
+                                    str(
+                                        scanRes.detailReportZh,
+                                        DxCarI18n.toSimplifiedChinese(scanRes.detailReportZh),
+                                        "⚠️ Your stock launcher stores split pairs in a private system sandbox (unreadable without Root). Tap 'Pick System Split Shortcut' or create a pair below using our AOSP split engine!",
+                                        "⚠️ 純正ランチャーの分割データは非公開領域に保護されています。「システム分割ショートカットを選択」を使うか、下の AOSP 分割エンジンでペアを作成してください。"
+                                    )
+                                } else {
+                                    str(
+                                        scanRes.detailReportZh,
+                                        DxCarI18n.toSimplifiedChinese(scanRes.detailReportZh),
+                                        "ℹ️ No public split-screen pairs found in the stock launcher yet. Tap 'Pick System Split Shortcut' to import, or create a new pair below.",
+                                        "ℹ️ 純正ランチャーの公開データに保存済み分割ペアは見つかりませんでした。「システム分割ショートカットを選択」でインポートするか、下で新しく作成してください。"
+                                    )
+                                }
                                 Text(
-                                    text = stockScanResult?.detailReportZh
-                                        ?: "可自動掃描原車桌面／系統已儲存的分屏組合（設為預設桌面後亦可讀取系統已釘選 App Pair），或直接挑選原車系統捷徑匯入！",
+                                    text = scanDescription,
                                     color = colors.secondaryText,
                                     fontSize = 12.sp
                                 )
@@ -353,14 +413,22 @@ fun SplitShortcutCreatorDialog(
                                         colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
-                                        Text("🔍 掃描原車已建立分屏", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            str("🔍 掃描原車已建立分屏", "🔍 扫描原车已建分屏", "🔍 Scan Stock Split Pairs", "🔍 純正の分割ペアをスキャン"),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                     if (onPickSystemShortcut != null) {
                                         OutlinedButton(
                                             onClick = onPickSystemShortcut,
                                             shape = RoundedCornerShape(12.dp)
                                         ) {
-                                            Text("📂 挑選原車系統分屏捷徑", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                str("📂 挑選原車系統分屏捷徑", "📂 挑选原车系统分屏快捷方式", "📂 Pick System Split Shortcut", "📂 システム分割ショートカットを選択"),
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
                                         }
                                     }
                                 }
@@ -387,7 +455,7 @@ fun SplitShortcutCreatorDialog(
                                                     onClick = { onTestLaunchShortcut(sc) },
                                                     shape = RoundedCornerShape(10.dp)
                                                 ) {
-                                                    Text("直接開啟", fontSize = 11.sp)
+                                                    Text(str("直接開啟", "直接开启", "Launch", "今すぐ開く"), fontSize = 11.sp)
                                                 }
                                             }
                                             Button(
@@ -395,7 +463,7 @@ fun SplitShortcutCreatorDialog(
                                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E), contentColor = Color.White),
                                                 shape = RoundedCornerShape(10.dp)
                                             ) {
-                                                Text("匯入儲存", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                Text(str("匯入儲存", "导入保存", "Import & Save", "インポート保存"), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                             }
                                         }
                                     }
@@ -416,7 +484,12 @@ fun SplitShortcutCreatorDialog(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(
-                                        text = "偵測到此車機系統可能未開啟「自由視窗 / 強制調整活動大小」，若測試無法左右並排請開啟開發者選項內該兩項設定",
+                                        text = str(
+                                            "偵測到此車機系統可能未開啟「自由視窗 / 強制調整活動大小」，若測試無法左右並排請開啟開發者選項內該兩項設定",
+                                            "检测到此车机系统可能未开启「自由窗口 / 强制将活动设为可调整大小」，若测试无法左右并排请开启开发者选项内该两项设置",
+                                            "Freeform windows / Force activities to be resizable may be disabled on this device. Enable both in Developer Options if side-by-side launch fails.",
+                                            "この端末で「フリーフォームウィンドウ／アクティビティをサイズ変更可能にする」が無効の可能性があります。並べて表示できない場合は開発者向けオプションで有効にしてください。"
+                                        ),
                                         color = colors.primaryText,
                                         fontSize = 11.sp,
                                         modifier = Modifier.weight(1f).padding(end = 8.dp)
@@ -427,7 +500,7 @@ fun SplitShortcutCreatorDialog(
                                     ) {
                                         Icon(Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(14.dp))
                                         Spacer(Modifier.width(4.dp))
-                                        Text("開發者設定", fontSize = 11.sp)
+                                        Text(str("開發者設定", "开发者选项", "Developer Options", "開発者向けオプション"), fontSize = 11.sp)
                                     }
                                 }
                             }
@@ -463,6 +536,8 @@ fun SplitShortcutCreatorDialog(
                         }
 
                         // Live Animated Split Preview Boxes (Left + Right)
+                        val leftPct = (selectedRatio.leftWeight * 100).toInt()
+                        val rightPct = ((1f - selectedRatio.leftWeight) * 100).toInt()
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -470,7 +545,12 @@ fun SplitShortcutCreatorDialog(
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             SplitSlotBox(
-                                sideLabel = "點擊選擇左側 (${(selectedRatio.leftWeight * 100).toInt()}%)",
+                                sideLabel = str(
+                                    "點擊選擇左側 ($leftPct%)",
+                                    "点击选择左侧 ($leftPct%)",
+                                    "Tap to Select Left ($leftPct%)",
+                                    "左側アプリを選択 ($leftPct%)"
+                                ),
                                 app = leftApp,
                                 onClick = { pickingSide = "LEFT" },
                                 modifier = Modifier
@@ -478,7 +558,12 @@ fun SplitShortcutCreatorDialog(
                                     .fillMaxHeight()
                             )
                             SplitSlotBox(
-                                sideLabel = "點擊選擇右側 (${((1f - selectedRatio.leftWeight) * 100).toInt()}%)",
+                                sideLabel = str(
+                                    "點擊選擇右側 ($rightPct%)",
+                                    "点击选择右侧 ($rightPct%)",
+                                    "Tap to Select Right ($rightPct%)",
+                                    "右側アプリを選択 ($rightPct%)"
+                                ),
                                 app = rightApp,
                                 onClick = { pickingSide = "RIGHT" },
                                 modifier = Modifier
@@ -499,6 +584,26 @@ fun SplitShortcutCreatorDialog(
                             ) {
                                 SplitLaunchEngine.entries.forEach { eng ->
                                     val selected = eng == selectedEngine
+                                    val engLabel = when (eng) {
+                                        SplitLaunchEngine.NATIVE_SPLIT_SCREEN -> str(
+                                            "AOSP 系統原生可拖動分屏（推薦）",
+                                            "AOSP 系统原生可拖动分屏（推荐）",
+                                            "AOSP Native Draggable Split-Screen (Recommended)",
+                                            "AOSP ネイティブ分割画面（推奨）"
+                                        )
+                                        SplitLaunchEngine.STOCK_LAUNCHER_SHORTCUT -> str(
+                                            "原車啟動器已建立分屏捷徑",
+                                            "原车启动器已建分屏快捷方式",
+                                            "Stock Launcher Split Shortcut",
+                                            "純正ランチャー分割ショートカット"
+                                        )
+                                        SplitLaunchEngine.FREEFORM_EXACT_RATIO -> str(
+                                            "Freeform 自由雙視窗",
+                                            "Freeform 自由双窗口",
+                                            "Freeform Dual Windows",
+                                            "Freeform デュアルウィンドウ"
+                                        )
+                                    }
                                     Surface(
                                         color = if (selected) colors.accent else colors.cardSurfaceElevated,
                                         shape = RoundedCornerShape(14.dp),
@@ -511,7 +616,7 @@ fun SplitShortcutCreatorDialog(
                                             .bouncyClickable(pressedScale = 0.91f) { selectedEngine = eng }
                                     ) {
                                         Text(
-                                            text = eng.labelZh,
+                                            text = engLabel,
                                             color = if (selected) colors.onAccent else colors.secondaryText,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.SemiBold,
@@ -545,7 +650,7 @@ fun SplitShortcutCreatorDialog(
                                     ) {
                                         Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(4.dp))
-                                        Text("測試分屏")
+                                        Text(str("測試分屏", "测试分屏", "Test Split", "テスト起動"))
                                     }
                                 }
 
@@ -559,7 +664,7 @@ fun SplitShortcutCreatorDialog(
                                     shape = RoundedCornerShape(16.dp)
                                 ) {
                                     Text(
-                                        text = "儲存為捷徑",
+                                        text = str("儲存為捷徑", "保存为快捷方式", "Save Shortcut", "ショートカット保存"),
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp)

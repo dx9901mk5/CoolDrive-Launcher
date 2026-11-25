@@ -219,7 +219,7 @@ fun IncomingCallBanner(
                     Spacer(Modifier.width((10f * s).coerceIn(6f, 16f).dp))
 
                     val displayTitle = callState.callerName.ifBlank {
-                        callState.callerNumber.ifBlank { str("藍牙來電", "Incoming Call", "着信") }
+                        callState.callerNumber.ifBlank { str("藍牙來電", "蓝牙来电", "Incoming Call", "Bluetooth着信") }
                     }
                     val showDistinctNumber = callState.callerNumber.isNotBlank() &&
                         !callState.callerNumber.equals(displayTitle, ignoreCase = true)
@@ -236,11 +236,11 @@ fun IncomingCallBanner(
                         val subtitle = when (callState.status) {
                             CallStatus.RINGING -> {
                                 val numPart = if (showDistinctNumber) " · ${callState.callerNumber}" else ""
-                                "${callState.sourceApp} · ${str("來電中", "Incoming", "着信中")}$numPart"
+                                "${callState.sourceApp} · ${str("來電中", "来电中", "Incoming", "着信中")}$numPart"
                             }
                             CallStatus.ACTIVE -> {
                                 val timer = "%02d:%02d".format(elapsedSec / 60, elapsedSec % 60)
-                                "${callState.sourceApp} · ${str("通話中", "In Call", "通話中")} $timer"
+                                "${callState.sourceApp} · ${str("通話中", "通话中", "In Call", "通話中")} $timer"
                             }
                             CallStatus.IDLE -> ""
                         }
@@ -268,7 +268,7 @@ fun IncomingCallBanner(
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = Icons.Rounded.Call,
-                                        contentDescription = "接聽",
+                                        contentDescription = str("接聽", "接听", "Answer", "応答"),
                                         tint = Color.White,
                                         modifier = Modifier.size(callBtnIconDp)
                                     )
@@ -286,7 +286,7 @@ fun IncomingCallBanner(
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Rounded.CallEnd,
-                                    contentDescription = "掛斷",
+                                    contentDescription = str("掛斷", "挂断", "Hang up", "終了"),
                                     tint = Color.White,
                                     modifier = Modifier.size(callBtnIconDp)
                                 )
@@ -444,27 +444,27 @@ fun IncomingMessageBanner(
                                 onClick = { onReadAloud(item) },
                                 modifier = Modifier.size(actionBtnDp)
                             ) {
-                                Icon(Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = "語音朗讀", tint = colors.accent, modifier = Modifier.size(actionIconDp))
+                                Icon(Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = str("語音朗讀", "语音朗读", "Read aloud", "音声読み上げ"), tint = colors.accent, modifier = Modifier.size(actionIconDp))
                             }
                             if (onVoiceReply != null && item.canReply) {
                                 IconButton(
                                     onClick = { onVoiceReply(item) },
                                     modifier = Modifier.size(actionBtnDp)
                                 ) {
-                                    Icon(Icons.Rounded.Mic, contentDescription = "語音回覆", tint = colors.accent, modifier = Modifier.size(actionIconDp))
+                                    Icon(Icons.Rounded.Mic, contentDescription = str("語音回覆", "语音回复", "Voice reply", "音声返信"), tint = colors.accent, modifier = Modifier.size(actionIconDp))
                                 }
                             }
                             IconButton(
                                 onClick = { onMarkRead(item) },
                                 modifier = Modifier.size(actionBtnDp)
                             ) {
-                                Icon(Icons.Rounded.Done, contentDescription = "已讀", tint = colors.statusConnected, modifier = Modifier.size(actionIconDp))
+                                Icon(Icons.Rounded.Done, contentDescription = str("已讀", "已读", "Mark as read", "既読にする"), tint = colors.statusConnected, modifier = Modifier.size(actionIconDp))
                             }
                             IconButton(
                                 onClick = onDismiss,
                                 modifier = Modifier.size(actionBtnDp)
                             ) {
-                                Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.secondaryText, modifier = Modifier.size(actionIconDp))
+                                Icon(Icons.Rounded.Close, contentDescription = str("關閉", "关闭", "Dismiss", "閉じる"), tint = colors.secondaryText, modifier = Modifier.size(actionIconDp))
                             }
                         }
                     }
@@ -505,7 +505,7 @@ fun IncomingMessageBanner(
                                         modifier = Modifier.size((14f * s).coerceIn(10f, 20f).dp)
                                     )
                                     Text(
-                                        text = str("快速回覆", "Quick Reply", "クイック返信"),
+                                        text = str("💬 快速回覆", "💬 快速回复", "💬 Quick Reply", "💬 クイック返信"),
                                         color = colors.primaryText,
                                         fontSize = replyBtnSp,
                                         fontWeight = FontWeight.Bold
@@ -645,7 +645,7 @@ fun NotificationCenterSheet(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "訊息與通知中心",
+                        text = str("訊息與通知中心", "消息与通知中心", "Messages & Notifications", "メッセージ・通知センター"),
                         color = colors.primaryText,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold
@@ -653,11 +653,11 @@ fun NotificationCenterSheet(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (messages.isNotEmpty()) {
                             IconButton(onClick = onClearAll) {
-                                Icon(Icons.Rounded.DeleteSweep, contentDescription = "全部清除", tint = colors.secondaryText)
+                                Icon(Icons.Rounded.DeleteSweep, contentDescription = str("全部清除", "全部清除", "Clear all", "すべて消去"), tint = colors.secondaryText)
                             }
                         }
                         IconButton(onClick = onClose) {
-                            Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.primaryText)
+                            Icon(Icons.Rounded.Close, contentDescription = str("關閉", "关闭", "Close", "閉じる"), tint = colors.primaryText)
                         }
                     }
                 }
@@ -667,7 +667,12 @@ fun NotificationCenterSheet(
                 if (messages.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
-                            text = "目前沒有未讀訊息\n手機配對並開啟同步端後，LINE／Messenger／簡訊會即時顯示於此",
+                            text = str(
+                                "目前沒有未讀訊息\n手機配對並開啟同步端後，LINE／Messenger／簡訊會即時顯示於此",
+                                "当前没有未读消息\n手机配对并开启同步端后，LINE／Messenger／短信会实时显示于此",
+                                "No unread messages\nOnce paired and synced, LINE, Messenger & SMS appear here live",
+                                "未読メッセージはありません\nスマホをペアリング・同期すると、LINE／Messenger／SMSがここに表示されます"
+                            ),
                             color = colors.secondaryText,
                             fontSize = 14.sp
                         )
@@ -718,10 +723,10 @@ fun NotificationCenterSheet(
                                             )
                                         }
                                         IconButton(onClick = { onReadAloud(msg) }) {
-                                            Icon(Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = "朗讀", tint = colors.accent)
+                                            Icon(Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = str("朗讀", "朗读", "Read aloud", "読み上げ"), tint = colors.accent)
                                         }
                                         IconButton(onClick = { onMarkRead(msg) }) {
-                                            Icon(Icons.Rounded.Done, contentDescription = "已讀", tint = colors.statusConnected)
+                                            Icon(Icons.Rounded.Done, contentDescription = str("已讀", "已读", "Mark as read", "既読"), tint = colors.statusConnected)
                                         }
                                     }
 

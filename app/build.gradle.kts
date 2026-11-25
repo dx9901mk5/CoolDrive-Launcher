@@ -11,9 +11,15 @@ android {
   defaultConfig {
     applicationId = "com.dxcar.launcher"
     minSdk = 28
-    targetSdk = 35
-    versionCode = 32
-    versionName = "1.7.3"
+    targetSdk = 36
+    versionCode = 33
+    versionName = "1.7.4"
+  }
+
+  bundle {
+    language {
+      enableSplit = false
+    }
   }
 
   flavorDimensions += "channel"
