@@ -1556,17 +1556,17 @@ private data class YtGestureHudState(
 
 /**
  * Inline Playable YouTube Card for Page 2 (1:1 Split Right Pane):
- * - Defaults video resolution to 720p (hd720).
+ * - Defaults video resolution preference to 720p via yt-player-quality storage.
  * - Swipe UP in the upper video player zone (top 48%) OR tap YouTube's bottom-right fullscreen icon
  *   -> enters true full-bleed Right-Half Fullscreen (CSS + CustomView lock, left 1:1 map untouched).
- * - Fullscreen-only YouTube gestures:
- *   * Double-tap Center 1/3 -> Play / Pause
+ * - Fullscreen-only YouTube gestures (Center 1/3 keeps native YouTube tap controls untouched!):
  *   * Double-tap Left 1/3 / Right 1/3 -> Rewind -10s / Fast-forward +10s (accumulating)
  *   * Double-tap & HOLD Left 1/3 or Right 1/3 -> Continuous accelerated rewind / fast-forward
  *   * Horizontal swipe/drag -> Smooth timeline scrub with live timestamp preview
  *   * Vertical swipe DOWN (or tap bottom-right exit fullscreen button) -> Exit fullscreen
- * - True cross-system background audio playback (continues in Stock Box Launcher, Google Maps,
- *   Browser, System Settings; pauses automatically ONLY when another media app starts playing).
+ * - True cross-system background audio playback via BackgroundPlayableWebView + Chromium's native
+ *   AudioFocusDelegate (continues in Stock Box Launcher, Google Maps, Browser, System Settings;
+ *   automatically pauses when another media app starts playing and takes AudioFocus).
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -1575,8 +1575,6 @@ fun EmbeddedYoutubePlayerCard(
 ) {
     val colors = LocalDxCarColors.current
     val context = LocalContext.current
-    val app = com.dxcar.launcher.DxCarApp.instance
-    val externalMedia = app?.mediaControlBridge?.mediaState?.collectAsState()?.value
 
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var isRightPaneFullscreen by remember { mutableStateOf(false) }
@@ -1585,11 +1583,8 @@ fun EmbeddedYoutubePlayerCard(
     var gestureSeq by remember { mutableIntStateOf(0) }
     var exitCustomViewTrigger by remember { mutableStateOf<(() -> Unit)?>(null) }
 
-    // Live video playback state mirrored from JS for 0ms gesture scrubbing
-    var videoCurrentSec by remember { mutableFloatStateOf(0f) }
-    var videoDurationSec by remember { mutableFloatStateOf(0f) }
-    var isYoutubePlayingNow by remember { mutableStateOf(false) }
-
+    // Plain thread-safe array [currentSec, durationSec] updated from JavaBridge without Compose Snapshot overhead
+    val videoTimeHolder = remember { FloatArray(2) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
     fun evalYoutubeJs(js: String) {
@@ -1599,13 +1594,14 @@ fun EmbeddedYoutubePlayerCard(
     }
 
     fun flashGestureHud(zone: YtGestureHudZone, text: String) {
-        gestureSeq++
-        gestureHud = YtGestureHudState(zone = zone, label = text, seq = gestureSeq)
+        mainHandler.post {
+            gestureSeq++
+            gestureHud = YtGestureHudState(zone = zone, label = text, seq = gestureSeq)
+        }
     }
 
     LaunchedEffect(gestureHud?.seq) {
         val currentSeq = gestureHud?.seq ?: return@LaunchedEffect
-        // Keep TOP hold indicator visible until explicitly cleared; auto-fade transient badges
         if (gestureHud?.zone != YtGestureHudZone.TOP) {
             kotlinx.coroutines.delay(850L)
             if (gestureHud?.seq == currentSeq) {
@@ -1676,23 +1672,17 @@ fun EmbeddedYoutubePlayerCard(
         (function() {
           var v = document.querySelector('video');
           if (v) {
-            if (v.paused) {
-              window.__dxcarUserPaused = false;
-              v.play();
-              return 'PLAY';
-            } else {
-              window.__dxcarUserPaused = true;
-              v.pause();
-              return 'PAUSE';
-            }
+            if (v.paused) { v.play(); return 'PLAY'; }
+            else { v.pause(); return 'PAUSE'; }
           }
-          return 'NONE';
+          var btn = document.querySelector('button[aria-label*="Play"], button[aria-label*="Pause"], button[aria-label*="播放"], button[aria-label*="暫停"], .ytp-play-button');
+          if (btn) btn.click();
+          return 'BTN';
         })();
     """.trimIndent()
 
     val playOnlyJs = """
         (function() {
-          window.__dxcarUserPaused = false;
           var v = document.querySelector('video');
           if (v && v.paused) { v.play(); return 'PLAY'; }
           return 'OK';
@@ -1701,7 +1691,6 @@ fun EmbeddedYoutubePlayerCard(
 
     val pauseOnlyJs = """
         (function() {
-          window.__dxcarUserPaused = true;
           var v = document.querySelector('video');
           if (v && !v.paused) { v.pause(); return 'PAUSE'; }
           return 'OK';
@@ -1767,51 +1756,9 @@ fun EmbeddedYoutubePlayerCard(
         }
     }
 
-    // Pause Page 2 YouTube automatically ONLY when another external Media App actively starts playing!
-    var prevExternalPlayingKey by remember { mutableStateOf("") }
-    LaunchedEffect(externalMedia?.packageName, externalMedia?.isPlaying) {
-        val pkg = externalMedia?.packageName.orEmpty()
-        val extPlaying = externalMedia?.isPlaying == true &&
-            pkg.isNotBlank() &&
-            pkg != context.packageName
-        val key = if (extPlaying) "$pkg:PLAYING" else ""
-        if (extPlaying && key != prevExternalPlayingKey && isYoutubePlayingNow) {
-            evalYoutubeJs(pauseOnlyJs)
-        }
-        prevExternalPlayingKey = key
-    }
-
-    // AudioFocus + Steering Wheel MediaSession Management
+    // Bind steering wheel MediaSession + KeyEvent bridge (NO custom AudioFocusRequest so Chromium's
+    // built-in AudioFocusDelegate plays unimpeded and yields naturally to external music apps!)
     DisposableEffect(context) {
-        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-        val focusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
-            when (focusChange) {
-                AudioManager.AUDIOFOCUS_LOSS,
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                    // Another media app requested playback focus -> pause Page 2 YouTube!
-                    evalYoutubeJs(pauseOnlyJs)
-                }
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                    // Navigation TTS prompt -> duck gently without pausing!
-                    evalYoutubeJs("(function(){ var v=document.querySelector('video'); if(v) v.volume=0.35; })();")
-                }
-                AudioManager.AUDIOFOCUS_GAIN -> {
-                    evalYoutubeJs("(function(){ var v=document.querySelector('video'); if(v) v.volume=1.0; })();")
-                }
-            }
-        }
-        val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build()
-            )
-            .setAcceptsDelayedFocusGain(true)
-            .setWillPauseWhenDucked(false)
-            .setOnAudioFocusChangeListener(focusListener, mainHandler)
-            .build()
-
         val actions = PlaybackState.ACTION_PLAY_PAUSE or
             PlaybackState.ACTION_PLAY or
             PlaybackState.ACTION_PAUSE or
@@ -1827,7 +1774,6 @@ fun EmbeddedYoutubePlayerCard(
                 )
                 setCallback(object : MediaSession.Callback() {
                     override fun onPlay() {
-                        audioManager?.requestAudioFocus(focusRequest)
                         evalYoutubeJs(playOnlyJs)
                     }
 
@@ -1862,10 +1808,7 @@ fun EmbeddedYoutubePlayerCard(
 
         EmbeddedYoutubeBridge.isActive = true
         EmbeddedYoutubeBridge.onTogglePlayPause = { evalYoutubeJs(togglePlayPauseJs) }
-        EmbeddedYoutubeBridge.onPlay = {
-            audioManager?.requestAudioFocus(focusRequest)
-            evalYoutubeJs(playOnlyJs)
-        }
+        EmbeddedYoutubeBridge.onPlay = { evalYoutubeJs(playOnlyJs) }
         EmbeddedYoutubeBridge.onPause = { evalYoutubeJs(pauseOnlyJs) }
         EmbeddedYoutubeBridge.onNext = {
             evalYoutubeJs("document.querySelector('button[aria-label*=\"Next\"], .ytp-next-button')?.click();")
@@ -1881,34 +1824,9 @@ fun EmbeddedYoutubePlayerCard(
             EmbeddedYoutubeBridge.onPause = null
             EmbeddedYoutubeBridge.onNext = null
             EmbeddedYoutubeBridge.onPrevious = null
-            runCatching { audioManager?.abandonAudioFocusRequest(focusRequest) }
             runCatching {
                 session?.isActive = false
                 session?.release()
-            }
-        }
-    }
-
-    // Request AudioFocus whenever YouTube transitions to playing so other media apps yield cleanly
-    LaunchedEffect(isYoutubePlayingNow) {
-        if (isYoutubePlayingNow) {
-            val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-            runCatching {
-                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                    .setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                            .build()
-                    )
-                    .setWillPauseWhenDucked(false)
-                    .setOnAudioFocusChangeListener({ fc ->
-                        if (fc == AudioManager.AUDIOFOCUS_LOSS || fc == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-                            evalYoutubeJs(pauseOnlyJs)
-                        }
-                    }, mainHandler)
-                    .build()
-                am?.requestAudioFocus(req)
             }
         }
     }
@@ -1991,7 +1909,7 @@ fun EmbeddedYoutubePlayerCard(
                 }
             }
 
-            // Video WebView + Full-Bleed Right-Pane Fullscreen + Native YouTube Gestures
+            // Video WebView + Full-Bleed Right-Pane Fullscreen + Left/Right 1/3 YouTube Gestures
             AndroidView(
                 factory = { ctx ->
                     var inlineCustomView: View? = null
@@ -2005,13 +1923,13 @@ fun EmbeddedYoutubePlayerCard(
                     var isHorizontalScrubbing = false
                     var scrubStartSec = 0f
 
-                    // Double-tap & Double-tap-and-hold state (active ONLY in Right-Pane Fullscreen)
-                    var lastTapUpMs = 0L
-                    var lastTapX = 0f
-                    var lastTapY = 0f
-                    var isSecondTapDown = false
+                    // Double-tap & Double-tap-and-hold state (ONLY Left 1/3 & Right 1/3 in Fullscreen; Center 1/3 keeps native YouTube controls!)
+                    var lastSideTapUpMs = 0L
+                    var lastSideTapX = 0f
+                    var lastSideTapY = 0f
+                    var isSecondSideTapDown = false
                     var isDoubleTapHolding = false
-                    var doubleTapZone = 0 // -1 = left 1/3, 0 = center 1/3, +1 = right 1/3
+                    var sideTapZone = 0 // -1 = left 1/3, +1 = right 1/3
                     var accumulatedSeekSec = 0
                     var lastAccumulatedMs = 0L
                     var holdRepeatRunnable: Runnable? = null
@@ -2022,7 +1940,7 @@ fun EmbeddedYoutubePlayerCard(
                         if (isDoubleTapHolding) {
                             isDoubleTapHolding = false
                             setPlaybackRateJs(1.0f)
-                            gestureHud = null
+                            mainHandler.post { gestureHud = null }
                         }
                     }
 
@@ -2043,7 +1961,6 @@ fun EmbeddedYoutubePlayerCard(
                                         if (!gestureHandled) {
                                             val dx = ev.x - downX
                                             val dy = ev.y - downY
-                                            // Upper red-circle video zone: top 4%..48% of the card height
                                             if (downY in (h * 0.03f)..(h * 0.48f) &&
                                                 dy < -(62f * density.coerceAtLeast(1f) / 1.6f) &&
                                                 kotlin.math.abs(dy) > kotlin.math.abs(dx) * 1.3f
@@ -2066,6 +1983,12 @@ fun EmbeddedYoutubePlayerCard(
                                 return super.dispatchTouchEvent(ev)
                             }
 
+                            val currentSideZone = when {
+                                ev.x < w / 3f -> -1
+                                ev.x > w * 2f / 3f -> 1
+                                else -> 0 // Center 1/3 -> preserve native YouTube player controls!
+                            }
+
                             when (ev.actionMasked) {
                                 MotionEvent.ACTION_DOWN -> {
                                     downX = ev.x
@@ -2073,29 +1996,24 @@ fun EmbeddedYoutubePlayerCard(
                                     downTimeMs = System.currentTimeMillis()
                                     gestureHandled = false
                                     isHorizontalScrubbing = false
-                                    isSecondTapDown = false
+                                    isSecondSideTapDown = false
                                     stopHoldAcceleration()
 
-                                    val dt = downTimeMs - lastTapUpMs
-                                    val dist = kotlin.math.hypot((ev.x - lastTapX).toDouble(), (ev.y - lastTapY).toDouble())
-                                    if (dt in 25L..320L && dist < 76f * density) {
-                                        // 2nd tap detected! Consume so WebView doesn't double-toggle controls
-                                        isSecondTapDown = true
-                                        gestureHandled = true
-                                        doubleTapZone = when {
-                                            ev.x < w / 3f -> -1
-                                            ev.x > w * 2f / 3f -> 1
-                                            else -> 0
-                                        }
-                                        // Schedule Double-Tap & HOLD acceleration for Left 1/3 or Right 1/3!
-                                        if (doubleTapZone != 0) {
+                                    // Double-tap & Double-tap-hold ONLY on Left 1/3 (-1) and Right 1/3 (+1)!
+                                    if (currentSideZone != 0) {
+                                        val dt = downTimeMs - lastSideTapUpMs
+                                        val dist = kotlin.math.hypot((ev.x - lastSideTapX).toDouble(), (ev.y - lastSideTapY).toDouble())
+                                        if (dt in 25L..320L && dist < 76f * density) {
+                                            isSecondSideTapDown = true
+                                            gestureHandled = true
+                                            sideTapZone = currentSideZone
                                             val holdStartMs = downTimeMs
                                             val runner = object : Runnable {
                                                 override fun run() {
-                                                    if (!isSecondTapDown) return
+                                                    if (!isSecondSideTapDown) return
                                                     if (!isDoubleTapHolding) {
                                                         isDoubleTapHolding = true
-                                                        if (doubleTapZone > 0) {
+                                                        if (sideTapZone > 0) {
                                                             setPlaybackRateJs(2.0f)
                                                             flashGestureHud(YtGestureHudZone.TOP, "⏩ 持續加速快轉中…")
                                                         } else {
@@ -2104,34 +2022,35 @@ fun EmbeddedYoutubePlayerCard(
                                                     }
                                                     val heldElapsed = System.currentTimeMillis() - holdStartMs
                                                     val stepSec = if (heldElapsed > 1600L) 4.5f else 2.5f
-                                                    seekRelativeSec(if (doubleTapZone > 0) stepSec else -stepSec)
+                                                    seekRelativeSec(if (sideTapZone > 0) stepSec else -stepSec)
                                                     mainHandler.postDelayed(this, 160L)
                                                 }
                                             }
                                             holdRepeatRunnable = runner
                                             mainHandler.postDelayed(runner, 230L)
+                                            return true
                                         }
-                                        return true
                                     }
                                 }
 
                                 MotionEvent.ACTION_MOVE -> {
                                     val dx = ev.x - downX
                                     val dy = ev.y - downY
-                                    if (isSecondTapDown) {
+                                    if (isSecondSideTapDown) {
                                         return true
                                     }
                                     if (isHorizontalScrubbing) {
                                         val deltaSec = (dx / w) * 90f
-                                        val dur = videoDurationSec.coerceAtLeast(1f)
-                                        val target = if (videoDurationSec > 1f) {
+                                        val totalDur = videoTimeHolder[1]
+                                        val dur = totalDur.coerceAtLeast(1f)
+                                        val target = if (totalDur > 1f) {
                                             (scrubStartSec + deltaSec).coerceIn(0f, dur)
                                         } else {
                                             (scrubStartSec + deltaSec).coerceAtLeast(0f)
                                         }
                                         seekAbsoluteSec(target)
                                         val sign = if (deltaSec >= 0f) "+" else ""
-                                        val durPart = if (videoDurationSec > 1f) " / ${formatYtTime(videoDurationSec)}" else ""
+                                        val durPart = if (totalDur > 1f) " / ${formatYtTime(totalDur)}" else ""
                                         flashGestureHud(
                                             YtGestureHudZone.CENTER,
                                             "${if (deltaSec >= 0f) "⏩" else "⏪"} ${formatYtTime(target)}$durPart ($sign${deltaSec.toInt()}秒)"
@@ -2154,7 +2073,7 @@ fun EmbeddedYoutubePlayerCard(
                                         ) {
                                             gestureHandled = true
                                             isHorizontalScrubbing = true
-                                            scrubStartSec = videoCurrentSec
+                                            scrubStartSec = videoTimeHolder[0]
                                             val cancelEv = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_CANCEL }
                                             super.dispatchTouchEvent(cancelEv)
                                             cancelEv.recycle()
@@ -2166,49 +2085,35 @@ fun EmbeddedYoutubePlayerCard(
                                 MotionEvent.ACTION_UP,
                                 MotionEvent.ACTION_CANCEL -> {
                                     val nowUp = System.currentTimeMillis()
-                                    if (isSecondTapDown) {
+                                    if (isSecondSideTapDown) {
                                         val wasHolding = isDoubleTapHolding
                                         stopHoldAcceleration()
-                                        isSecondTapDown = false
+                                        isSecondSideTapDown = false
                                         if (!wasHolding && ev.actionMasked == MotionEvent.ACTION_UP) {
-                                            when (doubleTapZone) {
-                                                0 -> {
-                                                    // Center 1/3 Double-Tap -> Play / Pause
-                                                    val nextPaused = isYoutubePlayingNow
-                                                    evalYoutubeJs(togglePlayPauseJs)
-                                                    flashGestureHud(
-                                                        YtGestureHudZone.CENTER,
-                                                        if (nextPaused) "⏸ 暫停" else "▶ 播放"
-                                                    )
+                                            if (sideTapZone > 0) {
+                                                accumulatedSeekSec = if (nowUp - lastAccumulatedMs < 900L && accumulatedSeekSec > 0) {
+                                                    accumulatedSeekSec + 10
+                                                } else {
+                                                    10
                                                 }
-                                                1 -> {
-                                                    // Right 1/3 Double-Tap -> +10s (accumulating)
-                                                    accumulatedSeekSec = if (nowUp - lastAccumulatedMs < 900L && accumulatedSeekSec > 0) {
-                                                        accumulatedSeekSec + 10
-                                                    } else {
-                                                        10
-                                                    }
-                                                    lastAccumulatedMs = nowUp
-                                                    seekRelativeSec(10f)
-                                                    lastTapUpMs = nowUp
-                                                    lastTapX = ev.x
-                                                    lastTapY = ev.y
-                                                    flashGestureHud(YtGestureHudZone.RIGHT, "⏩ +${accumulatedSeekSec} 秒")
+                                                lastAccumulatedMs = nowUp
+                                                seekRelativeSec(10f)
+                                                lastSideTapUpMs = nowUp
+                                                lastSideTapX = ev.x
+                                                lastSideTapY = ev.y
+                                                flashGestureHud(YtGestureHudZone.RIGHT, "⏩ +${accumulatedSeekSec} 秒")
+                                            } else if (sideTapZone < 0) {
+                                                accumulatedSeekSec = if (nowUp - lastAccumulatedMs < 900L && accumulatedSeekSec < 0) {
+                                                    accumulatedSeekSec - 10
+                                                } else {
+                                                    -10
                                                 }
-                                                -1 -> {
-                                                    // Left 1/3 Double-Tap -> -10s (accumulating)
-                                                    accumulatedSeekSec = if (nowUp - lastAccumulatedMs < 900L && accumulatedSeekSec < 0) {
-                                                        accumulatedSeekSec - 10
-                                                    } else {
-                                                        -10
-                                                    }
-                                                    lastAccumulatedMs = nowUp
-                                                    seekRelativeSec(-10f)
-                                                    lastTapUpMs = nowUp
-                                                    lastTapX = ev.x
-                                                    lastTapY = ev.y
-                                                    flashGestureHud(YtGestureHudZone.LEFT, "⏪ ${accumulatedSeekSec} 秒")
-                                                }
+                                                lastAccumulatedMs = nowUp
+                                                seekRelativeSec(-10f)
+                                                lastSideTapUpMs = nowUp
+                                                lastSideTapX = ev.x
+                                                lastSideTapY = ev.y
+                                                flashGestureHud(YtGestureHudZone.LEFT, "⏪ ${accumulatedSeekSec} 秒")
                                             }
                                         }
                                         return true
@@ -2217,10 +2122,14 @@ fun EmbeddedYoutubePlayerCard(
                                         isHorizontalScrubbing = false
                                         return true
                                     }
-                                    if (!gestureHandled && ev.actionMasked == MotionEvent.ACTION_UP && (nowUp - downTimeMs) < 280L) {
-                                        lastTapUpMs = nowUp
-                                        lastTapX = ev.x
-                                        lastTapY = ev.y
+                                    if (!gestureHandled &&
+                                        currentSideZone != 0 &&
+                                        ev.actionMasked == MotionEvent.ACTION_UP &&
+                                        (nowUp - downTimeMs) < 280L
+                                    ) {
+                                        lastSideTapUpMs = nowUp
+                                        lastSideTapX = ev.x
+                                        lastSideTapY = ev.y
                                     }
                                 }
                             }
@@ -2243,7 +2152,7 @@ fun EmbeddedYoutubePlayerCard(
                           if (window.__dxcarYtBootstrapped) return;
                           window.__dxcarYtBootstrapped = true;
 
-                          // 1. Spoof Page Visibility & Focus so background playback NEVER pauses in other apps / stock launcher!
+                          // 1. Spoof Page Visibility & Focus so background playback continues in Stock Launcher / Google Maps / Browser!
                           try {
                             Object.defineProperty(document, 'hidden', { get: function() { return false; }, configurable: true });
                             Object.defineProperty(document, 'webkitHidden', { get: function() { return false; }, configurable: true });
@@ -2257,37 +2166,17 @@ fun EmbeddedYoutubePlayerCard(
                             window.addEventListener('blur', blockEv, true);
                           } catch (e) {}
 
-                          // 2. Default video playback quality to 720p (hd720)
-                          function apply720pPreference() {
-                            try {
-                              var now = Date.now();
-                              var qPayload = JSON.stringify({
-                                data: JSON.stringify({ quality: 720, previousQuality: 720 }),
-                                expiration: now + 31536000000,
-                                creation: now
-                              });
-                              localStorage.setItem('yt-player-quality', qPayload);
-                              sessionStorage.setItem('yt-player-quality', qPayload);
-                            } catch (e) {}
-                          }
-                          apply720pPreference();
-
-                          var lastQualitySrc = '';
-                          function enforcePlayer720pOnce() {
-                            try {
-                              var v = document.querySelector('video');
-                              var curSrc = v ? (v.currentSrc || location.href) : '';
-                              if (curSrc && curSrc !== lastQualitySrc) {
-                                apply720pPreference();
-                                var mp = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
-                                if (mp) {
-                                  if (mp.setPlaybackQualityRange) mp.setPlaybackQualityRange('hd720', 'hd720');
-                                  if (mp.setPlaybackQuality) mp.setPlaybackQuality('hd720');
-                                  lastQualitySrc = curSrc;
-                                }
-                              }
-                            } catch (e) {}
-                          }
+                          // 2. Non-intrusively set default playback quality preference to 720p via storage
+                          try {
+                            var now = Date.now();
+                            var qPayload = JSON.stringify({
+                              data: JSON.stringify({ quality: 720, previousQuality: 720 }),
+                              expiration: now + 31536000000,
+                              creation: now
+                            });
+                            localStorage.setItem('yt-player-quality', qPayload);
+                            sessionStorage.setItem('yt-player-quality', qPayload);
+                          } catch (e) {}
 
                           // 3. Hook YouTube player's own bottom-right Fullscreen button (Image 6) so clicking it toggles Right-Pane Fullscreen!
                           document.addEventListener('click', function(e) {
@@ -2302,41 +2191,18 @@ fun EmbeddedYoutubePlayerCard(
                             } catch (err) {}
                           }, true);
 
-                          // 4. Report live playback time + guard against unwanted background auto-pause!
+                          // 4. Lightweight playback progress mirror for horizontal timeline scrubbing
                           setInterval(function() {
                             try {
                               var v = document.querySelector('video');
                               if (v && window.DxCarYtBridge) {
-                                enforcePlayer720pOnce();
                                 window.DxCarYtBridge.onVideoProgress(
                                   v.currentTime || 0,
-                                  (v.duration && isFinite(v.duration)) ? v.duration : 0,
-                                  !v.paused && !v.ended
+                                  (v.duration && isFinite(v.duration)) ? v.duration : 0
                                 );
-                                if (!v.__dxcarBound) {
-                                  v.__dxcarBound = true;
-                                  v.addEventListener('play', function() {
-                                    window.__dxcarLastActivePlayMs = Date.now();
-                                    enforcePlayer720pOnce();
-                                  });
-                                  v.addEventListener('playing', function() {
-                                    window.__dxcarLastActivePlayMs = Date.now();
-                                  });
-                                  v.addEventListener('pause', function() {
-                                    // If Android Launcher is in background (Google Maps / Browser / Stock Launcher)
-                                    // and pause was NOT triggered by user or external media AudioFocus, resume immediately!
-                                    if (!v.ended && !window.__dxcarUserPaused && window.DxCarYtBridge && window.DxCarYtBridge.shouldKeepPlayingInBackground()) {
-                                      setTimeout(function() {
-                                        if (v.paused && !v.ended && !window.__dxcarUserPaused) {
-                                          v.play().catch(function(){});
-                                        }
-                                      }, 90);
-                                    }
-                                  });
-                                }
                               }
                             } catch (err) {}
-                          }, 280);
+                          }, 350);
                         })();
                     """.trimIndent()
 
@@ -2371,31 +2237,14 @@ fun EmbeddedYoutubePlayerCard(
                                 }
 
                                 @JavascriptInterface
-                                fun onVideoProgress(cur: Float, dur: Float, playing: Boolean) {
-                                    videoCurrentSec = cur
-                                    videoDurationSec = dur
-                                    if (isYoutubePlayingNow != playing) {
-                                        mainHandler.post { isYoutubePlayingNow = playing }
-                                    }
-                                }
-
-                                @JavascriptInterface
-                                fun shouldKeepPlayingInBackground(): Boolean {
-                                    val dxApp = com.dxcar.launcher.DxCarApp.instance
-                                    return dxApp != null && !dxApp.isLauncherForeground.value
+                                fun onVideoProgress(cur: Float, dur: Float) {
+                                    videoTimeHolder[0] = cur
+                                    videoTimeHolder[1] = dur
                                 }
                             },
                             "DxCarYtBridge"
                         )
                         webViewClient = object : WebViewClient() {
-                            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                                super.onPageStarted(view, url, favicon)
-                                view?.evaluateJavascript(bootstrapYoutubeEnhancementsJs, null)
-                                if (isRightPaneFullscreen) {
-                                    view?.evaluateJavascript(applyRightPaneFsCssJs, null)
-                                }
-                            }
-
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 view?.evaluateJavascript(bootstrapYoutubeEnhancementsJs, null)
@@ -2439,7 +2288,7 @@ fun EmbeddedYoutubePlayerCard(
             )
         }
 
-        // Fullscreen Gesture Feedback Overlays (Left -10s / Center Play-Pause-Scrub / Right +10s / Top Hold Speed)
+        // Fullscreen Gesture Feedback Overlays (Left -10s / Center Scrub / Right +10s / Top Hold Speed)
         val activeHud = gestureHud
         AnimatedVisibility(
             visible = isRightPaneFullscreen && activeHud != null,

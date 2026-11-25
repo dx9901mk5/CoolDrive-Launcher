@@ -124,6 +124,6 @@ class CommsProtocolTest {
         val offlineBase = MapStyleFactory.buildOfflineCompatibleGoogleStyleJson("m")
         assertTrue(onlineWithTraffic.contains("lyrs=m&hl=zh-TW&gl=TW&scale=2"))
         assertTrue(offlineBase.contains("lyrs=m&hl=zh-TW&gl=TW&scale=2"))
-        assertTrue(onlineWithTraffic.contains("lyrs=traffic&hl=zh-TW&gl=TW&scale=2"))
+        assertTrue(onlineWithTraffic.contains("lyrs=m,traffic&hl=zh-TW&gl=TW&scale=2"))
     }
 }

@@ -4,8 +4,10 @@ import com.dxcar.launcher.data.MapEngineStyle
 
 /**
  * Zero-API-Key map styles for MapLibre OpenGL:
- * - Base raster tiles (lyrs=m or lyrs=y) are decoupled from the transparent traffic overlay (lyrs=traffic),
- *   guaranteeing 100% URL parity with OfflineMapManager's cached tiles in mbgl-offline.db!
+ * - Always mounts canonical offline-cached base raster source (`lyrs=m` or `lyrs=y`) underneath so
+ *   offline tiles in `mbgl-offline.db` render 100% when without internet.
+ * - When `trafficEnabled == true`, mounts live composite Google Traffic tiles (`lyrs=m,traffic` or
+ *   `lyrs=y,traffic`) right above it so live green/orange/red road traffic renders cleanly online!
  */
 object MapStyleFactory {
 
@@ -65,15 +67,16 @@ object MapStyleFactory {
         baseLyrs: String,
         includeTrafficOverlay: Boolean
     ): String {
+        val liveTrafficLyrs = "$baseLyrs,traffic"
         val trafficSourceBlock = if (includeTrafficOverlay) {
             """,
             "gmaps-traffic": {
               "type": "raster",
               "tiles": [
-                "https://mt0.google.com/vt/lyrs=traffic&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
-                "https://mt1.google.com/vt/lyrs=traffic&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
-                "https://mt2.google.com/vt/lyrs=traffic&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
-                "https://mt3.google.com/vt/lyrs=traffic&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}"
+                "https://mt0.google.com/vt/lyrs=$liveTrafficLyrs&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
+                "https://mt1.google.com/vt/lyrs=$liveTrafficLyrs&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
+                "https://mt2.google.com/vt/lyrs=$liveTrafficLyrs&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
+                "https://mt3.google.com/vt/lyrs=$liveTrafficLyrs&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}"
               ],
               "tileSize": 256
             }"""
@@ -87,7 +90,7 @@ object MapStyleFactory {
               "id": "gmaps-traffic-layer",
               "type": "raster",
               "source": "gmaps-traffic",
-              "minzoom": 5,
+              "minzoom": 0,
               "maxzoom": 20
             }"""
         } else {
