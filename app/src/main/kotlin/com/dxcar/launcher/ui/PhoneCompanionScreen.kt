@@ -54,12 +54,15 @@ import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.BluetoothConnected
+import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DirectionsCar
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Mouse
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.OpenInFull
@@ -129,6 +132,7 @@ import com.dxcar.launcher.comms.TouchpadAction
 import com.dxcar.launcher.data.AppLanguage
 import com.dxcar.launcher.data.DeviceFormFactor
 import com.dxcar.launcher.data.LauncherConfig
+import com.dxcar.launcher.data.ThemeMode
 import com.dxcar.launcher.i18n.DxCarI18n
 import com.dxcar.launcher.i18n.DxCarI18n.str
 import com.dxcar.launcher.i18n.LocalAppLanguage
@@ -206,6 +210,8 @@ fun PhoneCompanionScreen(
     onToggleSyncAllApps: (Boolean) -> Unit,
     onChangeTouchpadSensitivity: (Float) -> Unit = {},
     onSelectLanguage: (AppLanguage) -> Unit = {},
+    isNight: Boolean = false,
+    onCycleThemeMode: () -> Unit = {},
     onRequestRuntimePermissions: () -> Unit,
     onReconnectBridge: () -> Unit,
     onSwitchToAiBoxMode: () -> Unit
@@ -403,6 +409,43 @@ fun PhoneCompanionScreen(
                                         "権限設定 ($grantedPerms/$totalPerms · 開く)"
                                     )
                                 },
+                                color = colors.primaryText,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    val themeLabel = when (config.themeMode) {
+                        ThemeMode.FORCE_NIGHT -> str("主題：深色", "主题：深色", "Theme: Dark", "テーマ：ダーク")
+                        ThemeMode.FORCE_DAY -> str("主題：淺色", "主题：浅色", "Theme: Light", "テーマ：ライト")
+                        else -> str("主題：跟隨系統", "主题：跟随系统", "Theme: System", "テーマ：システム")
+                    }
+                    val themeIcon = when (config.themeMode) {
+                        ThemeMode.FORCE_NIGHT -> Icons.Rounded.DarkMode
+                        ThemeMode.FORCE_DAY -> Icons.Rounded.LightMode
+                        else -> if (isNight) Icons.Rounded.DarkMode else Icons.Rounded.BrightnessAuto
+                    }
+                    Surface(
+                        color = colors.cardSurfaceElevated,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .border(1.2.dp, colors.accent.copy(alpha = 0.65f), RoundedCornerShape(14.dp))
+                            .clickable { onCycleThemeMode() }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = themeIcon,
+                                contentDescription = themeLabel,
+                                tint = colors.accent,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = themeLabel,
                                 color = colors.primaryText,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold

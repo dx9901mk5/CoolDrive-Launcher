@@ -23,6 +23,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -181,7 +182,10 @@ fun DxCarRootScreen(
             DeviceFormFactor.shouldAutoDefaultToPhone(context, configuration, config)
         ) {
             app.preferences.update {
-                it.copy(deviceRole = DeviceRole.PHONE_COMPANION)
+                it.copy(
+                    deviceRole = DeviceRole.PHONE_COMPANION,
+                    themeMode = if (it.themeMode == ThemeMode.AUTO_TIME) ThemeMode.FOLLOW_SYSTEM else it.themeMode
+                )
             }
         }
     }
@@ -377,9 +381,17 @@ fun DxCarRootScreen(
         )
     }
 
-    val systemIsDark = (configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    val systemIsDark = isSystemInDarkTheme()
+    val effectiveThemeConfig = if (
+        config.deviceRole == DeviceRole.PHONE_COMPANION &&
+        (config.themeMode == ThemeMode.AUTO_TIME || config.themeMode == ThemeMode.AUTO_SUNRISE_SUNSET)
+    ) {
+        config.copy(themeMode = ThemeMode.FOLLOW_SYSTEM)
+    } else {
+        config
+    }
     val isNight = DayNightEngine.isNightNow(
-        config = config,
+        config = effectiveThemeConfig,
         now = sysStatus.now,
         systemIsDark = systemIsDark
     )
@@ -599,6 +611,17 @@ fun DxCarRootScreen(
                 },
                 onSelectLanguage = { lang ->
                     app.preferences.update { it.copy(appLanguage = lang) }
+                },
+                isNight = isNight,
+                onCycleThemeMode = {
+                    app.preferences.update { cur ->
+                        val nextMode = when (cur.themeMode) {
+                            ThemeMode.FOLLOW_SYSTEM, ThemeMode.AUTO_TIME, ThemeMode.AUTO_SUNRISE_SUNSET -> ThemeMode.FORCE_NIGHT
+                            ThemeMode.FORCE_NIGHT -> ThemeMode.FORCE_DAY
+                            ThemeMode.FORCE_DAY -> ThemeMode.FOLLOW_SYSTEM
+                        }
+                        cur.copy(themeMode = nextMode)
+                    }
                 },
                 onRequestRuntimePermissions = onRequestRuntimePermissions,
                 onReconnectBridge = { BluetoothCompanionService.forceReconnect(context) },
