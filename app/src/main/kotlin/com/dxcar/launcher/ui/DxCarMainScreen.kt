@@ -105,9 +105,11 @@ import com.dxcar.launcher.map.NavSearchResult
 import com.dxcar.launcher.map.OfflineMapUiState
 import com.dxcar.launcher.map.OfflineRegionPreset
 import com.dxcar.launcher.overlay.Cursor3DStateHolder
-import com.dxcar.launcher.overlay.Interactive3DCursorOverlay
+import com.dxcar.launcher.overlay.ExtraLargeTutorialModal
+import com.dxcar.launcher.overlay.Floating3DControlBar
 import com.dxcar.launcher.overlay.PersistentDockOverlayService
 import com.dxcar.launcher.overlay.RemoteCarMousePointerOverlay
+import com.dxcar.launcher.overlay.tutorial3DControlSteps
 import com.dxcar.launcher.system.InstalledAppInfo
 import com.dxcar.launcher.system.PermissionHelper
 import com.dxcar.launcher.system.SystemStatusMonitor
@@ -171,6 +173,7 @@ fun DxCarRootScreen(
     val billingState by app.billingTrialManager.state.collectAsState()
     val cursor3DActive by Cursor3DStateHolder.active.collectAsState()
     val cursor3DTutorial by Cursor3DStateHolder.showTutorial.collectAsState()
+    val isLauncherFg by app.isLauncherForeground.collectAsState()
     val remoteCursor by RemoteTouchpadController.cursorState.collectAsState()
     val remoteSwapSeq by RemoteTouchpadController.swapHomePanesSeq.collectAsState()
 
@@ -207,6 +210,10 @@ fun DxCarRootScreen(
 
     fun handleInAppBack(): Boolean {
         return when {
+            cursor3DTutorial -> {
+                Cursor3DStateHolder.closeTutorial()
+                true
+            }
             activeSettingsTutorial != null -> {
                 activeSettingsTutorial = null
                 true
@@ -244,7 +251,8 @@ fun DxCarRootScreen(
     }
 
     androidx.activity.compose.BackHandler(
-        enabled = activeSettingsTutorial != null ||
+        enabled = cursor3DTutorial ||
+            activeSettingsTutorial != null ||
             showSettingsPermissionsSheet ||
             showQuickControlCenter ||
             showNotificationCenter ||
@@ -253,6 +261,17 @@ fun DxCarRootScreen(
             destination != LauncherDestination.DASHBOARD_SPLIT
     ) {
         handleInAppBack()
+    }
+
+    // Track whether DX-Car's built-in MapLibre map is currently visible so Floating3DControlBar
+    // can directly animate MapLibre 3D tilt/zoom at 60fps without needing Accessibility permission.
+    LaunchedEffect(isLauncherFg, destination, currentDashboardPage, config.homeMapDisplayMode, config.deviceRole) {
+        val hasBuiltinMapVisible = isLauncherFg &&
+            config.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
+            (destination == LauncherDestination.FULLSCREEN_MAP ||
+                (destination == LauncherDestination.DASHBOARD_SPLIT &&
+                    (currentDashboardPage == 1 || config.homeMapDisplayMode == HomeMapDisplayMode.BUILTIN_LIVE_MAP)))
+        Cursor3DStateHolder.setBuiltinMapActive(hasBuiltinMapVisible)
     }
     var latestMapCardRect by remember { mutableStateOf<Rect?>(null) }
     var gestureHudText by remember { mutableStateOf<String?>(null) }
@@ -425,7 +444,7 @@ fun DxCarRootScreen(
     }
 
     fun toggle3DPointerGlobal() {
-        if (Settings.canDrawOverlays(context)) {
+        if (Settings.canDrawOverlays(context) && !DeviceFormFactor.isCompactPhoneScreen(configuration)) {
             PersistentDockOverlayService.toggle3DCursor(context)
         } else {
             Cursor3DStateHolder.toggle()
@@ -656,7 +675,7 @@ fun DxCarRootScreen(
                     unreadCount = unreadCount,
                     pinnedSlots = dockSlots,
                     rightHandDrive = config.rightHandDrive,
-                    is3DCursorActive = false,
+                    is3DCursorActive = cursor3DActive,
                     onToggleAppDrawer = {
                         destination = if (destination == LauncherDestination.APP_DRAWER) {
                             LauncherDestination.DASHBOARD_SPLIT
@@ -685,7 +704,7 @@ fun DxCarRootScreen(
                         }
                     },
                     onNotificationsClick = { showNotificationCenter = !showNotificationCenter },
-                    onToggle3DCursor = null,
+                    onToggle3DCursor = ::toggle3DPointerGlobal,
                     onVoiceNavClick = {
                         destination = LauncherDestination.DASHBOARD_SPLIT
                         onStartGeminiVoiceNav()
@@ -1629,7 +1648,47 @@ fun DxCarRootScreen(
                 )
             }
 
-            // Fallback in-app Remote Mouse Cursor when SYSTEM_ALERT_WINDOW isn't enabled yet
+            // Fallback in-app Non-Blocking Floating 3D Control Bar when system overlay window isn't attached
+            val hasSystem3DWindow by PersistentDockOverlayService.is3DWindowAttached.collectAsState()
+            if (!hasSystem3DWindow && cursor3DActive) {
+                var inAppBarOffsetX by remember { mutableStateOf(0f) }
+                var inAppBarOffsetY by remember { mutableStateOf(0f) }
+                val maxHalfW = (dm.widthPixels * 0.42f).coerceAtLeast(40f)
+                val maxDownY = (dm.heightPixels * 0.72f).coerceAtLeast(80f)
+                Floating3DControlBar(
+                    onOpenTutorial = { Cursor3DStateHolder.openTutorial() },
+                    onExit3DMode = { Cursor3DStateHolder.setActive(false) },
+                    onDragDelta = { dx, dy ->
+                        inAppBarOffsetX = (inAppBarOffsetX + dx).coerceIn(-maxHalfW, maxHalfW)
+                        inAppBarOffsetY = (inAppBarOffsetY + dy).coerceIn(0f, maxDownY)
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 14.dp)
+                        .offset { IntOffset(inAppBarOffsetX.roundToInt(), inAppBarOffsetY.roundToInt()) }
+                        .zIndex(45f)
+                )
+                if (cursor3DTutorial) {
+                    Box(modifier = Modifier.fillMaxSize().zIndex(50f)) {
+                        ExtraLargeTutorialModal(
+                            title = str(
+                                "🧊 3D 雙指快捷懸浮條 · 操作教學",
+                                "🧊 3D 双指快捷悬浮条 · 操作教程",
+                                "🧊 Floating 3D Control Bar · Guide",
+                                "🧊 3D 操作ツールバー · 操作ガイド"
+                            ),
+                            steps = tutorial3DControlSteps(),
+                            highlightNote = str(
+                                "💡 內建地圖免無障礙即可直接調整 3D／縮放；若要在原版 Google 地圖等外部導航使用，請在設定最上方「權限需求」開啟【顯示在其他應用程式上層】與【無障礙服務】。",
+                                "💡 内置地图免无障碍即可直接调整 3D／缩放；若要在原版 Google 地图等外部导航使用，请在设置最上方「权限需求」开启【显示在其他应用上层】与【无障碍服务】。",
+                                "💡 Works directly on the built-in map right away; enable [Display Over Other Apps] and [Accessibility Service] in Settings > Permissions to control external Google Maps.",
+                                "💡 内蔵マップでは追加権限なしで動作します。Google マップ等の外部ナビで使う場合は、設定上部の「権限設定」から【重ねて表示】と【ユーザー補助】を有効にしてください。"
+                            ),
+                            onClose = { Cursor3DStateHolder.closeTutorial() }
+                        )
+                    }
+                }
+            }
             if (!Settings.canDrawOverlays(context)) {
                 RemoteCarMousePointerOverlay(cursorState = remoteCursor)
             }

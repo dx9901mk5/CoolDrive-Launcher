@@ -162,7 +162,7 @@ fun CoolwalkDock(
                 if (onToggle3DCursor != null) {
                     SmallDockUtilityIcon(
                         icon = Icons.Rounded.ViewInAr,
-                        contentDescription = str("開啟 3D 類滑鼠指標", "开启 3D 类鼠标指针", "Toggle 3D cursor", "3Dポインター切替"),
+                        contentDescription = str("開啟 3D 雙指懸浮條", "开启 3D 双指悬浮条", "Toggle 3D bar", "3Dバー切替"),
                         tint = if (is3DCursorActive) Color(0xFF22C55E) else colors.accent,
                         onClick = onToggle3DCursor
                     )
@@ -351,7 +351,7 @@ fun CoolwalkDock(
                             if (onToggle3DCursor != null) {
                                 SmallDockUtilityIcon(
                                     icon = Icons.Rounded.ViewInAr,
-                                    contentDescription = str("開啟 3D 俯瞰類滑鼠指標", "开启 3D 俯瞰类鼠标指针", "Toggle 3D cursor", "3Dポインター切替"),
+                                    contentDescription = str("開啟 3D 雙指懸浮條", "开启 3D 双指悬浮条", "Toggle 3D bar", "3Dバー切替"),
                                     tint = if (is3DCursorActive) Color(0xFF22C55E) else colors.accent,
                                     onClick = onToggle3DCursor
                                 )

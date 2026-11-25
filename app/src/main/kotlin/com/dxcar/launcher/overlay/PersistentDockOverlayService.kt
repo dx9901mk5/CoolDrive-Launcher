@@ -128,7 +128,7 @@ class PersistentDockOverlayService :
     private var dockView: View? = null
     private var bannerView: ComposeView? = null
     private var planCPanelView: ComposeView? = null
-    private var cursor3DView: ComposeView? = null
+    private var cursor3DView: View? = null
     private var remoteMouseView: ComposeView? = null
     private var ytHandoffView: ComposeView? = null
 
@@ -150,6 +150,19 @@ class PersistentDockOverlayService :
     private var lastRawX = 0f
     @Volatile
     private var lastRawY = 0f
+
+    @Volatile
+    private var cursor3DRawX = 0f
+    @Volatile
+    private var cursor3DRawY = 0f
+    private var cursor3DDragAnchorSet = false
+    private var cursor3DDragStartRawX = 0f
+    private var cursor3DDragStartRawY = 0f
+    private var cursor3DDragStartWinX = 0
+    private var cursor3DDragStartWinY = 0
+    private var cursor3DPosInitialized = false
+    private var cursor3DPosX = 0
+    private var cursor3DPosY = 0
 
     override fun onCreate() {
         super.onCreate()
@@ -178,6 +191,7 @@ class PersistentDockOverlayService :
         setupDockWindow(app)
         setupBannerWindow(app)
         setupPlanCPanelWindow(app)
+        setupCursor3DWindow(app)
         setupRemoteMouseWindow(app)
         setupYoutubeHandoffWindow(app)
         observeVisibilityAndLayout(app)
@@ -226,6 +240,7 @@ class PersistentDockOverlayService :
         cursor3DView = null
         remoteMouseView = null
         ytHandoffView = null
+        _is3DWindowAttached.value = false
         viewModelStore.clear()
     }
 
@@ -431,7 +446,7 @@ class PersistentDockOverlayService :
                                 rightHandDrive = config.rightHandDrive,
                                 isOverlayMode = true,
                                 isOverlayPinnedOpen = pinnedOpen,
-                                is3DCursorActive = false,
+                                is3DCursorActive = cursor3DOn,
                                 onToggleAppDrawer = { bringDxCarToFront(MainActivity.EXTRA_OPEN_DRAWER) },
                                 onGoDashboard = {
                                     if (config.overlayAutoCollapseEnabled && !pinnedOpen) {
@@ -515,7 +530,12 @@ class PersistentDockOverlayService :
                                         ).show()
                                     }
                                 },
-                                onToggle3DCursor = null,
+                                onToggle3DCursor = {
+                                    val nowOn = Cursor3DStateHolder.toggle()
+                                    if (nowOn && config.overlayAutoCollapseEnabled && !pinnedOpen) {
+                                        isCollapsed.value = true
+                                    }
+                                },
                                 onVoiceNavClick = {
                                     if (config.overlayAutoCollapseEnabled && !pinnedOpen) {
                                         isCollapsed.value = true
@@ -563,10 +583,7 @@ class PersistentDockOverlayService :
     }
 
     private fun setupCursor3DWindow(app: DxCarApp) {
-        val view = ComposeView(this).apply {
-            setViewTreeLifecycleOwner(this@PersistentDockOverlayService)
-            setViewTreeSavedStateRegistryOwner(this@PersistentDockOverlayService)
-            setViewTreeViewModelStoreOwner(this@PersistentDockOverlayService)
+        val composeView = ComposeView(this).apply {
             setContent {
                 val config by app.preferences.config.collectAsState()
                 val sysStatus by app.systemStatusMonitor.status.collectAsState()
@@ -581,36 +598,140 @@ class PersistentDockOverlayService :
                     accentIndex = config.accentColorIndex,
                     stylePreset = config.stylePreset
                 ) {
-                    Interactive3DCursorOverlay(
-                        showTutorial = showTut,
-                        onOpenTutorial = { Cursor3DStateHolder.openTutorial() },
-                        onCloseTutorial = { Cursor3DStateHolder.closeTutorial() },
-                        onExit3DMode = { Cursor3DStateHolder.setActive(false) },
-                        onSetWindowPassThrough = { pass -> setCursor3DPassThrough(pass) }
-                    )
+                    if (showTut) {
+                        ExtraLargeTutorialModal(
+                            title = com.dxcar.launcher.i18n.DxCarI18n.str(
+                                "🧊 3D 雙指快捷懸浮條 · 操作教學",
+                                "🧊 3D 双指快捷悬浮条 · 操作教程",
+                                "🧊 Floating 3D Control Bar · Guide",
+                                "🧊 3D 操作ツールバー · 操作ガイド"
+                            ),
+                            steps = tutorial3DControlSteps(),
+                            highlightNote = com.dxcar.launcher.i18n.DxCarI18n.str(
+                                "💡 內建地圖免無障礙即可直接調整 3D／縮放；若要在原版 Google 地圖等外部導航使用，請在設定最上方「權限需求」開啟【無障礙服務】。",
+                                "💡 内置地图免无障碍即可直接调整 3D／缩放；若要在原版 Google 地图等外部导航使用，请在设置最上方「权限需求」开启【无障碍服务】。",
+                                "💡 Works directly on the built-in map with no extra permission; enable [Accessibility Service] in Settings > Permissions to control external Google Maps.",
+                                "💡 内蔵マップでは追加権限なしで即座に動作します。Google マップ等の外部ナビで使う場合は、設定上部の「権限設定」から【ユーザー補助サービス】を有効にしてください。"
+                            ),
+                            onClose = { Cursor3DStateHolder.closeTutorial() }
+                        )
+                    } else {
+                        Floating3DControlBar(
+                            onOpenTutorial = { Cursor3DStateHolder.openTutorial() },
+                            onExit3DMode = { Cursor3DStateHolder.setActive(false) },
+                            onDragDelta = { _, _ -> updateCursor3DDragPosition() },
+                            resolveExternalGestureAnchor = { resolveSafeExternalGestureAnchor() }
+                        )
+                    }
                 }
             }
         }
+
+        val container = object : FrameLayout(this) {
+            override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
+                if (ev != null) {
+                    cursor3DRawX = ev.rawX
+                    cursor3DRawY = ev.rawY
+                    when (ev.actionMasked) {
+                        MotionEvent.ACTION_DOWN,
+                        MotionEvent.ACTION_UP,
+                        MotionEvent.ACTION_CANCEL -> {
+                            cursor3DDragAnchorSet = false
+                        }
+                    }
+                }
+                return super.dispatchTouchEvent(ev)
+            }
+        }.apply {
+            setViewTreeLifecycleOwner(this@PersistentDockOverlayService)
+            setViewTreeSavedStateRegistryOwner(this@PersistentDockOverlayService)
+            setViewTreeViewModelStoreOwner(this@PersistentDockOverlayService)
+            addView(composeView)
+        }
+
         val params = createOverlayParams(
-            width = WindowManager.LayoutParams.MATCH_PARENT,
-            height = WindowManager.LayoutParams.MATCH_PARENT,
+            width = WindowManager.LayoutParams.WRAP_CONTENT,
+            height = WindowManager.LayoutParams.WRAP_CONTENT,
             gravity = Gravity.TOP or Gravity.START
         )
-        cursor3DView = view
+        cursor3DView = container
         cursor3DParams = params
-        view.visibility = View.GONE
-        runCatching { windowManager.addView(view, params) }
+        container.visibility = View.GONE
+        val added = runCatching { windowManager.addView(container, params) }.isSuccess
+        _is3DWindowAttached.value = added
     }
 
-    private fun setCursor3DPassThrough(passThrough: Boolean) {
+    private fun updateCursor3DDragPosition() {
         val view = cursor3DView ?: return
         val params = cursor3DParams ?: return
-        params.flags = if (passThrough) {
-            params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-        } else {
-            params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        if (Cursor3DStateHolder.showTutorial.value) return
+        val metrics = metricsFlow.value
+        val estW = view.width.takeIf { it > 0 } ?: (290f * metrics.density).roundToInt()
+        val estH = view.height.takeIf { it > 0 } ?: (104f * metrics.density).roundToInt()
+        val maxX = (metrics.widthPx - estW).coerceAtLeast(0)
+        val maxY = (metrics.heightPx - estH).coerceAtLeast(0)
+
+        if (!cursor3DDragAnchorSet) {
+            cursor3DDragStartRawX = cursor3DRawX
+            cursor3DDragStartRawY = cursor3DRawY
+            cursor3DDragStartWinX = params.x
+            cursor3DDragStartWinY = params.y
+            cursor3DDragAnchorSet = true
         }
+        val nextX = (cursor3DDragStartWinX + (cursor3DRawX - cursor3DDragStartRawX)).roundToInt().coerceIn(0, maxX)
+        val nextY = (cursor3DDragStartWinY + (cursor3DRawY - cursor3DDragStartRawY)).roundToInt().coerceIn(0, maxY)
+        cursor3DPosInitialized = true
+        cursor3DPosX = nextX
+        cursor3DPosY = nextY
+        params.x = nextX
+        params.y = nextY
         runCatching { windowManager.updateViewLayout(view, params) }
+    }
+
+    private fun clampCursor3DPosition(metrics: ScreenMetrics): Pair<Int, Int> {
+        val view = cursor3DView
+        val estW = view?.width?.takeIf { it > 0 } ?: (290f * metrics.density).roundToInt()
+        val estH = view?.height?.takeIf { it > 0 } ?: (104f * metrics.density).roundToInt()
+        val maxX = (metrics.widthPx - estW).coerceAtLeast(0)
+        val maxY = (metrics.heightPx - estH).coerceAtLeast(0)
+        if (!cursor3DPosInitialized) {
+            cursor3DPosX = ((metrics.widthPx - estW) / 2).coerceIn(0, maxX)
+            cursor3DPosY = (20f * metrics.density).roundToInt().coerceIn(0, maxY)
+            cursor3DPosInitialized = true
+        } else {
+            cursor3DPosX = cursor3DPosX.coerceIn(0, maxX)
+            cursor3DPosY = cursor3DPosY.coerceIn(0, maxY)
+        }
+        return cursor3DPosX to cursor3DPosY
+    }
+
+    /**
+     * Picks a screen-space target point for 2-finger Accessibility gestures that is GUARANTEED
+     * to avoid the compact floating 3D bar's current window rectangle.
+     */
+    private fun resolveSafeExternalGestureAnchor(): Pair<Float, Float> {
+        val metrics = metricsFlow.value
+        val w = metrics.widthPx.toFloat().coerceAtLeast(400f)
+        val h = metrics.heightPx.toFloat().coerceAtLeast(300f)
+        val defaultX = w * 0.50f
+        var targetY = h * 0.50f
+
+        val view = cursor3DView
+        val params = cursor3DParams
+        if (view != null && params != null && view.visibility == View.VISIBLE) {
+            val barTop = params.y.toFloat()
+            val barBottom = barTop + (view.height.takeIf { it > 0 }?.toFloat() ?: (104f * metrics.density))
+            val margin = 72f * metrics.density
+            if (targetY in (barTop - margin)..(barBottom + margin)) {
+                val barCenterY = (barTop + barBottom) * 0.5f
+                targetY = if (barCenterY < h * 0.50f) {
+                    (barBottom + margin).coerceAtLeast(h * 0.62f).coerceAtMost(h * 0.74f)
+                } else {
+                    (barTop - margin).coerceAtMost(h * 0.38f).coerceAtLeast(h * 0.28f)
+                }
+            }
+        }
+        return defaultX to targetY
     }
 
     private fun setupRemoteMouseWindow(app: DxCarApp) {
@@ -1102,13 +1223,35 @@ class PersistentDockOverlayService :
             }
         }
 
-        // Observe 3D Mouse-Like Pointer Overlay visibility
+        // Observe Non-Blocking 3D Control Bar visibility & responsive WRAP_CONTENT / Tutorial sizing
         lifecycleScope.launch {
-            Cursor3DStateHolder.active.collect { active ->
-                cursor3DView?.visibility = if (active) View.VISIBLE else View.GONE
+            combine(
+                Cursor3DStateHolder.active,
+                Cursor3DStateHolder.showTutorial,
+                metricsFlow
+            ) { active, showTut, metrics ->
+                Triple(active, showTut, metrics)
+            }.collect { (active, showTut, metrics) ->
+                val view = cursor3DView ?: return@collect
+                val params = cursor3DParams ?: return@collect
                 if (!active) {
-                    setCursor3DPassThrough(false)
+                    view.visibility = View.GONE
+                    return@collect
                 }
+                view.visibility = View.VISIBLE
+                if (showTut) {
+                    params.width = WindowManager.LayoutParams.MATCH_PARENT
+                    params.height = WindowManager.LayoutParams.MATCH_PARENT
+                    params.x = 0
+                    params.y = 0
+                } else {
+                    val (safeX, safeY) = clampCursor3DPosition(metrics)
+                    params.width = WindowManager.LayoutParams.WRAP_CONTENT
+                    params.height = WindowManager.LayoutParams.WRAP_CONTENT
+                    params.x = safeX
+                    params.y = safeY
+                }
+                runCatching { windowManager.updateViewLayout(view, params) }
             }
         }
 
@@ -1254,7 +1397,7 @@ class PersistentDockOverlayService :
         val notif: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("DX-Car Launcher 常駐懸浮與遠端觸控運作中")
-            .setContentText("支援跨啟動器常駐 Dock、3D 類滑鼠指標與來電訊息橫幅")
+            .setContentText("支援跨啟動器常駐 Dock、3D 雙指懸浮條與來電訊息橫幅")
             .setContentIntent(pi)
             .setOngoing(true)
             .build()
@@ -1283,6 +1426,8 @@ class PersistentDockOverlayService :
         const val ACTION_TOGGLE_3D_CURSOR = "com.dxcar.launcher.overlay.TOGGLE_3D_CURSOR"
 
         private val planCPanelRequested = MutableStateFlow(false)
+        private val _is3DWindowAttached = MutableStateFlow(false)
+        val is3DWindowAttached: kotlinx.coroutines.flow.StateFlow<Boolean> = _is3DWindowAttached
 
         fun start(context: Context) {
             if (!Settings.canDrawOverlays(context)) return

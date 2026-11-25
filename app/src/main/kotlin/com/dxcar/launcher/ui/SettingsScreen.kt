@@ -109,6 +109,7 @@ import com.dxcar.launcher.map.OfflineMapManager
 import com.dxcar.launcher.map.OfflineMapUiState
 import com.dxcar.launcher.map.OfflineRegionPreset
 import com.dxcar.launcher.overlay.ExtraLargeTutorialModal
+import com.dxcar.launcher.overlay.tutorial3DControlSteps
 import com.dxcar.launcher.system.AppCategory
 import com.dxcar.launcher.system.HomeLauncherInfo
 import com.dxcar.launcher.system.InstalledAppInfo
@@ -1295,6 +1296,47 @@ fun SettingsScreen(
                             checked = config.is24HourClock,
                             onCheckedChange = { checked -> onUpdateConfig { it.copy(is24HourClock = checked) } }
                         )
+
+                        // Non-blocking 3D Control Bar Tutorial Row
+                        Surface(
+                            color = colors.cardSurfaceElevated,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text(
+                                        str(
+                                            "🧊 Dock「3D 雙指懸浮條」操作說明",
+                                            "🧊 Dock「3D 双指悬浮条」操作说明",
+                                            "🧊 Dock Floating 3D Control Bar Guide",
+                                            "🧊 ドック「3D 操作ツールバー」ガイド"
+                                        ),
+                                        color = colors.primaryText,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        str(
+                                            "不擋畫面 4 鍵浮動條（3D仰角／2D平視／＋／－），支援長按微調與任意拖曳，絕不卡住畫面",
+                                            "不挡画面 4 键浮动条（3D仰角／2D平视／＋／－），支持长按微调与任意拖拽，绝不卡住画面",
+                                            "Non-blocking 4-button floating bar (3D Tilt / 2D Flat / + / −) with hold-to-repeat & drag, never traps screen",
+                                            "画面を塞がない 4 ボタン浮動バー（3D視点／2D平面／拡大／縮小）。長押し微調整・移動対応で安心操作"
+                                        ),
+                                        color = colors.secondaryText,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                                TutorialPillButton(
+                                    label = str("教學", "教程", "Guide", "ガイド"),
+                                    onClick = { onActiveTutorialChange(CarSettingsTutorialTopic.CURSOR_3D) }
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -2506,48 +2548,17 @@ fun SettingsScreen(
             CarSettingsTutorialTopic.CURSOR_3D -> {
                 ExtraLargeTutorialModal(
                     title = str(
-                        "🧊 Dock「3D 俯瞰」類滑鼠指標 · 操作教學",
-                        "🧊 Dock「3D 俯瞰」类鼠标指针 · 操作教程",
-                        "🧊 Dock 3D Tilt & Mouse Pointer · Guide",
-                        "🧊 ドック「3D 俯瞰」ポインター · 操作ガイド"
+                        "🧊 Dock「3D 雙指懸浮條」· 操作教學",
+                        "🧊 Dock「3D 双指悬浮条」· 操作教程",
+                        "🧊 Dock Floating 3D Control Bar · Guide",
+                        "🧊 ドック「3D 操作ツールバー」· 操作ガイド"
                     ),
-                    steps = listOf(
-                        str(
-                            "點擊 Dock 上的【3D】圖示後，畫面會出現一個「3D 立體類滑鼠指標」跟著您的手指移動。",
-                            "点击 Dock 上的【3D】图标后，画面会出现一个「3D 立体类鼠标指针」跟着您的手指移动。",
-                            "Tap the [3D] icon on the Dock to summon a 3D mouse-like pointer that follows your finger.",
-                            "ドックの【3D】アイコンをタップすると、指に追従する「3D マウスポインター」が表示されます。"
-                        ),
-                        str(
-                            "一般點擊或直接滑動手指時：維持「單指觸控」（附藍色光軌特效提示），可正常平移地圖或點擊按鈕。",
-                            "一般点击或直接滑动手指时：维持「单指触控」（附蓝色光轨特效提示），可正常平移地图或点击按钮。",
-                            "Tap or drag normally for standard 1-finger touch (with cyan light trail) to pan maps or tap buttons.",
-                            "通常のタップやスライドは「1本指タッチ」（青い軌跡エフェクト付き）として地図移動やボタン操作を行えます。"
-                        ),
-                        str(
-                            "長壓原處滿 2 秒（手指不要離開螢幕！）：游標外圈會亮起綠色十字光環，代表已進入「雙指模擬模式」。",
-                            "长按原处满 2 秒（手指不要离开屏幕！）：光标外圈会亮起绿色十字光环，代表已进入「双指模拟模式」。",
-                            "Hold still for 2 seconds without lifting your finger: a green crosshair halo lights up to indicate 2-Finger Simulation Mode.",
-                            "同じ場所を 2 秒間長押し（指を離さないでください！）：緑色の十字リングが点灯し「2本指シミュレートモード」に入ります。"
-                        ),
-                        str(
-                            "長壓滿 2 秒且手指不放開繼續移動：\n• 往左滑 ＝ 地圖縮小\n• 往右滑 ＝ 地圖放大\n• 往上／往下滑 ＝ 模擬雙指進入或退出 3D 建築俯瞰視角！",
-                            "长按满 2 秒且手指不放开继续移动：\n• 往左滑 ＝ 地图缩小\n• 往右滑 ＝ 地图放大\n• 往上／往下滑 ＝ 模拟双指进入或退出 3D 建筑俯瞰视角！",
-                            "While holding after 2 seconds, slide without lifting:\n• Slide Left = Zoom Out\n• Slide Right = Zoom In\n• Slide Up / Down = 2-Finger 3D Building Tilt / Back to 2D!",
-                            "2秒長押し後、指を離さずにスライド：\n• 左スライド ＝ ズームアウト\n• 右スライド ＝ ズームイン\n• 上／下スライド ＝ 3D 俯瞰視点切替／2D 復帰！"
-                        ),
-                        str(
-                            "手指一放開螢幕，就會自動變回一般「類滑鼠指標」；下次要縮放或切 3D 時，重新長壓 2 秒即可再次啟用。",
-                            "手指一放开屏幕，就会自动变回一般「类鼠标指针」；下次要缩放或切 3D 时，重新长按 2 秒即可再次启用。",
-                            "Lifting your finger resets back to normal pointer mode; hold 2 seconds again anytime to zoom or tilt.",
-                            "指を離すと自動的に通常ポインターへ戻ります。再度ズームや 3D 切替を行う際はもう一度 2 秒長押ししてください。"
-                        )
-                    ),
+                    steps = tutorial3DControlSteps(),
                     highlightNote = str(
-                        "💡 提醒：請先點設定最上方「權限設定」確認【顯示在其他應用程式上層】與【無障礙輔助服務】皆已開啟。",
-                        "💡 提醒：请先点设置最上方「权限需求」确认【显示在其他应用上层】与【无障碍辅助服务】均已开启。",
-                        "💡 Note: Ensure both [Display Over Other Apps] and [Accessibility Service] are enabled in Permissions at the top of Settings.",
-                        "💡 ヒント：設定上部の「権限設定」から【他のアプリの上に重ねて表示】と【ユーザー補助サービス】の両方が有効かご確認ください。"
+                        "💡 內建地圖免無障礙即可直接調整 3D／縮放；若要在原版 Google 地圖等外部導航使用，請點設定最上方「權限需求」開啟【顯示在其他應用程式上層】與【無障礙輔助服務】。",
+                        "💡 内置地图免无障碍即可直接调整 3D／缩放；若要在原版 Google 地图等外部导航使用，请点设置最上方「权限需求」开启【显示在其他应用上层】与【无障碍辅助服务】。",
+                        "💡 Works directly on the built-in map right away; enable [Display Over Other Apps] and [Accessibility Service] in Permissions at the top of Settings to control external Google Maps.",
+                        "💡 内蔵マップでは追加権限なしで動作します。Google マップ等の外部ナビで使う場合は、設定上部の「権限設定」から【重ねて表示】と【ユーザー補助サービス】を有効にしてください。"
                     ),
                     onClose = { onActiveTutorialChange(null) }
                 )

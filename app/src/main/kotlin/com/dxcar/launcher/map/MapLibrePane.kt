@@ -93,6 +93,8 @@ import com.dxcar.launcher.i18n.DxCarI18n
 import com.dxcar.launcher.i18n.DxCarI18n.str
 import com.dxcar.launcher.i18n.EffectiveLanguage
 import com.dxcar.launcher.i18n.LocalAppLanguage
+import com.dxcar.launcher.overlay.Cursor3DStateHolder
+import com.dxcar.launcher.overlay.Map3DAction
 import com.dxcar.launcher.theme.LocalDxCarColors
 import com.dxcar.launcher.ui.bouncyClickable
 import org.maplibre.android.camera.CameraPosition
@@ -156,6 +158,7 @@ fun LiveMapCard(
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
     var followVehicle by remember { mutableStateOf(true) }
     var currentZoom by remember { mutableDoubleStateOf(15.6) }
+    var manualTiltOverride by remember { mutableStateOf<Double?>(null) }
     var showLayerPicker by remember { mutableStateOf(false) }
     var showOfflineSheet by remember { mutableStateOf(false) }
     var showBuiltInSearchBox by remember { mutableStateOf(false) }
@@ -236,19 +239,48 @@ fun LiveMapCard(
         }
     }
 
-    LaunchedEffect(mapLibreMap, location, followVehicle, isPrimary, mapEngineStyle) {
+    LaunchedEffect(mapLibreMap, location, followVehicle, isPrimary, mapEngineStyle, manualTiltOverride) {
         val map = mapLibreMap ?: return@LaunchedEffect
         if (!followVehicle) return@LaunchedEffect
-        val tilt = if (mapEngineStyle == MapEngineStyle.OPENFREEMAP_VECTOR_3D ||
+        val defaultTilt = if (mapEngineStyle == MapEngineStyle.OPENFREEMAP_VECTOR_3D ||
             mapEngineStyle == MapEngineStyle.OPENFREEMAP_DARK
         ) 44.0 else 32.0
+        val resolvedTilt = manualTiltOverride ?: if (isPrimary || isFullscreen) defaultTilt else 18.0
         val cam = CameraPosition.Builder()
             .target(LatLng(location.latitude, location.longitude))
             .zoom(currentZoom)
             .bearing(if (location.speedKmh >= 4) location.bearingDeg.toDouble() else 0.0)
-            .tilt(if (isPrimary || isFullscreen) tilt else 18.0)
+            .tilt(resolvedTilt)
             .build()
         map.animateCamera(CameraUpdateFactory.newCameraPosition(cam), 700)
+    }
+
+    LaunchedEffect(mapLibreMap) {
+        val map = mapLibreMap ?: return@LaunchedEffect
+        Cursor3DStateHolder.builtinMapCommands.collect { action ->
+            val cur = map.cameraPosition
+            val target = cur.target ?: LatLng(location.latitude, location.longitude)
+            val nextZoom = when (action) {
+                Map3DAction.ZOOM_IN -> (cur.zoom + 1.0).coerceIn(3.0, 19.5)
+                Map3DAction.ZOOM_OUT -> (cur.zoom - 1.0).coerceIn(3.0, 19.5)
+                else -> cur.zoom
+            }
+            val nextTilt = when (action) {
+                Map3DAction.TILT_UP_3D -> (cur.tilt + 18.0).coerceIn(0.0, 60.0)
+                Map3DAction.TILT_DOWN_2D -> (cur.tilt - 18.0).coerceIn(0.0, 60.0)
+                else -> cur.tilt
+            }
+            currentZoom = nextZoom
+            if (action == Map3DAction.TILT_UP_3D || action == Map3DAction.TILT_DOWN_2D) {
+                manualTiltOverride = nextTilt
+            }
+            val updated = CameraPosition.Builder(cur)
+                .target(target)
+                .zoom(nextZoom)
+                .tilt(nextTilt)
+                .build()
+            map.animateCamera(CameraUpdateFactory.newCameraPosition(updated), 260)
+        }
     }
 
     Box(
