@@ -1,66 +1,118 @@
-# DX-Car Launcher
+<div align="center">
 
-**專為 Android AI Box 車機盒打造的 Android Auto (Coolwalk) 風格車機啟動器 ＋ 手機藍牙來電／訊息即時同步橋接**
+<img src="play_store_assets/feature_graphic_1024x500.png" alt="DX-Car Launcher Feature Graphic" width="100%" />
 
-[![Latest Release](https://img.shields.io/github/v/release/dx9901mk5/DX-Car-Launcher?label=Latest%20APK)](https://github.com/dx9901mk5/DX-Car-Launcher/releases/latest)
+# DX-Car Launcher (`v1.7.5`)
 
----
+**專為橫向平板與 Android AI Box 車機盒打造的 Android Auto (Coolwalk) 風格車載啟動器 ＋ 手機遠端觸控／來電訊息同步橋接**
 
-## ✨ 核心功能特色（最新 `v1.4.1`）
+**An Android Auto (Coolwalk) Inspired Car Launcher for Landscape Tablets & Android AI Box Head Units — with Smartphone Remote Touchpad & Live Call/Message Sync**
 
-### 1. 仿 Android Auto (Coolwalk) 70% 分割首頁、實驗方案切換與一體化媒體捷徑
-- **70% / 30% 黃金寬幅比例（可調 `55%–75%`）**：主卡片提供三套可於設定頁最上方一鍵切換的實驗架構，並預留 **方案 D（Root 保留）**：
-  - **方案 A（多圖層＋即時路況）**：自由切換 `Google 繁中地圖`／`Google 衛星混合`／`OpenFreeMap 3D 向量`／`深色極簡向量`，並可獨立開關 Google 即時路況圖層。
-  - **方案 B（方案 A ＋ 免 Key 內建導航）**：整合 Photon 繁中地點搜尋與 OSRM 路線規劃，直接於首頁 70% 地圖繪製藍線導航、顯示剩餘距離／ETA 與中文 TTS 轉彎語音提示。
-  - **方案 C（指定導航 App ＋ 純粹音樂封面）**：左側選擇 Google 地圖、導航王、Papago 等真實導航 App（顯示圖示與名稱），右側專注大專輯封面控制並自動偵測 YouTube／YT Music／KKBOX／Apple Music／Spotify／網易雲／VLC 等音源圖示。
-- **媒體控制器整合 6 格快捷 App ＋ 專輯封面優先 ＋ 點讚收藏**：右側大正方形專輯封面置頂、歌名歌手排於下方，並附點讚／紅心收藏鈕（支援網易雲音樂、Spotify、YT Music、KKBOX、Apple Music、VLC 等）；下方 6 格客製捷徑直接整合於媒體卡底部（可於設定選擇隱藏），依卡片寬度自動適配 1×6 或 2×3 排列。
-- **細膩觸控物理回饋**：全域按壓彈簧動畫 (`bouncyClickable`)、點擊副卡或三指左右滑互換，以及左／右駕完整鏡像佈局。
+[![Google Play Closed Testing](https://img.shields.io/badge/Google%20Play-Closed%20Testing%20v1.7.5-34A853?style=for-the-badge&logo=google-play&logoColor=white)](https://play.google.com/store/apps/details?id=com.dxcar.launcher)
+[![Languages](https://img.shields.io/badge/Languages-%E7%B9%81%E9%AB%94%E4%B8%AD%E6%96%87%20%7C%20%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87%20%7C%20English%20%7C%20%E6%97%A5%E6%9C%AC%E8%AA%9E-1A73E8?style=for-the-badge)](#)
 
-### 2. 免 API Key 100% 真實 Google 高畫質路況地圖 ＋ 原生 Google Maps 聯動
-- **100% 真實 Google 地圖 2x HD 繁中路況圖磚**：完整呈現台灣商家、地標與紅黃綠即時路況；夜晚透過 TextureView GPU 保色反轉呈現低眩光深海藍夜間風格，亦可一鍵切換 **OpenFreeMap 3D 向量地圖**。
-- **原生 Google Maps 完整整合**：強制以主螢幕 (`Display 0`) 全螢幕模式啟動原版 Google 地圖（修正部分 AI Box 背景 VirtualDisplay 攔截問題），並支援 **Android 原生分割螢幕 (`SplitSidePanelActivity`)**、**63% Freeform 本體貼合模式**，以及導航中即時同步 **AA 綠色 Turn-by-Turn 導航橫幅**。
+[繁體中文說明](#-繁體中文說明) • [English Documentation](#-english-documentation) • [Google Play 下載三步驟](#-google-play-下載與封閉測試三步驟--google-play-3-step-install) • [畫面預覽 Screenshots](#-畫面預覽--screenshots)
 
-### 3. DPI 自動切換最近 App 常駐 Dock、智慧避讓不遮擋與多比例分屏捷徑
-- **Google Coolwalk DPI 自動判定引擎 (`CoolwalkLayoutEngine`)**：自動依車機解析度與 DPI 換算工作區 `dp`，寬屏自動配置駕駛側直立 Dock、緊湊或直屏自動配置底部橫向 Dock；Dock 自動同步 **最近使用的 App 清單**，並於設定頁提供雙 Dock 獨立開關。
-- **全螢幕第三方 App 不遮擋雙方案**：
-  - **預設可調加厚邊緣拉條**：開啟 Google 地圖、YouTube、導航王等全螢幕 App 時，常駐懸浮 Dock 自動收合為預設 `26dp` 透明邊緣拉條（設定可調 `16–48dp` 厚度與位置偏移，亦支援長按拉條直接拖曳挪動），輕點或往內一滑立即展開，支援 `3s / 4s / 7s / 手動` 自動收回與 `📌` 暫時釘選。
-  - **選配實驗性 Freeform 避讓**：設定頁可自由啟用，自動以扣除 Dock 寬高後的視窗座標啟動 App。
-- **Dock 返回／多工複合按鈕與 12 小時制狀態列**：
-  - 左下角九宮格上方新增 **返回／多工複合鈕**（點一下系統返回；長按 2.5 秒讀條進度圈滿即進入系統多工）。
-  - 狀態列預設顯示 **12 小時制含 AM/PM（如 `8:20 PM`）**，通知小圖示整合於時間與 Wi-Fi 圖示之間。
-- **左下角寬鬆大圖示 App 選單 ＋ 分屏捷徑製作器**：
-  - 放大易點網格（`148dp` 格／`68dp` 圖示），支援 **長按向上拖曳至頂部 `✕ 移除`** 刪除捷徑或解除安裝。
-  - 內建 **「分屏設定」多比例捷徑製作器**（`3:7 / 4:6 / 5:5 / 6:4 / 7:3` 即時預覽、左右 App 挑選），一鍵儲存為雙圖示分屏捷徑卡片。
-
-### 4. 車載多指操作手勢
-- **雙指左側上下滑**：即時調整螢幕亮度 ｜ **雙指右側上下滑**：即時調整媒體音量
-- **雙指左／右滑**：切換下一首／上一首
-- **三指左／右滑**：首頁左右分割視窗立即互換 ｜ **三指向下滑**：一鍵返回首頁 ｜ **三指輕點**：切換白天／夜晚
-- **四指捏合／展開**：隱藏／顯示常駐 Dock
-
-### 5. 白天與夜晚雙模式、風格主題與啟動器管理
-- **4 套風格預設**：`AA Coolwalk 經典`、`極致純黑 OLED`、`流光毛玻璃`、`高對比行車` + 5 種強調色。
-- **5 種日夜模式**：自訂時間（預設 06:30 / 18:30）、GPS 離線 NOAA 日出／日落自動切換、跟隨車機系統深淺模式、固定白天、固定夜晚。
-- **啟動器切換與預設管理**：設定頁可掃描所有已安裝 Home 啟動器一鍵切換、透過 `RoleManager.ROLE_HOME` 一鍵設為預設主畫面，或恢復設定預設值。
-
-### 6. 來電與訊息即時顯示 ＋ AA 狀態列（時間 / Wi-Fi / 鮮明藍牙直達設定）
-- 狀態列精準還原 AA 位置：點擊 **Wi-Fi** 直達 Wi-Fi 設定、點擊 **藍牙**（連線亮鮮明藍光）直達藍牙設定、點擊 **時間** 展開快捷控制中心。
-- **單一 APK 雙模式（手機自動識別 ＋ 藍牙 SPP／Wi-Fi 熱點雙通道）**：裝於直向手機自動切換為純「手機通知同步端」（平板／折疊機展開才開放切換模式），透過藍牙 RFCOMM ＋ Wi-Fi 熱點區網直連自動同步 **LINE / Messenger / WhatsApp / Telegram / 簡訊 / 來電**（或全部 App 通知）至車機頂部懸浮橫幅，支援 **繁中 TTS 語音朗讀**、**快速回覆**、**語音回覆（RemoteInput）** 與 **接聽／掛斷**。
-
-### 7. GitHub 自動檢測與自動下載更新
-- 啟動時自動背景檢查 `dx9901mk5/DX-Car-Launcher` GitHub Releases 最新版本；發現新版自動下載並提示一鍵覆蓋更新。
+</div>
 
 ---
 
-## 🛠️ 本機編譯方式
+## 📱 Google Play 下載與封閉測試三步驟 / Google Play 3-Step Install
 
-```powershell
-.\gradlew.bat testDebugUnitTest assembleRelease
-```
+> ⚠️ **裝置定位說明 / Device Role Notice**  
+> **繁體中文**：本 App **專為橫向平板與車機（Android AI Box）打造**。安裝於直向手機時會自動進入「**手機遠端控制介面**」（藍牙／Wi-Fi 觸控板、來電與訊息同步），**不建議將手機端作為一般手機桌面啟動器使用**。  
+> **English**: DX-Car Launcher is **purpose-built for landscape tablets and Android AI Box car displays**. On smartphones, it automatically launches in **Phone Companion Mode** (remote touchpad + call/message sync) rather than replacing your phone's home launcher.
 
-詳細開發架構、實車驗證紀錄與後續規劃請參閱 [專案進度與開發紀錄.md](專案進度與開發紀錄.md)。
+請依序完成以下 **三個步驟** 即可透過 Google Play 商店下載並自動接收更新：  
+Follow these **3 steps** to join the closed test and install directly from Google Play:
+
+| 步驟 / Step | 說明（繁體中文） | Description (English) | 連結 / Link |
+| :---: | :--- | :--- | :--- |
+| **1** | **加入 DX Google 測試群組**（點擊「加入群組」） | **Join the DX Google Testing Group** | 👉 [groups.google.com/g/dx-file-manager-testers](https://groups.google.com/g/dx-file-manager-testers) |
+| **2** | **申請成為 Google Play 測試人員**（點「成為測試人員」） | **Opt-in as a Google Play Tester** | 👉 [play.google.com/apps/testing/com.dxcar.launcher](https://play.google.com/apps/testing/com.dxcar.launcher) |
+| **3** | **前往 Google Play 商店下載安裝** | **Download & Install on Google Play** | 👉 [play.google.com/store/apps/details?id=com.dxcar.launcher](https://play.google.com/store/apps/details?id=com.dxcar.launcher) |
 
 ---
 
-## ⚠️ 行車安全聲明
-行車過程中請專注前方路況，影音與詳細設定請於停車休息時或由副駕乘客操作。
+## 📸 畫面預覽 / Screenshots
+
+| 第一介面：地圖 ＋ 天氣音樂捷徑 (Page 1 Split) | 即時路況圖層與夜間模式 (Map Layers & Night Mode) |
+| :---: | :---: |
+| <img src="play_store_assets/screenshots/tablet_car/01_car_home_plan_a.png" width="420" /> | <img src="play_store_assets/screenshots/tablet_car/04_car_map_layers_traffic.png" width="420" /> |
+
+| 車機通知橫幅與快速回覆 (Car Notification Sync) | 四語系設定與雙模式 (4-Language Settings) |
+| :---: | :---: |
+| <img src="play_store_assets/screenshots/tablet_car/02_car_notification_from_phone.png" width="420" /> | <img src="play_store_assets/screenshots/tablet_car/06_car_settings_multilang.png" width="420" /> |
+
+| 手機端：遠端滑鼠觸控板與媒體控制 (Phone Remote Touchpad) | |
+| :---: | :---: |
+| <img src="play_store_assets/screenshots/phone/02_phone_remote_touchpad_oled.png" width="240" /> | |
+
+---
+
+## 🇹🇼 繁體中文說明
+
+### ✨ 核心特色（`v1.7.5`）
+
+1. **雙介面無限循環儀表板（Coolwalk 風格）**
+   - **第一介面（`55%–75%` 可調分割，預設 `70:30`）**：左側顯示即時路況地圖（Google 繁中地圖／衛星混合／OpenFreeMap 3D 向量／深色極簡向量，含獨立即時路況開關與離線地圖下載）；右側顯示放大專輯封面音樂控制器（預設 **YouTube Music**、點讚收藏、6 格客製快捷 App，點封面可與左側地圖互換）與左上角疊圖天氣膠囊。
+   - **第二介面（`1:1` 雙視窗）**：左側即時地圖 ＋ 右側內嵌 720p **YouTube 視窗播放**（支援右半邊全螢幕、左右 1/3 雙擊快退快轉、時間軸拖曳預覽、跨系統背景音訊播放）；**右側 YouTube 左上角固定 YouTube 圖示**，點擊可直接將**當前播放連結與秒數**接續開啟於 YouTube App 播放。
+   - **切換介面提示開關**：切換第一／第二介面時的中央提示膠囊可直接點選「**不再顯示**」，並隨時於設定內重新開啟。
+
+2. **Google App 青蛙天氣直達聯動**
+   - 點擊天氣膠囊優先透過 `dynact://velour/weather/ProxyActivity` 深層連結直開 **Google App 原生青蛙天氣專頁**，即時掌握每小時預報、體感溫度、風速與濕度。
+
+3. **手機端遠端觸控板 ＋ 來電與訊息同步通知中心**
+   - **藍牙 RFCOMM ＋ Wi-Fi 熱點雙通道自動橋接**：將手機來電（顯示聯絡人姓名與號碼，支援接聽／掛斷）與 LINE／Messenger／WhatsApp／Telegram／簡訊即時同步至車機。
+   - **訊息通知中心（`v1.7.5` 升級）**：支援 **TTS 語音朗讀**、**左右滑動移除單則訊息**、**長壓訊息彈出快速回覆選項**，以及手機端 **OLED 遠端滑鼠觸控板** 與 **3D 懸浮滑鼠指標**遙控車機。
+
+4. **智慧常駐 Dock 與全螢幕避讓**
+   - 依螢幕解析度與 DPI 自動配置駕駛側直立 Dock 或底部橫向 Dock，支援左／右駕鏡像、最近使用 App 同步、返回／多工複合鍵，以及開啟全螢幕第三方 App 時自動收合為透明邊緣拉條。
+
+5. **四語系即時切換 ＋ 日夜雙模式 ＋ 設定備份還原**
+   - **四語系 UI**：繁體中文、簡體中文、English、日本語，無須重啟 App 即時生效。
+   - **4 套主題風格 × 5 種日夜切換**：包含自訂時間、GPS 離線 NOAA 日出日落計算、跟隨系統、固定白天／夜晚。
+   - **設定備份與還原（`v1.7.5` 新增）**：可自訂預設備份檔名，一鍵選擇 **備份至本機（`.json`）** 或 **開啟 Google 雲端硬碟 App 上傳**，換機或重裝隨時一鍵還原。
+
+6. **授權方案**
+   - 提供 **7 天全功能免費試用**；試用期滿後可於 Google Play 一次買斷（`NT$500`）永久解鎖全部功能，無任何月費訂閱。
+
+---
+
+## 🇺🇸 English Documentation
+
+### ✨ Key Features (`v1.7.5`)
+
+1. **Dual-Page Coolwalk Split Dashboard**
+   - **Page 1 (`55%–75%` adjustable split, default `70:30`)**: Live multi-layer map on the left (Google Map / Satellite Hybrid / OpenFreeMap 3D Vector / Dark Vector with live traffic toggle & offline regions) + enlarged album-art media controller on the right (defaults to **YouTube Music**, like/favorite, 6 customizable shortcuts, tap cover to swap panes) with a corner weather pill.
+   - **Page 2 (`1:1` Split Window)**: Live map on the left + **Embedded 720p YouTube Player** on the right (supports right-pane fullscreen, double-tap left/right 1/3 to seek ±10s, horizontal scrub preview, and background audio playback). Tap the **pinned top-left YouTube icon** to hand off the **exact current video URL and timestamp** directly into the YouTube App.
+   - **Dismissible Page-Switch Hint**: Tap **"Don't show"** directly on the center page-switch pill, and re-enable it anytime in Settings.
+
+2. **Direct Google Weather Integration**
+   - Tapping the weather pill launches **Google App's native Froggy Weather view** directly (`dynact://velour/weather/ProxyActivity`) for hourly forecasts, feels-like temperature, wind, and humidity.
+
+3. **Smartphone Remote Touchpad & Live Notification/Call Sync**
+   - **Dual-Channel Bluetooth RFCOMM + Wi-Fi LAN Bridge**: Syncs incoming calls (contact name & number with answer/hang-up) and LINE / Messenger / WhatsApp / Telegram / SMS messages to your car screen.
+   - **Upgraded Notification Center (`v1.7.5`)**: Supports **TTS read-aloud**, **left/right swipe to remove messages**, **long-press to pop up quick replies**, plus a **Phone OLED Remote Touchpad** and **3D Floating Pointer** to control the car head unit from your phone.
+
+4. **Adaptive Persistent Dock & Fullscreen Auto-Collapse**
+   - Automatically places a driver-side vertical rail or bottom horizontal bar based on display DPI, with LHD/RHD mirroring, recent apps sync, Back/Recents combo button, and an auto-collapsing edge handle over fullscreen apps.
+
+5. **4-Language UI + Day/Night Engine + Backup & Restore**
+   - **Instant 4-Language Switching**: Traditional Chinese (`繁體中文`), Simplified Chinese (`简体中文`), `English`, and `日本語`.
+   - **4 Visual Themes × 5 Day/Night Modes**: Custom schedule, offline GPS NOAA sunrise/sunset calculation, system follow, force day, or force night.
+   - **Settings Backup & Restore (`v1.7.5`)**: Set a custom default filename, save `.json` backups **locally** or **open the Google Drive App to upload**, and restore all settings in one tap.
+
+6. **Licensing**
+   - Includes a **7-day full-feature free trial**, followed by a single one-time lifetime unlock via Google Play Billing (no recurring subscription).
+
+---
+
+## 🔒 隱私權政策 / Privacy Policy
+
+請參閱：[docs/PRIVACY_POLICY.md](docs/PRIVACY_POLICY.md)
+
+## ⚠️ 行車安全聲明 / Driving Safety Notice
+
+- **繁體中文**：行車過程中請專注前方路況，影音與詳細設定請於停車休息時或由副駕乘客操作。
+- **English**: Always keep your eyes on the road while driving. Video playback and detailed settings should only be operated while parked or by a passenger.
