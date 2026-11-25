@@ -13,7 +13,6 @@ import android.telephony.TelephonyManager
 import com.dxcar.launcher.DxCarApp
 import com.dxcar.launcher.data.DeviceRole
 import com.dxcar.launcher.overlay.PersistentDockOverlayService
-import com.dxcar.launcher.system.WifiHotspotFastRestarter
 import java.util.UUID
 
 class BluetoothCallReceiver : BroadcastReceiver() {

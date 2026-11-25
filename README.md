@@ -2,13 +2,13 @@
 
 <img src="play_store_assets/feature_graphic_1024x500.png" alt="DX-Car Launcher Feature Graphic" width="100%" />
 
-# DX-Car Launcher (`v1.7.6`)
+# DX-Car Launcher (`v1.7.7`)
 
 **專為橫向平板與 Android AI Box 車機盒打造的 Android Auto (Coolwalk) 風格車載啟動器 ＋ 手機遠端觸控／來電訊息同步橋接**
 
 **An Android Auto (Coolwalk) Inspired Car Launcher for Landscape Tablets & Android AI Box Head Units — with Smartphone Remote Touchpad & Live Call/Message Sync**
 
-[![Google Play Closed Testing](https://img.shields.io/badge/Google%20Play-Closed%20Testing%20v1.7.6-34A853?style=for-the-badge&logo=google-play&logoColor=white)](https://play.google.com/store/apps/details?id=com.dxcar.launcher)
+[![Google Play Closed Testing](https://img.shields.io/badge/Google%20Play-Closed%20Testing%20v1.7.7-34A853?style=for-the-badge&logo=google-play&logoColor=white)](https://play.google.com/store/apps/details?id=com.dxcar.launcher)
 [![Languages](https://img.shields.io/badge/Languages-%E7%B9%81%E9%AB%94%E4%B8%AD%E6%96%87%20%7C%20%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87%20%7C%20English%20%7C%20%E6%97%A5%E6%9C%AC%E8%AA%9E-1A73E8?style=for-the-badge)](#)
 
 [繁體中文說明](#-繁體中文說明) • [English Documentation](#-english-documentation) • [Google Play 下載三步驟](#-google-play-下載與封閉測試三步驟--google-play-3-step-install) • [畫面預覽 Screenshots](#-畫面預覽--screenshots)

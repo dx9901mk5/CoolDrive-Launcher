@@ -111,7 +111,6 @@ import com.dxcar.launcher.overlay.RemoteCarMousePointerOverlay
 import com.dxcar.launcher.system.InstalledAppInfo
 import com.dxcar.launcher.system.PermissionHelper
 import com.dxcar.launcher.system.SystemStatusMonitor
-import com.dxcar.launcher.system.WifiHotspotFastRestarter
 import com.dxcar.launcher.theme.DayNightEngine
 import com.dxcar.launcher.theme.DxCarTheme
 import com.dxcar.launcher.theme.LocalDxCarColors
@@ -174,7 +173,6 @@ fun DxCarRootScreen(
     val cursor3DTutorial by Cursor3DStateHolder.showTutorial.collectAsState()
     val remoteCursor by RemoteTouchpadController.cursorState.collectAsState()
     val remoteSwapSeq by RemoteTouchpadController.swapHomePanesSeq.collectAsState()
-    val wifiCycleEvent by WifiHotspotFastRestarter.statusEvent.collectAsState()
 
     // Auto-detect Smartphone vs AI Box Car Head Unit on first launch when not pinned by user
     LaunchedEffect(configuration.screenWidthDp, configuration.screenHeightDp, config.roleUserPinned) {
@@ -283,13 +281,6 @@ fun DxCarRootScreen(
         }
     }
 
-    LaunchedEffect(wifiCycleEvent) {
-        if (!wifiCycleEvent.isNullOrBlank()) {
-            gestureHudText = wifiCycleEvent
-            WifiHotspotFastRestarter.consumeStatusEvent()
-        }
-    }
-
     LaunchedEffect(remoteSwapSeq) {
         if (remoteSwapSeq > 0L) {
             isMapPrimary = !isMapPrimary
@@ -314,6 +305,11 @@ fun DxCarRootScreen(
             }
             com.dxcar.launcher.MainActivity.EXTRA_OPEN_YOUTUBE -> {
                 destination = LauncherDestination.FULLSCREEN_YOUTUBE_WEB
+                onExternalNavConsumed()
+            }
+            com.dxcar.launcher.MainActivity.EXTRA_OPEN_YOUTUBE_HANDOFF -> {
+                destination = LauncherDestination.DASHBOARD_SPLIT
+                currentDashboardPage = 1
                 onExternalNavConsumed()
             }
             com.dxcar.launcher.MainActivity.EXTRA_OPEN_QUICK_PANEL -> {
@@ -592,6 +588,14 @@ fun DxCarRootScreen(
                         )
                     }
                     BluetoothCompanionService.forceReconnect(context)
+                },
+                onSetTargetDeviceName = { customName ->
+                    app.preferences.update {
+                        it.copy(
+                            companionTargetDeviceName = customName,
+                            companionTargetDeviceAddress = if (customName.isBlank()) "" else it.companionTargetDeviceAddress
+                        )
+                    }
                 },
                 onToggleAllowedPackage = { pkg ->
                     app.preferences.update { current ->
@@ -902,7 +906,7 @@ fun DxCarRootScreen(
                                             )
                                         },
                                         onStopBuiltInNav = { app.builtInNavEngine.stopNavigation() },
-                                        onWeatherClick = { app.weatherRepository.openGoogleWeatherApp(context) },
+                                        onWeatherClick = { app.weatherRepository.openGoogleWeatherApp(context, config.weatherAppPackage) },
                                         onMediaPlayPause = { app.mediaControlBridge.togglePlayPause() },
                                         onMediaNext = { app.mediaControlBridge.skipNext() },
                                         onMediaPrev = { app.mediaControlBridge.skipPrevious() },
@@ -1188,12 +1192,6 @@ fun DxCarRootScreen(
                                 onStartVoiceNavigation = {
                                     destination = LauncherDestination.DASHBOARD_SPLIT
                                     onStartGeminiVoiceNav()
-                                },
-                                onTestWifiHotspotCycle = {
-                                    WifiHotspotFastRestarter.forceCycleSystemWifi(
-                                        context,
-                                        DxCarI18n.tr("手動測試", "手动测试", "Manual Test", "手動テスト")
-                                    )
                                 },
                                 onUpdateConfig = { transform -> app.preferences.update(transform) },
                                 onRequestSetDefaultHome = {

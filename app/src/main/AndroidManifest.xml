@@ -146,6 +146,17 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <service
+            android:name=".comms.DxCarBluetoothTileService"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <!-- Persistent Floating AA Dock & Global Incoming Call/Message Overlay Service -->
         <service
             android:name=".overlay.PersistentDockOverlayService"

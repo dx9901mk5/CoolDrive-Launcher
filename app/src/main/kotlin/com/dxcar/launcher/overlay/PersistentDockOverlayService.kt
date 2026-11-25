@@ -4,12 +4,17 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.PixelFormat
+import android.media.MediaMetadata
+import android.media.session.MediaSessionManager
+import android.media.session.PlaybackState
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
@@ -37,6 +42,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -124,12 +130,14 @@ class PersistentDockOverlayService :
     private var planCPanelView: ComposeView? = null
     private var cursor3DView: ComposeView? = null
     private var remoteMouseView: ComposeView? = null
+    private var ytHandoffView: ComposeView? = null
 
     private var dockParams: WindowManager.LayoutParams? = null
     private var bannerParams: WindowManager.LayoutParams? = null
     private var planCPanelParams: WindowManager.LayoutParams? = null
     private var cursor3DParams: WindowManager.LayoutParams? = null
     private var remoteMouseParams: WindowManager.LayoutParams? = null
+    private var ytHandoffParams: WindowManager.LayoutParams? = null
 
     private val isCollapsed = MutableStateFlow(true)
     private val isPinnedOpen = MutableStateFlow(false)
@@ -172,6 +180,7 @@ class PersistentDockOverlayService :
         setupPlanCPanelWindow(app)
         setupCursor3DWindow(app)
         setupRemoteMouseWindow(app)
+        setupYoutubeHandoffWindow(app)
         observeVisibilityAndLayout(app)
     }
 
@@ -211,11 +220,13 @@ class PersistentDockOverlayService :
         removeOverlaySafe(planCPanelView)
         removeOverlaySafe(cursor3DView)
         removeOverlaySafe(remoteMouseView)
+        removeOverlaySafe(ytHandoffView)
         dockView = null
         bannerView = null
         planCPanelView = null
         cursor3DView = null
         remoteMouseView = null
+        ytHandoffView = null
         viewModelStore.clear()
     }
 
@@ -880,7 +891,7 @@ class PersistentDockOverlayService :
                                         customShortcutSlots = config.customShortcutSlots,
                                         splitShortcuts = config.splitShortcuts,
                                         installedApps = installedApps,
-                                        onWeatherClick = { app.weatherRepository.openGoogleWeatherApp(this@PersistentDockOverlayService) },
+                                        onWeatherClick = { app.weatherRepository.openGoogleWeatherApp(this@PersistentDockOverlayService, config.weatherAppPackage) },
                                         onPlayPause = { app.mediaControlBridge.togglePlayPause() },
                                         onNext = { app.mediaControlBridge.skipNext() },
                                         onPrevious = { app.mediaControlBridge.skipPrevious() },
@@ -914,6 +925,95 @@ class PersistentDockOverlayService :
         planCPanelParams = params
         view.visibility = View.GONE
         runCatching { windowManager.addView(view, params) }
+    }
+
+    private fun setupYoutubeHandoffWindow(app: DxCarApp) {
+        val view = ComposeView(this).apply {
+            setViewTreeLifecycleOwner(this@PersistentDockOverlayService)
+            setViewTreeSavedStateRegistryOwner(this@PersistentDockOverlayService)
+            setViewTreeViewModelStoreOwner(this@PersistentDockOverlayService)
+            setContent {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(androidx.compose.ui.graphics.Color(0xE6FF0000))
+                        .border(1.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.55f), RoundedCornerShape(9.dp))
+                        .bouncyClickable { handoffFromYoutubeAppToPage2() }
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.PlayArrow,
+                        contentDescription = "Hand off to Page 2 YouTube",
+                        tint = androidx.compose.ui.graphics.Color.White,
+                        modifier = Modifier.size(21.dp)
+                    )
+                }
+            }
+        }
+        val density = resources.displayMetrics.density
+        val params = createOverlayParams(
+            width = WindowManager.LayoutParams.WRAP_CONTENT,
+            height = WindowManager.LayoutParams.WRAP_CONTENT,
+            gravity = Gravity.TOP or Gravity.START
+        ).apply {
+            x = (14f * density).toInt()
+            y = (14f * density).toInt()
+        }
+        ytHandoffView = view
+        ytHandoffParams = params
+        view.visibility = View.GONE
+        runCatching { windowManager.addView(view, params) }
+    }
+
+    private fun handoffFromYoutubeAppToPage2() {
+        val msm = getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager
+        val comp = ComponentName(this, com.dxcar.launcher.comms.BoxNotificationListenerService::class.java)
+        val controller = runCatching {
+            msm?.getActiveSessions(comp)?.firstOrNull { it.packageName == "com.google.android.youtube" }
+        }.getOrNull()
+
+        val pb = controller?.playbackState
+        val posMs = if (pb != null) {
+            val base = pb.position.coerceAtLeast(0L)
+            if (pb.state == PlaybackState.STATE_PLAYING) {
+                base + ((SystemClock.elapsedRealtime() - pb.lastPositionUpdateTime) * pb.playbackSpeed).toLong().coerceAtLeast(0L)
+            } else base
+        } else 0L
+        val posSec = (posMs / 1000L).toInt().coerceAtLeast(0)
+
+        val meta = controller?.metadata
+        val mediaUri = meta?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI).orEmpty()
+        val mediaId = meta?.getString(MediaMetadata.METADATA_KEY_MEDIA_ID).orEmpty()
+        val title = meta?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty()
+        val artist = meta?.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty()
+
+        val rawCandidate = mediaUri.ifBlank { mediaId }
+        val videoId = when {
+            rawCandidate.matches(Regex("^[A-Za-z0-9_-]{11}$")) -> rawCandidate
+            rawCandidate.contains("v=") -> android.net.Uri.parse(rawCandidate).getQueryParameter("v")
+            rawCandidate.contains("youtu.be/") -> android.net.Uri.parse(rawCandidate).lastPathSegment
+            else -> null
+        }
+
+        val targetUrl = when {
+            !videoId.isNullOrBlank() ->
+                if (posSec > 0) "https://m.youtube.com/watch?v=$videoId&t=${posSec}s"
+                else "https://m.youtube.com/watch?v=$videoId"
+            title.isNotBlank() -> {
+                val q = java.net.URLEncoder.encode(listOf(title, artist).filter { it.isNotBlank() }.joinToString(" "), "UTF-8")
+                "https://m.youtube.com/results?search_query=$q"
+            }
+            else -> "https://m.youtube.com"
+        }
+
+        runCatching { controller?.transportControls?.pause() }
+        com.dxcar.launcher.ui.YoutubeHandoffBridge.requestHandoff(
+            url = targetUrl,
+            positionSec = posSec,
+            enterFullscreen = true
+        )
+        bringDxCarToFront(MainActivity.EXTRA_OPEN_YOUTUBE_HANDOFF)
     }
 
     private fun observeVisibilityAndLayout(app: DxCarApp) {
@@ -1022,6 +1122,19 @@ class PersistentDockOverlayService :
         lifecycleScope.launch {
             RemoteTouchpadController.cursorState.collect { cursor ->
                 remoteMouseView?.visibility = if (cursor.visible) View.VISIBLE else View.GONE
+            }
+        }
+
+        // Observe YouTube App Foreground -> show tiny top-left YouTube handoff button
+        lifecycleScope.launch {
+            combine(
+                app.preferences.config,
+                app.isLauncherForeground,
+                DxCarAccessibilityService.foregroundPackage
+            ) { cfg, isHomeFg, fgPkg ->
+                !isHomeFg && cfg.deviceRole == DeviceRole.AI_BOX_LAUNCHER && fgPkg == "com.google.android.youtube"
+            }.collect { showYtHandoff ->
+                ytHandoffView?.visibility = if (showYtHandoff) View.VISIBLE else View.GONE
             }
         }
 

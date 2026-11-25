@@ -164,7 +164,30 @@ class LocalWeatherRepository(private val context: Context) {
         return true
     }
 
-    fun openGoogleWeatherApp(ctx: Context) {
+    fun openGoogleWeatherApp(ctx: Context, customPackage: String = "") {
+        val launchBundle = runCatching {
+            android.app.ActivityOptions.makeBasic()
+                .setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY)
+                .toBundle()
+        }.getOrNull()
+
+        if (customPackage.isNotBlank() && customPackage != GOOGLE_APP_PACKAGE) {
+            val customIntent = ctx.packageManager.getLaunchIntentForPackage(customPackage)?.apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            if (customIntent != null) {
+                val ok = runCatching {
+                    if (launchBundle != null) ctx.startActivity(customIntent, launchBundle)
+                    else ctx.startActivity(customIntent)
+                    true
+                }.getOrDefault(false)
+                if (ok) {
+                    forceRefresh()
+                    return
+                }
+            }
+        }
+
         val candidates = listOf(
             // 1. Official Google App Froggy Weather shortcut deep link (opens native WeatherActivity directly)
             Intent(Intent.ACTION_VIEW, Uri.parse("dynact://velour/weather/ProxyActivity")).apply {
@@ -204,12 +227,6 @@ class LocalWeatherRepository(private val context: Context) {
             // 9. Web fallback if Google App is not installed
             Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=weather"))
         )
-        val launchBundle = runCatching {
-            android.app.ActivityOptions.makeBasic()
-                .setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY)
-                .toBundle()
-        }.getOrNull()
-
         for (intent in candidates) {
             if (intent == null) continue
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

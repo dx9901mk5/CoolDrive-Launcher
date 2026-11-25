@@ -155,7 +155,6 @@ fun SettingsScreen(
     onDownloadOfflineRegion: (String) -> Unit = {},
     onCancelOfflineDownload: () -> Unit = {},
     onStartVoiceNavigation: () -> Unit = {},
-    onTestWifiHotspotCycle: () -> Unit = {},
     onUpdateConfig: ((LauncherConfig) -> LauncherConfig) -> Unit,
     onRequestSetDefaultHome: () -> Unit,
     onSwitchToLauncher: (HomeLauncherInfo) -> Unit,
@@ -818,6 +817,117 @@ fun SettingsScreen(
                             checked = config.mapTrafficEnabled,
                             onCheckedChange = { checked -> onUpdateConfig { it.copy(mapTrafficEnabled = checked) } }
                         )
+                        // CUSTOM DEFAULT WEATHER APP PICKER (Default: Google App Froggy Weather)
+                        var showWeatherAppPicker by remember { mutableStateOf(false) }
+                        val selectedWeatherLabel = remember(config.weatherAppPackage, installedApps) {
+                            if (config.weatherAppPackage.isBlank() || config.weatherAppPackage == "com.google.android.googlequicksearchbox") {
+                                DxCarI18n.tr(
+                                    "Google App（預設青蛙天氣）",
+                                    "Google App（默认青蛙天气）",
+                                    "Google App (Default Froggy Weather)",
+                                    "Google アプリ（標準カエル天気）"
+                                )
+                            } else {
+                                installedApps.firstOrNull { it.packageName == config.weatherAppPackage }?.label
+                                    ?: config.weatherAppPackage
+                            }
+                        }
+                        Surface(
+                            color = colors.cardSurfaceElevated,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, colors.cardBorder, RoundedCornerShape(14.dp))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                        Text(
+                                            text = str(
+                                                "第一介面天氣預設開啟 App",
+                                                "第一界面天气默认开启 App",
+                                                "Page 1 Default Weather App",
+                                                "ページ 1 天気タップ時の既定アプリ"
+                                            ),
+                                            color = colors.primaryText,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = str(
+                                                "目前設定：$selectedWeatherLabel",
+                                                "当前设置：$selectedWeatherLabel",
+                                                "Current: $selectedWeatherLabel",
+                                                "現在の設定：$selectedWeatherLabel"
+                                            ),
+                                            color = colors.accent,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        if (config.weatherAppPackage.isNotBlank()) {
+                                            OutlinedButton(
+                                                onClick = { onUpdateConfig { it.copy(weatherAppPackage = "") } },
+                                                shape = RoundedCornerShape(12.dp)
+                                            ) {
+                                                Text(str("預設 Google", "默认 Google", "Default Google", "Googleに戻す"), fontSize = 11.sp)
+                                            }
+                                        }
+                                        Button(
+                                            onClick = { showWeatherAppPicker = !showWeatherAppPicker },
+                                            colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Text(
+                                                if (showWeatherAppPicker) str("收合", "收起", "Close", "閉じる")
+                                                else str("更改 App", "更改 App", "Change App", "変更"),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                                if (showWeatherAppPicker) {
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        SelectablePill(
+                                            text = str("Google App（預設）", "Google App（默认）", "Google App (Default)", "Google アプリ（既定）"),
+                                            selected = config.weatherAppPackage.isBlank() || config.weatherAppPackage == "com.google.android.googlequicksearchbox",
+                                            onClick = {
+                                                onUpdateConfig { it.copy(weatherAppPackage = "") }
+                                                showWeatherAppPicker = false
+                                            }
+                                        )
+                                        installedApps
+                                            .sortedByDescending {
+                                                val low = "${it.label} ${it.packageName}".lowercase()
+                                                low.contains("weather") || low.contains("天氣") || low.contains("天气") || low.contains("天気")
+                                            }
+                                            .take(24)
+                                            .forEach { appItem ->
+                                                SelectablePill(
+                                                    text = appItem.label,
+                                                    selected = config.weatherAppPackage == appItem.packageName,
+                                                    onClick = {
+                                                        onUpdateConfig { it.copy(weatherAppPackage = appItem.packageName) }
+                                                        showWeatherAppPicker = false
+                                                    }
+                                                )
+                                            }
+                                    }
+                                }
+                            }
+                        }
                         // ALWAYS-VISIBLE 60FPS / 60HZ SWITCH + LIVE HARDWARE CAPABILITY PROMPT!
                         val refreshCap = remember(config.prefer60FpsEnabled) {
                             SystemStatusMonitor.inspectRefreshRateCapability(context)
@@ -1344,10 +1454,10 @@ fun SettingsScreen(
                         "カテゴリ 3 · スマホ2チャンネル同期・リモートマウス・更新"
                     ),
                     hint = str(
-                        "手機連上車機藍牙免持或開啟 Wi-Fi 熱點即可自動穩定同步通知與遠端滑鼠觸控板；點擊「教學」查看特大字步驟",
-                        "手机连上车机蓝牙免提或开启 Wi-Fi 热点即可自动稳定同步通知与远程鼠标触控板；点击「教程」查看特大字步骤",
-                        "Auto-syncs notifications & remote touchpad via Car Bluetooth or Wi-Fi Hotspot; tap Guide for large-print steps",
-                        "車載 Bluetooth や Wi-Fi テザリングで通知とリモートタッチパッドを自動同期。「ガイド」で拡大手順を表示"
+                        "手機連上車機藍牙免持即可自動穩定同步通知與遠端滑鼠觸控板；點擊「教學」查看特大字步驟",
+                        "手机连上车机蓝牙免提即可自动稳定同步通知与远程鼠标触控板；点击「教程」查看特大字步骤",
+                        "Auto-syncs notifications & remote touchpad via Car Bluetooth; tap Guide for large-print steps",
+                        "車載 Bluetooth 接続で通知とリモートタッチパッドを自動同期。「ガイド」で拡大手順を表示"
                     )
                 )
 
@@ -1407,10 +1517,10 @@ fun SettingsScreen(
                                             )
                                         } else {
                                             str(
-                                                "支援藍牙 SPP ＋ 手機熱點閘道雙向自動直連（無須手動輸入 IP）",
-                                                "支持蓝牙 SPP ＋ 手机热点网关双向自动直连（无需手动输入 IP）",
-                                                "Auto bi-directional link via Bluetooth SPP + Hotspot Gateway (No manual IP needed)",
-                                                "Bluetooth SPP＋テザリングゲートウェイ自動直結（IP手入力不要）"
+                                                "支援車機藍牙 SPP 自動配對與雙向同步（無須手動輸入 IP）",
+                                                "支持车机蓝牙 SPP 自动配对与双向同步（无需手动输入 IP）",
+                                                "Auto bi-directional sync via Car Bluetooth SPP (No manual IP needed)",
+                                                "車載 Bluetooth SPP 自動接続・双方向同期（IP手入力不要）"
                                             )
                                         },
                                         color = colors.secondaryText,
@@ -2506,10 +2616,10 @@ fun SettingsScreen(
                             "【スマホ側】同じ APK を入れて起動すると自動でスマホモードになります。上部の「権限設定」から【通知へのアクセス】を許可します（Android 13+ で制限される場合はアプリ情報 → 右上 ⋮ →「制限付き設定を許可」）。"
                         ),
                         str(
-                            "【自動連線方式】只要「手機連上車機盒藍牙（可接電話狀態）」或「開啟手機 Wi-Fi 熱點給車機連網」，雙端會自動透過藍牙 SPP 或熱點閘道穩定連線，不需手動輸入 IP！",
-                            "【自动连接方式】只要「手机连上车机盒蓝牙（可接电话状态）」或「开启手机 Wi-Fi 热点给车机联网」，双端会自动通过蓝牙 SPP 或热点网关稳定连接，无需手动输入 IP！",
-                            "[Auto-Connection] Simply connect your phone to Car Bluetooth or turn on your phone's Wi-Fi Hotspot for the Car — both sides connect automatically via Bluetooth SPP or Hotspot Gateway with no manual IP!",
-                            "【自動接続】「スマホを車載 Bluetooth に接続」または「スマホの Wi-Fi テザリングに車載機を接続」するだけで、Bluetooth SPP またはゲートウェイ経由で自動接続されます（IP 入力不要）！"
+                            "【自動連線方式】只要「手機連上車機盒藍牙（可接電話狀態）」，雙端就會自動透過藍牙 SPP 穩定連線，不需手動輸入 IP！若斷線可在手機端點「再次觸發藍牙連線」或使用桌面捷徑／下拉快捷鍵。",
+                            "【自动连接方式】只要「手机连上车机盒蓝牙（可接电话状态）」，双端就会自动通过蓝牙 SPP 稳定连接，无需手动输入 IP！若断开可在手机端点「再次触发蓝牙连接」或使用桌面快捷方式／下拉快捷键。",
+                            "[Auto-Connection] Simply connect your phone to Car Bluetooth — both sides connect automatically via Bluetooth SPP with no manual IP! Use [Reconnect Bluetooth] or the Home Shortcut / Quick Tile anytime.",
+                            "【自動接続】「スマホを車載 Bluetooth に接続」するだけで、Bluetooth SPP 経由で自動接続されます（IP 入力不要）。スマホ側の「Bluetooth 再接続」やホーム・クイック設定からも再接続できます！"
                         ),
                         str(
                             "【遠端滑鼠觸控板】連線後手機畫面可直接當作車機滑鼠觸控板使用；點手機上的「車機滑鼠靈敏度設定」，車機畫面就會自動跳出系統指標速度設定頁！",
@@ -2519,10 +2629,10 @@ fun SettingsScreen(
                         )
                     ),
                     highlightNote = str(
-                        "✓ 已修復 Wi-Fi 熱點頻繁斷開問題：現在通知推播與「推播測試通知」皆走背景高速通道，連線持續穩定不中斷！",
-                        "✓ 已修复 Wi-Fi 热点频繁断开问题：现在通知推送与「推送测试通知」均走后台高速通道，连接持续稳定不中断！",
-                        "✓ Hotspot stability enhanced: notifications and test alerts run on a dedicated background IO channel for uninterrupted syncing!",
-                        "✓ テザリング接続の安定性を強化：通知転送とテスト送信は専用の高速バックグラウンド通信で途切れず動作します！"
+                        "✓ 已強化藍牙自動重連與手機端桌面捷徑／下拉快捷鍵一鍵重連，通知推播與遠端控制持續穩定不中斷！",
+                        "✓ 已强化蓝牙自动重连与手机端桌面快捷方式／下拉快捷键一键重连，通知推送与远程控制持续稳定不中断！",
+                        "✓ Enhanced Bluetooth auto-reconnect + Phone Home Shortcut & Quick Settings Tile for uninterrupted syncing!",
+                        "✓ Bluetooth 自動再接続とスマホのホームショートカット／クイック設定タイルを強化し、安定した同期を維持します！"
                     ),
                     onClose = { onActiveTutorialChange(null) }
                 )

@@ -207,6 +207,28 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIncomingIntent(intent: Intent?) {
+        if (intent?.action == ACTION_TRIGGER_BT_RECONNECT) {
+            BluetoothCompanionService.forceReconnect(this)
+            val targetName = (application as DxCarApp).preferences.config.value.companionTargetDeviceName
+            val tip = if (targetName.isNotBlank()) {
+                DxCarI18n.tr(
+                    "🔄 正在重新觸發藍牙連線：$targetName",
+                    "🔄 正在重新触发蓝牙连接：$targetName",
+                    "🔄 Reconnecting Bluetooth: $targetName",
+                    "🔄 Bluetooth 再接続中：$targetName"
+                )
+            } else {
+                DxCarI18n.tr(
+                    "🔄 正在重新觸發車機藍牙連線…",
+                    "🔄 正在重新触发车机蓝牙连接…",
+                    "🔄 Reconnecting Car Bluetooth…",
+                    "🔄 車載 Bluetooth に再接続中…"
+                )
+            }
+            android.widget.Toast.makeText(this, tip, android.widget.Toast.LENGTH_SHORT).show()
+            externalHudToast.value = tip
+            return
+        }
         val action = intent?.getStringExtra(EXTRA_ACTION)
         if (!action.isNullOrBlank()) {
             if (action == EXTRA_START_VOICE_NAV) {
@@ -332,10 +354,12 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        const val ACTION_TRIGGER_BT_RECONNECT = "com.dxcar.launcher.ACTION_TRIGGER_BT_RECONNECT"
         const val EXTRA_ACTION = "dxcar_extra_action"
         const val EXTRA_GO_DASHBOARD = "go_dashboard"
         const val EXTRA_OPEN_DRAWER = "open_drawer"
         const val EXTRA_OPEN_YOUTUBE = "open_youtube"
+        const val EXTRA_OPEN_YOUTUBE_HANDOFF = "open_youtube_handoff"
         const val EXTRA_OPEN_QUICK_PANEL = "open_quick_panel"
         const val EXTRA_OPEN_NOTIFICATIONS = "open_notifications"
         const val EXTRA_OPEN_SETTINGS = "open_settings"

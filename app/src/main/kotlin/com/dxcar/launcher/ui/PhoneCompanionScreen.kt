@@ -1,8 +1,13 @@
 package com.dxcar.launcher.ui
 
 import android.app.Activity
+import android.app.StatusBarManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
+import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
 import android.os.VibrationAttributes
@@ -12,6 +17,7 @@ import android.os.VibratorManager
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -52,6 +58,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AddToHomeScreen
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.BluetoothConnected
 import androidx.compose.material.icons.rounded.BrightnessAuto
@@ -121,12 +128,15 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.dxcar.launcher.BuildConfig
+import com.dxcar.launcher.MainActivity
+import com.dxcar.launcher.R
 import com.dxcar.launcher.billing.BillingTrialState
 import com.dxcar.launcher.comms.BluetoothCompanionService
 import com.dxcar.launcher.comms.BoxNotificationListenerService
 import com.dxcar.launcher.comms.BridgeConnectionStatus
 import com.dxcar.launcher.comms.BridgePacket
 import com.dxcar.launcher.comms.BridgeStatusState
+import com.dxcar.launcher.comms.DxCarBluetoothTileService
 import com.dxcar.launcher.comms.PacketType
 import com.dxcar.launcher.comms.TouchpadAction
 import com.dxcar.launcher.data.AppLanguage
@@ -205,6 +215,7 @@ fun PhoneCompanionScreen(
     onRestorePurchases: () -> Unit = {},
     onRefreshPairedDevices: () -> Unit,
     onSelectTargetDevice: (PairedBtDevice) -> Unit,
+    onSetTargetDeviceName: (String) -> Unit = {},
     onToggleAllowedPackage: (String) -> Unit,
     onSetAllowedPackages: (List<String>) -> Unit = {},
     onToggleSyncAllApps: (Boolean) -> Unit,
@@ -475,10 +486,10 @@ fun PhoneCompanionScreen(
                     "カテゴリ 1 · 車載機デュアル接続状態"
                 ),
                 hint = str(
-                    "連上車機藍牙或開啟手機熱點自動直連；無須手動輸入 IP",
-                    "连上车机蓝牙或开启手机热点自动直连；无需手动输入 IP",
-                    "Auto-connects via Car Bluetooth or Wi-Fi Hotspot — no manual IP needed",
-                    "車載 Bluetooth またはスマホのテザリングで自動直結（IP手入力不要）"
+                    "連上車機藍牙免持／SPP 即可自動穩定同步；可自訂預設藍牙裝置並將重連鈕加入桌面或下拉快捷鍵",
+                    "连上车机蓝牙免提／SPP 即可自动稳定同步；可自定义默认蓝牙设备并将重连按钮加入桌面或下拉快捷键",
+                    "Auto-syncs via Car Bluetooth; customize default target BT device and add Quick Reconnect shortcut/tile",
+                    "車載 Bluetooth で自動同期。既定の Bluetooth 機器設定やホーム画面・クイック設定タイル追加に対応"
                 )
             )
 
@@ -540,17 +551,17 @@ fun PhoneCompanionScreen(
                                         )
                                     config.companionTargetDeviceName.isNotBlank() ->
                                         str(
-                                            "藍牙目標：${config.companionTargetDeviceName}（連熱點亦自動雙向直連）",
-                                            "蓝牙目标：${config.companionTargetDeviceName}（连热点亦自动双向直连）",
-                                            "BT Target: ${config.companionTargetDeviceName} (Hotspot also auto-connects)",
-                                            "Bluetooth 対象：${config.companionTargetDeviceName}（テザリングでも自動接続）"
+                                            "預設藍牙目標：${config.companionTargetDeviceName}",
+                                            "默认蓝牙目标：${config.companionTargetDeviceName}",
+                                            "Default BT Target: ${config.companionTargetDeviceName}",
+                                            "既定の Bluetooth 対象：${config.companionTargetDeviceName}"
                                         )
                                     else ->
                                         str(
-                                            "只要手機已連車機藍牙通話或開啟熱點，系統即自動偵測連入",
-                                            "只要手机已连车机蓝牙通话或开启热点，系统即自动检测连入",
-                                            "Auto-detects & connects whenever paired to Car BT audio or Wi-Fi Hotspot",
-                                            "車載 Bluetooth 通話またはテザリング接続時に自動検出して接続します"
+                                            "只要手機已連上車機藍牙免持，系統即自動偵測連入",
+                                            "只要手机已连上车机蓝牙免提，系统即自动检测连入",
+                                            "Auto-detects & connects whenever paired to Car Bluetooth",
+                                            "車載 Bluetooth に接続すると自動で検出して接続します"
                                         )
                                 },
                                 color = colors.secondaryText,
@@ -614,7 +625,81 @@ fun PhoneCompanionScreen(
                         ) {
                             Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text(str("立即搜尋重連", "立即搜索重连", "Reconnect Now", "今すぐ再接続"))
+                            Text(str("再次觸發藍牙連線", "再次触发蓝牙连接", "Reconnect Bluetooth", "Bluetooth 再接続"))
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val sm = context.getSystemService(ShortcutManager::class.java)
+                                if (sm != null && sm.isRequestPinShortcutSupported) {
+                                    val shortcutIntent = Intent(context, MainActivity::class.java).apply {
+                                        action = MainActivity.ACTION_TRIGGER_BT_RECONNECT
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                                    }
+                                    val label = DxCarI18n.tr("DX-Car 藍牙連線", "DX-Car 蓝牙连接", "DX-Car BT Connect", "DX-Car BT接続")
+                                    val info = ShortcutInfo.Builder(context, "dxcar_bt_reconnect")
+                                        .setShortLabel(label)
+                                        .setLongLabel(label)
+                                        .setIcon(Icon.createWithResource(context, R.mipmap.ic_launcher))
+                                        .setIntent(shortcutIntent)
+                                        .build()
+                                    sm.requestPinShortcut(info, null)
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        DxCarI18n.tr(
+                                            "此裝置桌面不支援自動釘選捷徑，可改用「加入下拉快捷鍵」",
+                                            "此设备桌面不支持自动固定快捷方式，可改用「加入下拉快捷键」",
+                                            "Launcher does not support pinned shortcuts; try Add Quick Tile",
+                                            "ホーム画面のピン留め非対応です。「クイック設定に追加」をご利用ください"
+                                        ),
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            },
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Rounded.AddToHomeScreen, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(str("加入桌面捷徑", "加入桌面快捷方式", "Add Home Shortcut", "ホーム画面に追加"), fontSize = 12.sp)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    val sbm = context.getSystemService(StatusBarManager::class.java)
+                                    val label = DxCarI18n.tr("DX-Car 藍牙連線", "DX-Car 蓝牙连接", "DX-Car BT Connect", "DX-Car BT接続")
+                                    sbm?.requestAddTileService(
+                                        ComponentName(context, DxCarBluetoothTileService::class.java),
+                                        label,
+                                        Icon.createWithResource(context, R.mipmap.ic_launcher),
+                                        context.mainExecutor
+                                    ) { resultCode ->
+                                        val msg = if (resultCode == StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED ||
+                                            resultCode == StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED
+                                        ) {
+                                            DxCarI18n.tr("✓ 已加入下拉快速設定磚", "✓ 已加入下拉快捷设置砖", "✓ Added to Quick Settings", "✓ クイック設定に追加しました")
+                                        } else {
+                                            DxCarI18n.tr("可從系統下拉快捷鍵編輯面板拖入「DX-Car 藍牙連線」", "可从系统下拉快捷键编辑面板拖入「DX-Car 蓝牙连接」", "You can drag 'DX-Car BT Connect' in Quick Settings edit", "クイック設定の編集から「DX-Car BT接続」を追加できます")
+                                        }
+                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        DxCarI18n.tr(
+                                            "請從螢幕頂部下拉快捷鍵 → 點擊編輯，拖入「DX-Car 藍牙連線」",
+                                            "请从屏幕顶部下拉快捷键 → 点击编辑，拖入「DX-Car 蓝牙连接」",
+                                            "Pull down Quick Settings → Edit → drag 'DX-Car BT Connect'",
+                                            "クイック設定を開き「編集」から「DX-Car BT接続」を追加してください"
+                                        ),
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            },
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Rounded.Bluetooth, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(str("加入下拉快捷鍵", "加入下拉快捷键", "Add Quick Tile", "クイック設定に追加"), fontSize = 12.sp)
                         }
                         OutlinedButton(
                             onClick = {
@@ -648,10 +733,10 @@ fun PhoneCompanionScreen(
                                     )
                                 } else {
                                     DxCarI18n.tr(
-                                        "⏳ 已排入傳送佇列並喚醒連線：請確認車機已安裝開啟新版且連上同一藍牙或熱點",
-                                        "⏳ 已排入发送队列并唤醒连接：请确认车机已安装开启新版且连上同一蓝牙或热点",
-                                        "⏳ Queued & waking link: ensure Car has the latest app open on same BT or Hotspot",
-                                        "⏳ 送信キューに追加し接続を起動中：車載機側も最新版を起動し同じ BT／テザリングに接続してください"
+                                        "⏳ 已排入傳送佇列並喚醒藍牙連線：請確認車機已開啟新版且與手機藍牙已配對",
+                                        "⏳ 已排入发送队列并唤醒蓝牙连接：请确认车机已开启新版且与手机蓝牙已配对",
+                                        "⏳ Queued & waking BT link: ensure Car has the app open and BT paired",
+                                        "⏳ 送信キューに追加し BT 接続を起動中：車載機側も起動し Bluetooth ペアリング済みかご確認ください"
                                     )
                                 }
                             },
@@ -733,10 +818,10 @@ fun PhoneCompanionScreen(
                     ) {
                         Text(
                             text = str(
-                                "選擇配對的車機 AI Box（熱點連上亦自動通）",
-                                "选择配对的车机 AI Box（热点连上亦自动通）",
-                                "Select Paired Car AI Box (Hotspot Also Auto-Connects)",
-                                "ペアリング済みの車載 AI Box を選択（テザリングでも自動接続）"
+                                "選擇配對的車機 AI Box（或輸入預設藍牙裝置名稱）",
+                                "选择配对的车机 AI Box（或输入默认蓝牙设备名称）",
+                                "Select Paired Car AI Box (or set default BT device name)",
+                                "ペアリング済みの車載 AI Box を選択（または既定の機器名を入力）"
                             ),
                             color = colors.primaryText,
                             fontSize = 15.sp,
@@ -747,13 +832,30 @@ fun PhoneCompanionScreen(
                             Text(str("重新整理", "刷新", "Refresh", "更新"), fontSize = 12.sp)
                         }
                     }
+                    OutlinedTextField(
+                        value = config.companionTargetDeviceName,
+                        onValueChange = { onSetTargetDeviceName(it) },
+                        singleLine = true,
+                        label = {
+                            Text(
+                                str(
+                                    "預設觸發搜尋的藍牙裝置名稱",
+                                    "默认触发搜索的蓝牙设备名称",
+                                    "Default Target Bluetooth Device Name",
+                                    "既定の検索対象 Bluetooth 機器名"
+                                ),
+                                fontSize = 12.sp
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
                     if (pairedDevices.isEmpty()) {
                         Text(
                             text = str(
-                                "未偵測到已配對藍牙裝置（請先確認已授予藍牙權限，或直接開啟手機 Wi-Fi 熱點給車機連網）。",
-                                "未检测到已配对蓝牙设备（请先确认已授予蓝牙权限，或直接开启手机 Wi-Fi 热点给车机联网）。",
-                                "No paired Bluetooth devices found (grant Bluetooth permission first, or turn on Wi-Fi Hotspot for your Car).",
-                                "ペアリング済みの Bluetooth 機器が見つかりません（Bluetooth 権限を許可するか、Wi-Fi テザリングをオンにしてください）。"
+                                "未偵測到已配對藍牙裝置（請先確認已授予藍牙權限並於系統藍牙配對車機）。",
+                                "未检测到已配对蓝牙设备（请先确认已授予蓝牙权限并在系统蓝牙配对车机）。",
+                                "No paired Bluetooth devices found (grant Bluetooth permission and pair Car BT in system settings).",
+                                "ペアリング済みの Bluetooth 機器が見つかりません（Bluetooth 権限を許可し車載機とペアリングしてください）。"
                             ),
                             color = colors.secondaryText,
                             fontSize = 12.sp

@@ -1662,6 +1662,31 @@ private fun QuickTile(
     }
 }
 
+data class YoutubeHandoffRequest(
+    val url: String,
+    val positionSec: Int = 0,
+    val enterFullscreen: Boolean = true,
+    val seq: Long = System.currentTimeMillis()
+)
+
+object YoutubeHandoffBridge {
+    private val _pendingHandoff = kotlinx.coroutines.flow.MutableStateFlow<YoutubeHandoffRequest?>(null)
+    val pendingHandoff: kotlinx.coroutines.flow.StateFlow<YoutubeHandoffRequest?> = _pendingHandoff
+
+    fun requestHandoff(url: String, positionSec: Int = 0, enterFullscreen: Boolean = true) {
+        _pendingHandoff.value = YoutubeHandoffRequest(
+            url = url,
+            positionSec = positionSec,
+            enterFullscreen = enterFullscreen,
+            seq = System.currentTimeMillis()
+        )
+    }
+
+    fun consume() {
+        _pendingHandoff.value = null
+    }
+}
+
 /**
  * Bridge connecting steering wheel / car media buttons (both KeyEvent and MediaSession)
  * directly to Page 2's EmbeddedYoutubePlayerCard while it is active.
@@ -1775,6 +1800,7 @@ fun EmbeddedYoutubePlayerCard(
     // Plain thread-safe array [currentSec, durationSec] updated from JavaBridge without Compose Snapshot overhead
     val videoTimeHolder = remember { FloatArray(2) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    val pendingHandoff by YoutubeHandoffBridge.pendingHandoff.collectAsState()
 
     fun evalYoutubeJs(js: String) {
         mainHandler.post {
@@ -1849,6 +1875,16 @@ fun EmbeddedYoutubePlayerCard(
     fun enterRightPaneFullscreen() {
         isRightPaneFullscreen = true
         evalYoutubeJs(applyRightPaneFsCssJs)
+    }
+
+    LaunchedEffect(pendingHandoff, webViewRef) {
+        val req = pendingHandoff ?: return@LaunchedEffect
+        val wv = webViewRef ?: return@LaunchedEffect
+        YoutubeHandoffBridge.consume()
+        wv.loadUrl(req.url)
+        if (req.enterFullscreen) {
+            enterRightPaneFullscreen()
+        }
     }
 
     fun exitRightPaneFullscreen() {
@@ -2622,31 +2658,29 @@ fun EmbeddedYoutubePlayerCard(
             }
         }
 
-        // Pinned top-left YouTube App handoff button in right-pane fullscreen mode
-        if (isRightPaneFullscreen) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(start = 12.dp, top = 12.dp)
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(Color(0xE6FF0000))
-                    .border(1.dp, Color.White.copy(alpha = 0.45f), RoundedCornerShape(9.dp))
-                    .clickable { openCurrentYoutubeInApp() }
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.PlayArrow,
-                    contentDescription = str(
-                        "於 YouTube App 接續播放",
-                        "在 YouTube App 中继续播放",
-                        "Continue in YouTube App",
-                        "YouTube アプリで続きから再生"
-                    ),
-                    tint = Color.White,
-                    modifier = Modifier.size(21.dp)
-                )
-            }
+        // Pinned top-left YouTube App handoff button (always visible on Page 2 YouTube: windowed & fullscreen)
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(start = 10.dp, top = if (isRightPaneFullscreen) 10.dp else 44.dp)
+                .size(30.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xE6FF0000))
+                .border(1.dp, Color.White.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                .clickable { openCurrentYoutubeInApp() }
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.PlayArrow,
+                contentDescription = str(
+                    "於 YouTube App 接續播放",
+                    "在 YouTube App 中继续播放",
+                    "Continue in YouTube App",
+                    "YouTube アプリで続きから再生"
+                ),
+                tint = Color.White,
+                modifier = Modifier.size(19.dp)
+            )
         }
 
         // Brief 2.2s hint when entering right-half YouTube fullscreen

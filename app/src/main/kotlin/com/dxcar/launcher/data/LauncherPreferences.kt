@@ -220,6 +220,7 @@ data class LauncherConfig(
     val showSixShortcutsInMediaPanel: Boolean = true,
     val showUiSwitchHint: Boolean = true,
     val backupDefaultName: String = "DXCar_Settings_Backup",
+    val weatherAppPackage: String = "",
     val primarySplitRatio: Float = 0.70f,
     val is24HourClock: Boolean = false,
     val prefer60FpsEnabled: Boolean = true,
