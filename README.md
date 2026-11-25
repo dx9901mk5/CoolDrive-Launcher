@@ -34,6 +34,16 @@ Follow these **3 steps** to join the closed test and install directly from Googl
 
 ---
 
+## 🎬 實機功能演示影片 / Demo Video (YouTube)
+
+[![Watch DX-Car Launcher Demo on YouTube](https://img.youtube.com/vi/vCQj7nQV7m8/maxresdefault.jpg)](https://youtu.be/vCQj7nQV7m8)
+
+- **YouTube 觀看連結 / Watch on YouTube**：👉 [https://youtu.be/vCQj7nQV7m8](https://youtu.be/vCQj7nQV7m8)
+- **繁體中文說明**：展示 10 吋車機平板分割首頁（70% 即時路況地圖 ＋ YouTube Music 預設控制與封面交換）、手機端即時推播測試通知至車機橫幅、手機 100% 純黑 OLED 遠端滑鼠觸控板操作車機 3D 游標、大圖示 App 選單、AOSP 分屏設定與四語系切換介面。
+- **English Description**: Demonstrates the 10-inch tablet/car split dashboard (70% live traffic map + YouTube Music card & pane swap), live smartphone-to-car notification banner sync, 100% pure-black OLED remote touchpad driving the 3D car cursor, large-icon app drawer, AOSP split-screen setup, and instant 4-language UI switching.
+
+---
+
 ## 📸 畫面預覽 / Screenshots
 
 | 第一介面：地圖 ＋ 天氣音樂捷徑 (Page 1 Split) | 即時路況圖層與夜間模式 (Map Layers & Night Mode) |
