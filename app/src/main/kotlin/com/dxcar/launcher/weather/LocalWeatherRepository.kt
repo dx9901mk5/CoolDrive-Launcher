@@ -131,25 +131,46 @@ class LocalWeatherRepository(private val context: Context) {
 
     fun openGoogleWeatherApp(ctx: Context) {
         val candidates = listOf(
-            // 1. Google App native Weather Frog / Weather page shortcut
-            Intent(Intent.ACTION_VIEW, Uri.parse("dynact://velour/weather/ProxyActivity")).apply {
+            // 1. Official Google App native Froggy Weather deep link -> launches WeatherActivity directly!
+            Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/gaweather")).apply {
+                addCategory(Intent.CATEGORY_DEFAULT)
+                addCategory(Intent.CATEGORY_BROWSABLE)
                 setPackage(GOOGLE_APP_PACKAGE)
             },
-            // 2. Standalone Google Weather app (if installed)
-            ctx.packageManager.getLaunchIntentForPackage("com.google.android.apps.weather"),
-            // 3. Google App Search Weather card
+            // 2. Explicit DynamicActivityTrampoline with /gaweather URI for OEM / AI Box ROMs
+            Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/gaweather")).apply {
+                setClassName(
+                    GOOGLE_APP_PACKAGE,
+                    "com.google.android.apps.gsa.velour.DynamicActivityTrampoline"
+                )
+            },
+            // 3. Pixel / Standalone Google Weather app (if installed)
+            ctx.packageManager.getLaunchIntentForPackage(GOOGLE_WEATHER_PACKAGE),
+            // 4. Google App Search Weather card fallback
             Intent(Intent.ACTION_WEB_SEARCH).apply {
                 setPackage(GOOGLE_APP_PACKAGE)
                 putExtra(SearchManager.QUERY, "weather")
             },
-            // 4. Web fallback directly to Google Weather page
+            // 5. Web fallback if Google App is not installed
             Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=weather"))
         )
+        val launchBundle = runCatching {
+            android.app.ActivityOptions.makeBasic()
+                .setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY)
+                .toBundle()
+        }.getOrNull()
+
         for (intent in candidates) {
             if (intent == null) continue
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val resolved = ctx.packageManager.resolveActivity(intent, 0) != null
+            if (!resolved && intent.`package` != null) continue
             val ok = runCatching {
-                ctx.startActivity(intent)
+                if (launchBundle != null) {
+                    ctx.startActivity(intent, launchBundle)
+                } else {
+                    ctx.startActivity(intent)
+                }
                 true
             }.getOrDefault(false)
             if (ok) break

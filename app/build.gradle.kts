@@ -12,8 +12,8 @@ android {
     applicationId = "com.dxcar.launcher"
     minSdk = 28
     targetSdk = 35
-    versionCode = 30
-    versionName = "1.7.1"
+    versionCode = 32
+    versionName = "1.7.3"
   }
 
   flavorDimensions += "channel"
@@ -45,6 +45,9 @@ android {
       isMinifyEnabled = false
       signingConfig = signingConfigs.getByName("dxcar")
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+      ndk {
+        debugSymbolLevel = "SYMBOL_TABLE"
+      }
     }
   }
 

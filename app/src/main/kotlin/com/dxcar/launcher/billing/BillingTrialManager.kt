@@ -127,7 +127,8 @@ class BillingTrialManager(context: Context) : PurchasesUpdatedListener {
             .setProductList(productList)
             .build()
 
-        billingClient.queryProductDetailsAsync(params) { result, detailsList ->
+        billingClient.queryProductDetailsAsync(params) { result, queryResult ->
+            val detailsList = queryResult.productDetailsList
             if (result.responseCode == BillingClient.BillingResponseCode.OK) {
                 val item = detailsList.firstOrNull { it.productId == PRODUCT_LIFETIME_PRO }
                 if (item != null) {
