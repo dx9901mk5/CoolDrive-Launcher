@@ -120,25 +120,57 @@ class MediaControlBridge(
         }
     }
 
+    private val ignoredNonMusicPackages = setOf(
+        "com.google.android.googlequicksearchbox",
+        "com.google.android.gms",
+        "com.android.systemui",
+        "com.google.android.tts",
+        "com.google.android.youtube" // Page 1 media card focuses on music apps unless YouTube is actively playing
+    )
+
+    private fun isEligibleMusicController(controller: MediaController): Boolean {
+        val pkg = controller.packageName
+        if (pkg == context.packageName) return false
+        val state = controller.playbackState?.state
+        val isActivelyPlaying = state == PlaybackState.STATE_PLAYING || state == PlaybackState.STATE_BUFFERING
+        if (pkg in ignoredNonMusicPackages && !isActivelyPlaying) return false
+        return true
+    }
+
     private fun updateControllers(controllers: List<MediaController>) {
         selectedController?.unregisterCallback(controllerCallback)
-        activeControllers = controllers
+        val eligible = controllers.filter(::isEligibleMusicController)
+        activeControllers = eligible
 
-        val rememberedPkg = preferredPackage ?: preferences.config.value.lastMediaPackage.takeIf { it.isNotBlank() }
-        val picked = controllers.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
-            ?: rememberedPkg?.let { target -> controllers.firstOrNull { it.packageName == target } }
-            ?: pickBestController(controllers)
+        val cfg = preferences.config.value
+        val rememberedPkg = preferredPackage
+            ?: cfg.lastMediaPackage
+                .takeIf { it.isNotBlank() && it != context.packageName && it !in ignoredNonMusicPackages && isPackageInstalled(it) }
+            ?: findBestInstalledMusicApp()
+
+        val picked = eligible.firstOrNull {
+            val st = it.playbackState?.state
+            st == PlaybackState.STATE_PLAYING || st == PlaybackState.STATE_BUFFERING
+        }
+            ?: rememberedPkg?.let { target -> eligible.firstOrNull { it.packageName == target } }
+            ?: pickBestController(eligible, rememberedPkg)
 
         selectedController = picked
         picked?.registerCallback(controllerCallback)
         publishSelectedState()
     }
 
-    private fun pickBestController(controllers: List<MediaController>): MediaController? {
+    private fun pickBestController(controllers: List<MediaController>, rememberedPkg: String?): MediaController? {
         if (controllers.isEmpty()) return null
-        return controllers.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
-            ?: controllers.firstOrNull { it.metadata != null }
-            ?: controllers.first()
+        val activeOrPaused = controllers.firstOrNull {
+            val st = it.playbackState?.state
+            (st == PlaybackState.STATE_PLAYING || st == PlaybackState.STATE_PAUSED) && it.metadata != null
+        }
+        if (activeOrPaused != null) return activeOrPaused
+        // If we have a remembered/default music app (like YT Music) installed and no other app is paused with metadata,
+        // return null so the Media Card cleanly displays YT Music ready to wake & play!
+        if (rememberedPkg != null) return null
+        return controllers.firstOrNull { it.metadata != null } ?: controllers.first()
     }
 
     private fun publishSelectedState() {
@@ -154,7 +186,8 @@ class MediaControlBridge(
 
         if (controller == null) {
             val cfg = preferences.config.value
-            val fallbackPkg = cfg.lastMediaPackage.takeIf { it.isNotBlank() && isPackageInstalled(it) }
+            val fallbackPkg = cfg.lastMediaPackage
+                .takeIf { it.isNotBlank() && it != context.packageName && it !in ignoredNonMusicPackages && isPackageInstalled(it) }
                 ?: findBestInstalledMusicApp()
             if (fallbackPkg != null) {
                 val label = cfg.lastMediaAppName.takeIf { it.isNotBlank() && fallbackPkg == cfg.lastMediaPackage }
@@ -163,12 +196,12 @@ class MediaControlBridge(
                 val savedTitle = if (fallbackPkg == cfg.lastMediaPackage && cfg.lastMediaTitle.isNotBlank()) {
                     cfg.lastMediaTitle
                 } else {
-                    "點擊 ▶ 繼續播放 $label"
+                    "點擊 ▶ 播放 $label"
                 }
                 val savedArtist = if (fallbackPkg == cfg.lastMediaPackage && cfg.lastMediaArtist.isNotBlank()) {
-                    "${cfg.lastMediaArtist} · 上次使用 $label"
+                    "${cfg.lastMediaArtist} · $label"
                 } else {
-                    "上次使用的音樂 App：$label（點 ▶ 直接喚醒續播）"
+                    "預設音樂播放器：$label（點擊 ▶ 直接喚醒播放）"
                 }
                 _mediaState.value = ActiveMediaState(
                     hasSession = false,
@@ -209,13 +242,15 @@ class MediaControlBridge(
             pb?.state == PlaybackState.STATE_BUFFERING
         val (canFav, isFav) = detectFavoriteCapability(controller, pkg, meta, pb)
 
-        // Persist the latest active music app & track so cold-boot resume works seamlessly!
-        preferences.recordLastMediaSession(
-            packageName = pkg,
-            appName = appLabel,
-            title = if (title == appLabel) "" else title,
-            artist = if (artist == appLabel) "" else artist
-        )
+        // Persist the latest active music app & track (never overwrite with launcher or non-music helpers!)
+        if (pkg != context.packageName && pkg !in ignoredNonMusicPackages) {
+            preferences.recordLastMediaSession(
+                packageName = pkg,
+                appName = appLabel,
+                title = if (title == appLabel) "" else title,
+                artist = if (artist == appLabel) "" else artist
+            )
+        }
 
         _mediaState.value = ActiveMediaState(
             hasSession = true,
@@ -238,13 +273,12 @@ class MediaControlBridge(
 
     private fun findBestInstalledMusicApp(): String? {
         val candidates = listOf(
+            "com.google.android.apps.youtube.music",
             "com.netease.cloudmusic",
             "com.spotify.music",
-            "com.google.android.apps.youtube.music",
             "com.skysoft.kkbox.android",
             "com.apple.android.music",
-            "org.videolan.vlc",
-            "com.google.android.youtube"
+            "org.videolan.vlc"
         )
         return candidates.firstOrNull { isPackageInstalled(it) }
     }
