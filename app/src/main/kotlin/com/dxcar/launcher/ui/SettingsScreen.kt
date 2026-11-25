@@ -1295,47 +1295,6 @@ fun SettingsScreen(
                             checked = config.is24HourClock,
                             onCheckedChange = { checked -> onUpdateConfig { it.copy(is24HourClock = checked) } }
                         )
-
-                        // Prominent 3D Cursor Tutorial Row
-                        Surface(
-                            color = colors.cardSurfaceElevated,
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                                    Text(
-                                        str(
-                                            "🧊 Dock「3D 俯瞰」類滑鼠指標操作說明",
-                                            "🧊 Dock「3D 俯瞰」类鼠标指针操作说明",
-                                            "🧊 Dock 3D Tilt & Mouse Pointer Guide",
-                                            "🧊 ドック「3D 俯瞰」ポインター操作ガイド"
-                                        ),
-                                        color = colors.primaryText,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        str(
-                                            "單指移動＝一般觸控 · 長壓 2 秒不放＝左右縮放／上下 3D 俯瞰",
-                                            "单指移动＝一般触控 · 长按 2 秒不放＝左右缩放／上下 3D 俯瞰",
-                                            "1-Finger Move = Touch · Hold 2s = Left/Right Zoom & Up/Down 3D Tilt",
-                                            "1本指移動＝通常タッチ · 2秒長押し維持＝左右ズーム／上下 3D 視点"
-                                        ),
-                                        color = colors.secondaryText,
-                                        fontSize = 11.sp
-                                    )
-                                }
-                                TutorialPillButton(
-                                    label = str("教學", "教程", "Guide", "ガイド"),
-                                    onClick = { onActiveTutorialChange(CarSettingsTutorialTopic.CURSOR_3D) }
-                                )
-                            }
-                        }
                     }
                 }
 

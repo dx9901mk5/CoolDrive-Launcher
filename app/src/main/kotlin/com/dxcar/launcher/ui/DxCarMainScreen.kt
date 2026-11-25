@@ -656,7 +656,7 @@ fun DxCarRootScreen(
                     unreadCount = unreadCount,
                     pinnedSlots = dockSlots,
                     rightHandDrive = config.rightHandDrive,
-                    is3DCursorActive = cursor3DActive,
+                    is3DCursorActive = false,
                     onToggleAppDrawer = {
                         destination = if (destination == LauncherDestination.APP_DRAWER) {
                             LauncherDestination.DASHBOARD_SPLIT
@@ -685,7 +685,7 @@ fun DxCarRootScreen(
                         }
                     },
                     onNotificationsClick = { showNotificationCenter = !showNotificationCenter },
-                    onToggle3DCursor = ::toggle3DPointerGlobal,
+                    onToggle3DCursor = null,
                     onVoiceNavClick = {
                         destination = LauncherDestination.DASHBOARD_SPLIT
                         onStartGeminiVoiceNav()
@@ -1629,17 +1629,8 @@ fun DxCarRootScreen(
                 )
             }
 
-            // Fallback in-app 3D Cursor & Remote Mouse Cursor when SYSTEM_ALERT_WINDOW isn't enabled yet
+            // Fallback in-app Remote Mouse Cursor when SYSTEM_ALERT_WINDOW isn't enabled yet
             if (!Settings.canDrawOverlays(context)) {
-                if (cursor3DActive) {
-                    Interactive3DCursorOverlay(
-                        showTutorial = cursor3DTutorial,
-                        onOpenTutorial = { Cursor3DStateHolder.openTutorial() },
-                        onCloseTutorial = { Cursor3DStateHolder.closeTutorial() },
-                        onExit3DMode = { Cursor3DStateHolder.setActive(false) },
-                        onSetWindowPassThrough = {}
-                    )
-                }
                 RemoteCarMousePointerOverlay(cursorState = remoteCursor)
             }
         }

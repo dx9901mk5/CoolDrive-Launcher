@@ -178,7 +178,6 @@ class PersistentDockOverlayService :
         setupDockWindow(app)
         setupBannerWindow(app)
         setupPlanCPanelWindow(app)
-        setupCursor3DWindow(app)
         setupRemoteMouseWindow(app)
         setupYoutubeHandoffWindow(app)
         observeVisibilityAndLayout(app)
@@ -432,7 +431,7 @@ class PersistentDockOverlayService :
                                 rightHandDrive = config.rightHandDrive,
                                 isOverlayMode = true,
                                 isOverlayPinnedOpen = pinnedOpen,
-                                is3DCursorActive = cursor3DOn,
+                                is3DCursorActive = false,
                                 onToggleAppDrawer = { bringDxCarToFront(MainActivity.EXTRA_OPEN_DRAWER) },
                                 onGoDashboard = {
                                     if (config.overlayAutoCollapseEnabled && !pinnedOpen) {
@@ -516,12 +515,7 @@ class PersistentDockOverlayService :
                                         ).show()
                                     }
                                 },
-                                onToggle3DCursor = {
-                                    val nowOn = Cursor3DStateHolder.toggle()
-                                    if (nowOn && config.overlayAutoCollapseEnabled && !pinnedOpen) {
-                                        isCollapsed.value = true
-                                    }
-                                },
+                                onToggle3DCursor = null,
                                 onVoiceNavClick = {
                                     if (config.overlayAutoCollapseEnabled && !pinnedOpen) {
                                         isCollapsed.value = true
