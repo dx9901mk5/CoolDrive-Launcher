@@ -118,6 +118,7 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 enum class CarSettingsTutorialTopic {
+    DUAL_UI_GUIDE,
     CURSOR_3D,
     PHONE_PAIRING,
     STOCK_DOCK_CONFLICT
@@ -368,9 +369,102 @@ fun SettingsScreen(
                 val cardPlanAndOffline: @Composable (Modifier) -> Unit = { mod ->
                     SettingsSectionCard(
                         icon = Icons.Rounded.Science,
-                        title = str("首頁方案與離線地圖管理", "Home Plan & Offline Maps", "ホームプラン・オフライン地図"),
+                        title = str("首頁方案、第一／第二介面教學與離線地圖", "Home Plan, UI 1 & 2 Guide & Offline Maps", "ホームプラン・第1/第2画面ガイド・オフライン地図"),
+                        headerTrailing = {
+                            TutorialPillButton(
+                                label = str("放大教學", "Full Guide", "拡大ガイド"),
+                                onClick = { onActiveTutorialChange(CarSettingsTutorialTopic.DUAL_UI_GUIDE) }
+                            )
+                        },
                         modifier = mod
                     ) {
+                        // Built-in First UI (1/2) & Second UI (2/2) Usage Guide Description Card
+                        Surface(
+                            color = colors.cardSurfaceElevated,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, colors.accent.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(13.dp),
+                                verticalArrangement = Arrangement.spacedBy(7.dp)
+                            ) {
+                                Text(
+                                    text = str(
+                                        "📖 第一介面 (1/2) ＆ 第二介面 (2/2) 操作說明",
+                                        "📖第一界面 (1/2) ＆ 第二界面 (2/2) 操作说明",
+                                        "📖 First UI (1/2) & Second UI (2/2) Usage Guide",
+                                        "📖 第1画面 (1/2) ＆ 第2画面 (2/2) 操作ガイド"
+                                    ),
+                                    color = colors.accent,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                                Text(
+                                    text = str(
+                                        "• 切換第一／第二介面：按住畫面中央分隔線握把（1/2 或 2/2）向左或向右滑動即可切換。",
+                                        "• 切换第一／第二界面：按住画面中央分隔线握把（1/2 或 2/2）向左或向右滑动即可切换。",
+                                        "• Switch UI 1 / UI 2: Drag the center divider handle (1/2 or 2/2) left or right.",
+                                        "• 第1／第2画面の切替：中央の区切りバー（1/2・2/2）を左右にスライドします。"
+                                    ),
+                                    color = colors.primaryText,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = str(
+                                        "① 第一介面（導航地圖 ＋ 音樂天氣）：\n" +
+                                            "  - 卡片互換：點擊播放器「專輯封面」即可左右交換主／副視窗大小（下方按鈕與 6 格捷徑皆可直接點擊）。\n" +
+                                            "  - 天氣與播放 App：點擊封面左上角「天氣地點膠囊」直開 Google 天氣；點擊點讚（♡）旁的「App 圖示」直入該音樂 App。\n" +
+                                            "  - 地圖圖層與路況：點擊地圖右下角「圖層圓鈕」可切換標準／衛星／3D 向量與疊加即時路況。",
+                                        "① 第一界面（导航地图 ＋ 音乐天气）：\n" +
+                                            "  - 卡片互换：点击播放器「专辑封面」即可左右交换主／副窗口大小（下方按钮与 6 格快捷均可直接点击）。\n" +
+                                            "  - 天气与播放 App：点击封面左上角「天气地点胶囊」直开 Google 天气；点击点赞（♡）旁的「App 图标」直入该音乐 App。\n" +
+                                            "  - 地图图层与路况：点击地图右下角「图层圆钮」可切换标准／卫星／3D 矢量与叠加实时路况。",
+                                        "① First UI (Map + Media & Weather):\n" +
+                                            "  - Swap Cards: Tap the Album Cover to swap left/right pane sizes (all bottom controls & 6 shortcuts stay directly clickable).\n" +
+                                            "  - Weather & App: Tap top-left weather pill on cover for Google Weather; tap App Icon next to Like (♡) to open the player app.\n" +
+                                            "  - Map Layers & Traffic: Tap bottom-right Layers button to switch Standard/Satellite/3D & live traffic.",
+                                        "① 第1画面（ナビ地図＋音楽・天気）：\n" +
+                                            "  - カード入替：「アルバムカバー」をタップで左右サイズを入替（下部ボタンと6枠ショートカットはそのまま操作可能）。\n" +
+                                            "  - 天気＆アプリ：カバー左上の天気ピルで Google 天気を表示。いいね（♡）横のアプリアイコンで再生アプリを起動。\n" +
+                                            "  - 地図レイヤー＆渋滞：地図右下のレイヤーボタンで標準／衛星／3D地図とリアルタイム渋滞を切替。"
+                                    ),
+                                    color = colors.secondaryText,
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 17.sp
+                                )
+                                Text(
+                                    text = str(
+                                        "② 第二介面（1:1 內建地圖 ＋ YouTube 視窗播放 · 預設 720p）：\n" +
+                                            "  - 左右視窗對調：長壓中央「2/2 分隔線」即可平滑互換地圖與 YouTube 左右位置。\n" +
+                                            "  - 右半邊全螢幕：於 YouTube「上半部影片區上滑」（或點右下角全螢幕鈕）進入滿版右半全螢幕；「下滑」或再點按鈕退出。\n" +
+                                            "  - 全螢幕快轉手勢：左 1/3 點兩下倒退 10 秒、右 1/3 點兩下快轉 10 秒；左右 1/3 點兩下按住不放可「持續加速倒退／快轉」；左右橫滑可拖曳時間軸（中央 1/3 維持 YouTube 原生點控）。\n" +
+                                            "  - 背景持續播音：支援方向盤鍵控播；切去 Google 地圖、瀏覽器或回原車機盒桌面皆持續背景播放（僅其他音樂 App 播放時自動暫停）。",
+                                        "② 第二界面（1:1 内置地图 ＋ YouTube 窗口播放 · 默认 720p）：\n" +
+                                            "  - 左右窗口对调：长按中央「2/2 分隔线」即可平滑互换地图与 YouTube 左右位置。\n" +
+                                            "  - 右半边全屏：在 YouTube「上半部视频区上滑」（或点右下角全屏钮）进入满版右半全屏；「下滑」或再点按钮退出。\n" +
+                                            "  - 全屏快进手势：左 1/3 双击快退 10 秒、右 1/3 双击快进 10 秒；左右 1/3 双击按住可「持续加速快退／快进」；左右横滑可拖拽时间轴（中央 1/3 维持 YouTube 原生点控）。\n" +
+                                            "  - 后台持续播音：支持方向盘按键控播；切去 Google 地图、浏览器或回原车机盒桌面均持续后台播放（仅其他音乐 App 播放时自动暂停）。",
+                                        "② Second UI (1:1 Map + YouTube Player · Default 720p):\n" +
+                                            "  - Swap Left/Right: Long-press the center 2/2 divider line to swap Map and YouTube sides.\n" +
+                                            "  - Right-Half Fullscreen: Swipe UP on the upper video area (or tap player fullscreen icon) to fill right pane; Swipe DOWN to exit.\n" +
+                                            "  - Fullscreen Gestures: Double-tap Left/Right 1/3 for -10s / +10s; double-tap & hold Left/Right 1/3 for accelerated rewind/fast-forward; swipe horizontally to scrub timeline (Center 1/3 keeps native YouTube tap).\n" +
+                                            "  - Background Audio: Keeps playing across Google Maps, Browser & Stock Launcher; pauses automatically only when another music app plays.",
+                                        "② 第2画面（1:1 内蔵地図＋YouTube ウィンドウ再生・標準 720p）：\n" +
+                                            "  - 左右入替：中央の「2/2 区切り線」を長押しで地図と YouTube の左右を入れ替え。\n" +
+                                            "  - 右半分フルスクリーン：上部の動画エリアを上にスワイプ（または右下の全画面ボタン）で右半分全画面へ。下スワイプで終了。\n" +
+                                            "  - 全画面ジェスチャー：左/右 1/3 ダブルタップで 10秒戻し/送り、ダブルタップ長押しで高速戻し/送り、左右スワイプでシーク（中央 1/3 は標準操作）。\n" +
+                                            "  - バックグラウンド再生：Google マップ・ブラウザ・標準ホームへ移動しても再生継続（他音楽アプリ再生時のみ自動一時停止）。"
+                                    ),
+                                    color = colors.secondaryText,
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 17.sp
+                                )
+                            }
+                        }
+
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             HomeExperimentMode.visibleEntries.forEach { mode ->
                                 val selected = config.homeExperimentMode == mode
@@ -1626,6 +1720,21 @@ fun SettingsScreen(
 
         // EXTRA-LARGE FONT TUTORIAL MODALS (Triggered by clicking any "教學" button!)
         when (activeTutorial) {
+            CarSettingsTutorialTopic.DUAL_UI_GUIDE -> {
+                ExtraLargeTutorialModal(
+                    title = "📖 第一介面 (1/2) ＆ 第二介面 (2/2) · 完整操作教學",
+                    steps = listOf(
+                        "【切換第一／第二介面】按住畫面中央分隔線握把（1/2 或 2/2）向左或向右拖曳滑動，即可在「① 第一介面」與「② 第二介面」之間切換。",
+                        "【① 第一介面：封面交換與快捷操作】點擊播放器「專輯封面」即可左右交換地圖與播放器大小；封面左上角「天氣地點膠囊」點擊直開 Google 天氣；下方點讚（♡）旁的「App 圖示」點擊直入該播放 App；地圖右下角「圖層圓鈕」整合切換標準／衛星／3D 底圖與即時路況。",
+                        "【② 第二介面：長壓互換與右半邊全螢幕】長壓中央「2/2 分隔線」可對調左右視窗位置；於 YouTube「上半部影片區向上滑動」（或點播放器右下角全螢幕鈕）即可進入右半邊滿版全螢幕，「向下滑動」或再點按鈕即可退出。",
+                        "【② 第二介面：YouTube 全螢幕快轉手勢】全螢幕狀態下：左 1/3 點兩下倒退 10 秒、右 1/3 點兩下快轉 10 秒；左右 1/3「點兩下後按住不放」可持續加速倒退／快轉；左右水平滑動可直接拖曳時間軸（中央 1/3 維持 YouTube 原生點控）。",
+                        "【② 第二介面：720p 預設與跨系統背景播放】預設以 720p 播放並支援方向盤媒體鍵；切去 Google 地圖、瀏覽器、系統設定或退回原車機盒桌面皆會持續背景播放聲音，僅當其他音樂 App 開始播放時才自動暫停。"
+                    ),
+                    highlightNote = "💡 提示：點擊 Dock 左下角按鈕在任何非首頁畫面皆會直接帶您回到啟動器首頁；已在首頁時點擊則展開 App 清單！",
+                    onClose = { onActiveTutorialChange(null) }
+                )
+            }
+
             CarSettingsTutorialTopic.CURSOR_3D -> {
                 ExtraLargeTutorialModal(
                     title = "🧊 Dock「3D 俯瞰」類滑鼠指標 · 操作教學",

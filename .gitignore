@@ -15,6 +15,7 @@ app/signing/*.jks
 app/signing/*.keystore
 私鑰備份/
 dist/*.apk
+dist/*.aab
 臨時影片/
 *.mp4
 *.mov
