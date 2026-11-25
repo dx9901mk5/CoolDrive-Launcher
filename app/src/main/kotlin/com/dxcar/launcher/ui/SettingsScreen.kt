@@ -2,6 +2,10 @@ package com.dxcar.launcher.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,12 +32,15 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.DisplaySettings
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Mic
@@ -43,6 +50,7 @@ import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Settings
@@ -53,6 +61,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -154,6 +163,8 @@ fun SettingsScreen(
     onLaunchRealMapsSplitScreen: () -> Unit,
     onLaunchRealMapsFreeform: () -> Unit,
     onOpenSplitShortcutCreator: () -> Unit,
+    onExportConfigJson: () -> String = { "{}" },
+    onImportConfigJson: (String) -> Boolean = { false },
     onResetSettingsToDefaults: () -> Unit,
     onRefreshPermissions: () -> Unit,
     onRequestRuntimePermissions: () -> Unit,
@@ -1147,6 +1158,23 @@ fun SettingsScreen(
                         )
 
                         SettingsToggleRow(
+                            title = str(
+                                "顯示切換介面提示（第一／第二介面）",
+                                "显示切换界面提示（第一／第二界面）",
+                                "Show Page-Switch Hint Pill",
+                                "画面切り替えヒントを表示"
+                            ),
+                            subtitle = str(
+                                "在第一／第二介面間滑動時顯示中央提示，點提示上的「不再顯示」可關閉，也可於此重新開啟",
+                                "在第一／第二界面间滑动时显示中央提示，点提示上的「不再显示」可关闭，也可在此重新开启",
+                                "Shows the center pill when switching Page 1 / Page 2; re-enable here if dismissed",
+                                "ページ1／2切り替え時に中央ヒントを表示します（非表示にした場合はここで再有効化）"
+                            ),
+                            checked = config.showUiSwitchHint,
+                            onCheckedChange = { checked -> onUpdateConfig { it.copy(showUiSwitchHint = checked) } }
+                        )
+
+                        SettingsToggleRow(
                             title = str("24 小時制時鐘", "24 小时制时钟", "24-Hour Clock", "24時間表示"),
                             subtitle = str(
                                 "關閉時顯示單行 12 小時制（如 8:20 PM）；點擊左上 Wi-Fi 圖示可展開下拉快捷鍵",
@@ -1853,6 +1881,214 @@ fun SettingsScreen(
                                     }
                                 }
                                 Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, tint = colors.accent)
+                            }
+                        }
+
+                        // BACKUP & RESTORE CARD (Local + Google Drive App)
+                        var backupNameInput by remember(config.backupDefaultName) {
+                            mutableStateOf(config.backupDefaultName)
+                        }
+                        var backupStatusMsg by remember { mutableStateOf<String?>(null) }
+
+                        fun sanitizedBackupBaseName(): String {
+                            val cleaned = backupNameInput.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                            return cleaned.ifBlank { "DXCar_Settings_Backup" }
+                        }
+
+                        val saveLocalLauncher = rememberLauncherForActivityResult(
+                            contract = ActivityResultContracts.CreateDocument("application/json")
+                        ) { uri ->
+                            if (uri != null) {
+                                val ok = runCatching {
+                                    val jsonText = onExportConfigJson()
+                                    context.contentResolver.openOutputStream(uri)?.use { out ->
+                                        out.write(jsonText.toByteArray(Charsets.UTF_8))
+                                    } ?: error("Cannot open output stream")
+                                }.isSuccess
+                                backupStatusMsg = if (ok) {
+                                    DxCarI18n.tr(
+                                        "✅ 已成功備份設定至本機檔案",
+                                        "✅ 已成功备份设置至本地文件",
+                                        "✅ Settings backed up to local file",
+                                        "✅ 設定をローカルファイルにバックアップしました"
+                                    )
+                                } else {
+                                    DxCarI18n.tr(
+                                        "❌ 寫入本機備份檔失敗",
+                                        "❌ 写入本地备份文件失败",
+                                        "❌ Failed to write local backup file",
+                                        "❌ ローカルバックアップの保存に失敗しました"
+                                    )
+                                }
+                            }
+                        }
+
+                        val restoreLauncher = rememberLauncherForActivityResult(
+                            contract = ActivityResultContracts.OpenDocument()
+                        ) { uri ->
+                            if (uri != null) {
+                                val ok = runCatching {
+                                    val raw = context.contentResolver.openInputStream(uri)?.use { input ->
+                                        input.readBytes().toString(Charsets.UTF_8)
+                                    } ?: return@runCatching false
+                                    onImportConfigJson(raw)
+                                }.getOrDefault(false)
+                                backupStatusMsg = if (ok) {
+                                    DxCarI18n.tr(
+                                        "✅ 已成功還原所有啟動器設定",
+                                        "✅ 已成功还原所有启动器设置",
+                                        "✅ Launcher settings restored successfully",
+                                        "✅ すべてのランチャー設定を復元しました"
+                                    )
+                                } else {
+                                    DxCarI18n.tr(
+                                        "❌ 還原失敗：檔案格式不是有效的 DX-Car 設定備份",
+                                        "❌ 还原失败：文件格式不是有效的 DX-Car 设置备份",
+                                        "❌ Restore failed: invalid DX-Car settings backup",
+                                        "❌ 復元に失敗：有効な DX-Car 設定バックアップではありません"
+                                    )
+                                }
+                            }
+                        }
+
+                        Surface(
+                            color = colors.cardSurfaceElevated,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, colors.cardBorder, RoundedCornerShape(14.dp))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Rounded.Backup, contentDescription = null, tint = colors.accent, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = str(
+                                            "設定備份與還原（本機／Google 雲端硬碟）",
+                                            "设置备份与还原（本地／Google 云端硬盘）",
+                                            "Backup & Restore Settings (Local / Google Drive)",
+                                            "設定のバックアップと復元（ローカル／Google ドライブ）"
+                                        ),
+                                        color = colors.primaryText,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                OutlinedTextField(
+                                    value = backupNameInput,
+                                    onValueChange = { next ->
+                                        backupNameInput = next
+                                        onUpdateConfig { it.copy(backupDefaultName = next) }
+                                    },
+                                    singleLine = true,
+                                    label = {
+                                        Text(
+                                            str(
+                                                "備份檔案預設名稱（不含 .json）",
+                                                "备份文件默认名称（不含 .json）",
+                                                "Default Backup Name (without .json)",
+                                                "バックアップの既定ファイル名（.json 不要）"
+                                            ),
+                                            fontSize = 12.sp
+                                        )
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            saveLocalLauncher.launch("${sanitizedBackupBaseName()}.json")
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Icon(Icons.Rounded.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(str("備份至本機", "备份至本地", "Save Locally", "ローカルに保存"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    Button(
+                                        onClick = {
+                                            val fileName = "${sanitizedBackupBaseName()}.json"
+                                            val shared = runCatching {
+                                                val dir = File(context.cacheDir, "backups").apply { mkdirs() }
+                                                val outFile = File(dir, fileName)
+                                                outFile.writeText(onExportConfigJson(), Charsets.UTF_8)
+                                                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", outFile)
+                                                val driveIntent = Intent(Intent.ACTION_SEND).apply {
+                                                    type = "application/json"
+                                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                                    putExtra(Intent.EXTRA_SUBJECT, fileName)
+                                                    setPackage("com.google.android.apps.docs")
+                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                }
+                                                try {
+                                                    context.startActivity(driveIntent)
+                                                } catch (_: Throwable) {
+                                                    val chooser = Intent.createChooser(
+                                                        Intent(Intent.ACTION_SEND).apply {
+                                                            type = "application/json"
+                                                            putExtra(Intent.EXTRA_STREAM, uri)
+                                                            putExtra(Intent.EXTRA_SUBJECT, fileName)
+                                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                        },
+                                                        DxCarI18n.tr(
+                                                            "上傳設定備份至雲端硬碟",
+                                                            "上传设置备份至云端硬盘",
+                                                            "Upload Backup to Drive",
+                                                            "バックアップをドライブにアップロード"
+                                                        )
+                                                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                    context.startActivity(chooser)
+                                                }
+                                            }.isSuccess
+                                            backupStatusMsg = if (shared) {
+                                                DxCarI18n.tr(
+                                                    "☁️ 已產生 $fileName 並開啟 Google 雲端硬碟上傳",
+                                                    "☁️ 已生成 $fileName 并打开 Google 云端硬盘上传",
+                                                    "☁️ Created $fileName & opened Google Drive upload",
+                                                    "☁️ $fileName を作成し Google ドライブを開きました"
+                                                )
+                                            } else {
+                                                DxCarI18n.tr(
+                                                    "❌ 無法開啟 Google 雲端硬碟 App，請改用「備份至本機」",
+                                                    "❌ 无法打开 Google 云端硬盘 App，请改用「备份至本地」",
+                                                    "❌ Could not open Google Drive App; use Save Locally instead",
+                                                    "❌ Google ドライブを開けませんでした。「ローカルに保存」をお試しください"
+                                                )
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = colors.cardSurface, contentColor = colors.accent),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Icon(Icons.Rounded.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(str("開啟 Google 雲端硬碟上傳", "打开 Google 云端硬盘上传", "Upload via Google Drive", "Google ドライブでアップロード"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            restoreLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                                        },
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Icon(Icons.Rounded.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(str("還原設定檔", "还原配置文件", "Restore Backup", "バックアップから復元"), fontSize = 12.sp)
+                                    }
+                                }
+                                if (!backupStatusMsg.isNullOrBlank()) {
+                                    Text(
+                                        text = backupStatusMsg.orEmpty(),
+                                        color = colors.accent,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
                             }
                         }
 

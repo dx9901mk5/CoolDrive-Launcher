@@ -159,14 +159,6 @@ fun CoolwalkDock(
                     onBackClick = onBackClick,
                     onRecentsClick = onRecentsClick
                 )
-                if (onVoiceNavClick != null) {
-                    SmallDockUtilityIcon(
-                        icon = Icons.Rounded.Mic,
-                        contentDescription = str("Gemini 語音輸入導航", "Gemini 语音输入导航", "Gemini voice navigation", "Gemini 音声ナビ"),
-                        tint = Color(0xFFA78BFA),
-                        onClick = onVoiceNavClick
-                    )
-                }
                 if (onToggle3DCursor != null) {
                     SmallDockUtilityIcon(
                         icon = Icons.Rounded.ViewInAr,
@@ -346,24 +338,11 @@ fun CoolwalkDock(
                             onLongClick = onBluetoothLongClick
                         )
                     }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(3.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        NotificationBellButton(
-                            unreadCount = unreadCount,
-                            compact = true,
-                            onClick = onNotificationsClick
-                        )
-                        if (onVoiceNavClick != null) {
-                            SmallDockUtilityIcon(
-                                icon = Icons.Rounded.Mic,
-                                contentDescription = str("Gemini 語音輸入導航", "Gemini 语音输入导航", "Gemini voice navigation", "Gemini 音声ナビ"),
-                                tint = Color(0xFFA78BFA),
-                                onClick = onVoiceNavClick
-                            )
-                        }
-                    }
+                    NotificationBellButton(
+                        unreadCount = unreadCount,
+                        compact = true,
+                        onClick = onNotificationsClick
+                    )
                     if (onToggle3DCursor != null || (isOverlayMode && (onTogglePinOverlay != null || onCollapseOverlay != null))) {
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(3.dp),

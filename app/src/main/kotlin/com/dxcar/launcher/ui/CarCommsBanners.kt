@@ -12,9 +12,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -606,6 +608,7 @@ fun IncomingMessageBanner(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun NotificationCenterSheet(
     messages: List<CarMessageItem>,
@@ -613,10 +616,12 @@ fun NotificationCenterSheet(
     onReadAloud: (CarMessageItem) -> Unit,
     onQuickReply: (CarMessageItem, String) -> Unit,
     onMarkRead: (CarMessageItem) -> Unit,
+    onRemoveMessage: (CarMessageItem) -> Unit,
     onClearAll: () -> Unit,
     onClose: () -> Unit
 ) {
     val colors = LocalDxCarColors.current
+    var expandedReplyMsgId by remember { mutableStateOf<String?>(null) }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -644,12 +649,26 @@ fun NotificationCenterSheet(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = str("訊息與通知中心", "消息与通知中心", "Messages & Notifications", "メッセージ・通知センター"),
-                        color = colors.primaryText,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = str("訊息與通知中心", "消息与通知中心", "Messages & Notifications", "メッセージ・通知センター"),
+                            color = colors.primaryText,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (messages.isNotEmpty()) {
+                            Text(
+                                text = str(
+                                    "←→ 左右滑動移除訊息 · 長壓訊息彈出快速回覆",
+                                    "←→ 左右滑动移除消息 · 长按消息弹出快速回复",
+                                    "←→ Swipe left/right to remove · Long-press for quick replies",
+                                    "←→ 左右スワイプで削除 · 長押しでクイック返信"
+                                ),
+                                color = colors.secondaryText,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (messages.isNotEmpty()) {
                             IconButton(onClick = onClearAll) {
@@ -684,69 +703,98 @@ fun NotificationCenterSheet(
                     ) {
                         items(messages, key = { it.id }) { msg ->
                             val tint = messageBrandColor(msg.appPackage, colors.accent)
-                            Surface(
-                                color = colors.cardSurfaceElevated,
-                                shape = RoundedCornerShape(18.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .border(1.dp, colors.cardBorder, RoundedCornerShape(18.dp))
+                            val showReplies = expandedReplyMsgId == msg.id
+                            SwipeHorizontalToDismissBox(
+                                resetKey = msg.id,
+                                thresholdDp = 80f,
+                                onDismissed = { onRemoveMessage(msg) }
                             ) {
-                                Column(
-                                    modifier = Modifier.padding(14.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                Surface(
+                                    color = colors.cardSurfaceElevated,
+                                    shape = RoundedCornerShape(18.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .border(
+                                            width = if (showReplies) 1.5.dp else 1.dp,
+                                            color = if (showReplies) tint else colors.cardBorder,
+                                            shape = RoundedCornerShape(18.dp)
+                                        )
+                                        .combinedClickable(
+                                            onClick = {
+                                                if (showReplies) expandedReplyMsgId = null
+                                            },
+                                            onLongClick = {
+                                                if (msg.canReply) {
+                                                    expandedReplyMsgId = if (showReplies) null else msg.id
+                                                }
+                                            }
+                                        )
                                 ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically
+                                    Column(
+                                        modifier = Modifier.padding(14.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Text(
+                                                        text = msg.sender,
+                                                        color = colors.primaryText,
+                                                        fontSize = 15.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                    Spacer(Modifier.width(8.dp))
+                                                    Text(
+                                                        text = msg.appName,
+                                                        color = tint,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.SemiBold
+                                                    )
+                                                }
+                                                Spacer(Modifier.height(3.dp))
                                                 Text(
-                                                    text = msg.sender,
-                                                    color = colors.primaryText,
-                                                    fontSize = 15.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                                Spacer(Modifier.width(8.dp))
-                                                Text(
-                                                    text = msg.appName,
-                                                    color = tint,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.SemiBold
+                                                    text = msg.text,
+                                                    color = colors.secondaryText,
+                                                    fontSize = 14.sp
                                                 )
                                             }
-                                            Spacer(Modifier.height(3.dp))
-                                            Text(
-                                                text = msg.text,
-                                                color = colors.secondaryText,
-                                                fontSize = 14.sp
-                                            )
+                                            IconButton(onClick = { onReadAloud(msg) }) {
+                                                Icon(Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = str("朗讀", "朗读", "Read aloud", "読み上げ"), tint = colors.accent)
+                                            }
+                                            IconButton(onClick = { onMarkRead(msg) }) {
+                                                Icon(Icons.Rounded.Done, contentDescription = str("已讀", "已读", "Mark as read", "既読"), tint = colors.statusConnected)
+                                            }
                                         }
-                                        IconButton(onClick = { onReadAloud(msg) }) {
-                                            Icon(Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = str("朗讀", "朗读", "Read aloud", "読み上げ"), tint = colors.accent)
-                                        }
-                                        IconButton(onClick = { onMarkRead(msg) }) {
-                                            Icon(Icons.Rounded.Done, contentDescription = str("已讀", "已读", "Mark as read", "既読"), tint = colors.statusConnected)
-                                        }
-                                    }
 
-                                    if (msg.canReply) {
-                                        Row(
-                                            modifier = Modifier.horizontalScroll(rememberScrollState()),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        AnimatedVisibility(
+                                            visible = msg.canReply && showReplies,
+                                            enter = expandVertically() + fadeIn(),
+                                            exit = shrinkVertically() + fadeOut()
                                         ) {
-                                            quickReplies.forEach { reply ->
-                                                Surface(
-                                                    color = colors.cardSurface,
-                                                    shape = RoundedCornerShape(12.dp),
-                                                    modifier = Modifier.clickable { onQuickReply(msg, reply) }
-                                                ) {
-                                                    Text(
-                                                        text = reply,
-                                                        color = colors.primaryText,
-                                                        fontSize = 12.sp,
-                                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                                                    )
+                                            Row(
+                                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                quickReplies.forEach { reply ->
+                                                    Surface(
+                                                        color = tint.copy(alpha = 0.16f),
+                                                        shape = RoundedCornerShape(12.dp),
+                                                        modifier = Modifier.clickable {
+                                                            onQuickReply(msg, reply)
+                                                            expandedReplyMsgId = null
+                                                        }
+                                                    ) {
+                                                        Text(
+                                                            text = reply,
+                                                            color = colors.primaryText,
+                                                            fontSize = 12.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -764,6 +812,8 @@ fun NotificationCenterSheet(
 @Composable
 fun GestureFeedbackPill(
     text: String?,
+    showDontShowAgain: Boolean = false,
+    onDontShowAgain: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalDxCarColors.current
@@ -779,13 +829,35 @@ fun GestureFeedbackPill(
             shadowElevation = 10.dp,
             modifier = Modifier.border(1.5.dp, colors.accent, RoundedCornerShape(24.dp))
         ) {
-            Text(
-                text = text.orEmpty(),
-                color = colors.primaryText,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 22.dp, vertical = 12.dp)
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 11.dp)
+            ) {
+                Text(
+                    text = text.orEmpty(),
+                    color = colors.primaryText,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                if (showDontShowAgain && onDontShowAgain != null) {
+                    Surface(
+                        color = colors.accent.copy(alpha = 0.18f),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .border(1.dp, colors.accent.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+                            .clickable { onDontShowAgain() }
+                    ) {
+                        Text(
+                            text = str("不再顯示", "不再显示", "Don't show", "今後表示しない"),
+                            color = colors.accent,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+            }
         }
     }
 }

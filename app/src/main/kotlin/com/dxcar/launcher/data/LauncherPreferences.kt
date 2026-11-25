@@ -218,6 +218,8 @@ data class LauncherConfig(
     val planCNavPackage: String = "com.google.android.apps.maps",
     val planCOverlayMusicPanelEnabled: Boolean = true,
     val showSixShortcutsInMediaPanel: Boolean = true,
+    val showUiSwitchHint: Boolean = true,
+    val backupDefaultName: String = "DXCar_Settings_Backup",
     val primarySplitRatio: Float = 0.70f,
     val is24HourClock: Boolean = false,
     val prefer60FpsEnabled: Boolean = true,
@@ -563,6 +565,23 @@ class LauncherPreferences(context: Context) {
         update { current ->
             current.copy(appFolders = current.appFolders.filterNot { it.id == folderId })
         }
+    }
+
+    fun exportConfigJson(): String {
+        return json.encodeToString(_config.value)
+    }
+
+    fun importConfigJson(rawJson: String): Boolean {
+        return runCatching {
+            val imported = json.decodeFromString<LauncherConfig>(rawJson)
+            val normalized = if (imported.homeExperimentMode != HomeExperimentMode.PLAN_A_MULTI_LAYER) {
+                imported.copy(homeExperimentMode = HomeExperimentMode.PLAN_A_MULTI_LAYER)
+            } else {
+                imported
+            }
+            update { normalized }
+            true
+        }.getOrDefault(false)
     }
 
     companion object {

@@ -254,6 +254,7 @@ fun DxCarRootScreen(
     }
     var latestMapCardRect by remember { mutableStateOf<Rect?>(null) }
     var gestureHudText by remember { mutableStateOf<String?>(null) }
+    var isUiSwitchHud by remember { mutableStateOf(false) }
     var permissionHealth by remember { mutableStateOf(PermissionHelper.check(context)) }
     var pairedBtDevices by remember { mutableStateOf(app.systemStatusMonitor.getPairedBluetoothDevices()) }
 
@@ -263,10 +264,11 @@ fun DxCarRootScreen(
         }
     }
 
-    LaunchedEffect(gestureHudText) {
+    LaunchedEffect(gestureHudText, isUiSwitchHud) {
         if (gestureHudText != null) {
-            delay(2_400L)
+            delay(if (isUiSwitchHud) 4_200L else 2_400L)
             gestureHudText = null
+            isUiSwitchHud = false
         }
     }
 
@@ -708,20 +710,23 @@ fun DxCarRootScreen(
                                 currentPage = currentDashboardPage,
                                 onPageChanged = { nextPage ->
                                     currentDashboardPage = nextPage
-                                    gestureHudText = if (nextPage == 0) {
-                                        DxCarI18n.tr(
-                                            "① 第一介面 · 導航與音樂天氣",
-                                            "① 第一界面 · 导航与音乐天气",
-                                            "① Page 1 · Navigation, Media & Weather",
-                                            "① ページ 1 · ナビ・音楽・天気"
-                                        )
-                                    } else {
-                                        DxCarI18n.tr(
-                                            "② 第二介面 · 1:1 方案A地圖 ＋ YouTube 視窗",
-                                            "② 第二界面 · 1:1 方案A地图 ＋ YouTube 窗口",
-                                            "② Page 2 · 1:1 Live Map + YouTube Window",
-                                            "② ページ 2 · 1:1 マップ ＋ YouTube ウィンドウ"
-                                        )
+                                    if (config.showUiSwitchHint) {
+                                        isUiSwitchHud = true
+                                        gestureHudText = if (nextPage == 0) {
+                                            DxCarI18n.tr(
+                                                "① 第一介面 · 導航與音樂天氣",
+                                                "① 第一界面 · 导航与音乐天气",
+                                                "① Page 1 · Navigation, Media & Weather",
+                                                "① ページ 1 · ナビ・音楽・天気"
+                                            )
+                                        } else {
+                                            DxCarI18n.tr(
+                                                "② 第二介面 · 1:1 方案A地圖 ＋ YouTube 視窗",
+                                                "② 第二界面 · 1:1 方案A地图 ＋ YouTube 窗口",
+                                                "② Page 2 · 1:1 Live Map + YouTube Window",
+                                                "② ページ 2 · 1:1 マップ ＋ YouTube ウィンドウ"
+                                            )
+                                        }
                                     }
                                 },
                                 pageOneContent = { onSeamDragDelta, onSeamDragEnd ->
@@ -1199,6 +1204,8 @@ fun DxCarRootScreen(
                                 },
                                 onLaunchRealMapsFreeform = { launchFreeformPrimaryBox(null) },
                                 onOpenSplitShortcutCreator = { showSplitCreator = true },
+                                onExportConfigJson = { app.preferences.exportConfigJson() },
+                                onImportConfigJson = { raw -> app.preferences.importConfigJson(raw) },
                                 onResetSettingsToDefaults = {
                                     app.preferences.resetToDefaults()
                                     gestureHudText = DxCarI18n.tr(
@@ -1517,6 +1524,12 @@ fun DxCarRootScreen(
             // HUD TOAST PILL
             GestureFeedbackPill(
                 text = gestureHudText,
+                showDontShowAgain = isUiSwitchHud,
+                onDontShowAgain = {
+                    app.preferences.update { it.copy(showUiSwitchHint = false) }
+                    gestureHudText = null
+                    isUiSwitchHud = false
+                },
                 modifier = Modifier.align(Alignment.Center)
             )
 
@@ -1540,6 +1553,7 @@ fun DxCarRootScreen(
                         )
                     },
                     onMarkRead = { app.notificationCenter.markMessageRead(it) },
+                    onRemoveMessage = { app.notificationCenter.removeMessage(it) },
                     onClearAll = { app.notificationCenter.clearAllMessages() },
                     onClose = { showNotificationCenter = false }
                 )

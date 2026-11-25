@@ -166,27 +166,42 @@ class LocalWeatherRepository(private val context: Context) {
 
     fun openGoogleWeatherApp(ctx: Context) {
         val candidates = listOf(
-            // 1. Official Google App native Froggy Weather deep link -> launches WeatherActivity directly!
-            Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/gaweather")).apply {
-                addCategory(Intent.CATEGORY_DEFAULT)
-                addCategory(Intent.CATEGORY_BROWSABLE)
+            // 1. Official Google App Froggy Weather shortcut deep link (opens native WeatherActivity directly)
+            Intent(Intent.ACTION_VIEW, Uri.parse("dynact://velour/weather/ProxyActivity")).apply {
                 setPackage(GOOGLE_APP_PACKAGE)
             },
-            // 2. Explicit DynamicActivityTrampoline with /gaweather URI for OEM / AI Box ROMs
+            // 2. Explicit DynamicActivityTrampoline with dynact://velour/weather/ProxyActivity
+            Intent(Intent.ACTION_VIEW, Uri.parse("dynact://velour/weather/ProxyActivity")).apply {
+                setClassName(
+                    GOOGLE_APP_PACKAGE,
+                    "com.google.android.apps.gsa.velour.DynamicActivityTrampoline"
+                )
+            },
+            // 3. Google App /gaweather deep link (native WeatherActivity on newer Google App versions)
+            Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/gaweather")).apply {
+                setPackage(GOOGLE_APP_PACKAGE)
+            },
+            // 4. Explicit DynamicActivityTrampoline with /gaweather URI
             Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/gaweather")).apply {
                 setClassName(
                     GOOGLE_APP_PACKAGE,
                     "com.google.android.apps.gsa.velour.DynamicActivityTrampoline"
                 )
             },
-            // 3. Pixel / Standalone Google Weather app (if installed)
+            // 5. Google App custom scheme weather deep link
+            Intent(Intent.ACTION_VIEW, Uri.parse("googleapp://weather")).apply {
+                setPackage(GOOGLE_APP_PACKAGE)
+            },
+            // 6. Pixel / Standalone Google Weather app (if installed)
             ctx.packageManager.getLaunchIntentForPackage(GOOGLE_WEATHER_PACKAGE),
-            // 4. Google App Search Weather card fallback
+            // 7. Generic /gaweather App Link (lets Android / Google App handle Froggy Weather directly)
+            Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/gaweather")),
+            // 8. Google App Search Weather card fallback
             Intent(Intent.ACTION_WEB_SEARCH).apply {
                 setPackage(GOOGLE_APP_PACKAGE)
                 putExtra(SearchManager.QUERY, "weather")
             },
-            // 5. Web fallback if Google App is not installed
+            // 9. Web fallback if Google App is not installed
             Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=weather"))
         )
         val launchBundle = runCatching {

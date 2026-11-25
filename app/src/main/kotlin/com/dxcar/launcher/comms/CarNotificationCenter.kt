@@ -88,6 +88,13 @@ class CarNotificationCenter(
         onMarkReadDispatch?.invoke(item)
     }
 
+    fun removeMessage(item: CarMessageItem) {
+        _messages.value = _messages.value.filterNot { it.id == item.id }
+        if (_popupMessage.value?.id == item.id) {
+            dismissPopupMessage()
+        }
+    }
+
     fun clearAllMessages() {
         _messages.value = emptyList()
         dismissPopupMessage()

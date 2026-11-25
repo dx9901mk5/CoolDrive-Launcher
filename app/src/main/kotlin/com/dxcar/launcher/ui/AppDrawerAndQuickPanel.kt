@@ -1,14 +1,18 @@
 package com.dxcar.launcher.ui
 
 import android.annotation.SuppressLint
+import android.app.ActivityOptions
 import android.content.Context
+import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.view.Display
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -1853,6 +1857,75 @@ fun EmbeddedYoutubePlayerCard(
         isRightPaneFullscreen = false
     }
 
+    fun launchYoutubeAppWithState(rawUrl: String, sec: Int) {
+        val baseUrl = rawUrl.ifBlank { "https://www.youtube.com" }
+        val targetUrl = runCatching {
+            val uri = Uri.parse(baseUrl)
+            val vParam = uri.getQueryParameter("v")
+            val pathSegs = uri.pathSegments
+            val videoId = when {
+                !vParam.isNullOrBlank() -> vParam
+                uri.host?.contains("youtu.be") == true && pathSegs.isNotEmpty() -> pathSegs.first()
+                pathSegs.size >= 2 && (pathSegs[0] == "shorts" || pathSegs[0] == "live" || pathSegs[0] == "embed") -> pathSegs[1]
+                else -> null
+            }
+            if (!videoId.isNullOrBlank()) {
+                if (sec > 0) "https://www.youtube.com/watch?v=$videoId&t=${sec}s"
+                else "https://www.youtube.com/watch?v=$videoId"
+            } else {
+                baseUrl
+            }
+        }.getOrDefault(baseUrl)
+
+        val opts = ActivityOptions.makeBasic().apply {
+            launchDisplayId = Display.DEFAULT_DISPLAY
+        }.toBundle()
+        val ytIntent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
+            setPackage("com.google.android.youtube")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            context.startActivity(ytIntent, opts)
+        } catch (_: Throwable) {
+            val fallbackIntent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            runCatching { context.startActivity(fallbackIntent, opts) }
+        }
+    }
+
+    fun openCurrentYoutubeInApp() {
+        val wv = webViewRef
+        if (wv == null) {
+            launchYoutubeAppWithState("https://www.youtube.com", 0)
+            return
+        }
+        val js = """
+            (function() {
+              var v = document.querySelector('video');
+              var sec = v && !isNaN(v.currentTime) ? Math.floor(v.currentTime) : -1;
+              if (v && !v.paused) { try { v.pause(); } catch(e) {} }
+              return JSON.stringify({ url: window.location.href || '', sec: sec });
+            })();
+        """.trimIndent()
+        wv.evaluateJavascript(js) { raw ->
+            val fallbackUrl = wv.url ?: "https://www.youtube.com"
+            val fallbackSec = videoTimeHolder[0].toInt().coerceAtLeast(0)
+            var parsedUrl = fallbackUrl
+            var parsedSec = fallbackSec
+            if (!raw.isNullOrBlank() && raw != "null") {
+                runCatching {
+                    val obj = org.json.JSONObject(org.json.JSONTokener(raw).nextValue().toString())
+                    val u = obj.optString("url", "")
+                    if (u.isNotBlank()) parsedUrl = u
+                    val s = obj.optInt("sec", -1)
+                    if (s >= 0) parsedSec = s
+                }
+            }
+            launchYoutubeAppWithState(parsedUrl, parsedSec)
+        }
+    }
+
     val togglePlayPauseJs = """
         (function() {
           var v = document.querySelector('video');
@@ -2036,15 +2109,21 @@ fun EmbeddedYoutubePlayerCard(
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
-                                .size(22.dp)
+                                .size(24.dp)
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(Color(0xFFFF0000))
+                                .clickable { openCurrentYoutubeInApp() }
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.PlayArrow,
-                                contentDescription = null,
+                                contentDescription = str(
+                                    "於 YouTube App 接續播放",
+                                    "在 YouTube App 中继续播放",
+                                    "Continue in YouTube App",
+                                    "YouTube アプリで続きから再生"
+                                ),
                                 tint = Color.White,
-                                modifier = Modifier.size(15.dp)
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                         Spacer(Modifier.width(7.dp))
@@ -2539,6 +2618,33 @@ fun EmbeddedYoutubePlayerCard(
                     fontSize = 15.sp,
                     fontWeight = FontWeight.ExtraBold,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp)
+                )
+            }
+        }
+
+        // Pinned top-left YouTube App handoff button in right-pane fullscreen mode
+        if (isRightPaneFullscreen) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = 12.dp, top = 12.dp)
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(Color(0xE6FF0000))
+                    .border(1.dp, Color.White.copy(alpha = 0.45f), RoundedCornerShape(9.dp))
+                    .clickable { openCurrentYoutubeInApp() }
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.PlayArrow,
+                    contentDescription = str(
+                        "於 YouTube App 接續播放",
+                        "在 YouTube App 中继续播放",
+                        "Continue in YouTube App",
+                        "YouTube アプリで続きから再生"
+                    ),
+                    tint = Color.White,
+                    modifier = Modifier.size(21.dp)
                 )
             }
         }
