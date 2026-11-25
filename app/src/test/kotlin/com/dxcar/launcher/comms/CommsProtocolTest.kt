@@ -102,12 +102,15 @@ class CommsProtocolTest {
 
     @Test
     fun `contact name resolver distinguishes real contact names from generic or numeric labels`() {
+        assertTrue(ContactNameResolver.isPureGenericPlaceholder("來電"))
+        assertTrue(ContactNameResolver.isPureGenericPlaceholder("行動電話來電"))
+        assertFalse(ContactNameResolver.isPureGenericPlaceholder("0912-345-678"))
         assertTrue(ContactNameResolver.isGenericOrNumberOnly("藍牙來電"))
-        assertTrue(ContactNameResolver.isGenericOrNumberOnly("行動電話來電"))
         assertTrue(ContactNameResolver.isGenericOrNumberOnly("+886 912-345-678"))
         assertFalse(ContactNameResolver.isGenericOrNumberOnly("阿醬(俊和)"))
         assertFalse(ContactNameResolver.isGenericOrNumberOnly("王小明"))
         assertEquals("0912-345-678", ContactNameResolver.extractPlausiblePhoneNumber("來電 0912-345-678"))
+        assertEquals("0988123456", ContactNameResolver.extractPlausiblePhoneNumber("tel:0988123456"))
     }
 
     @Test

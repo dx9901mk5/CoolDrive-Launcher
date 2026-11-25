@@ -121,18 +121,36 @@ class CarNotificationCenter(
             else -> 0L
         }
 
-        // Preserve resolved contact name & phone number across rapid HFP / PhoneState / Notification broadcasts
+        // Priority hierarchy: Real Contact Name > Actual Phone Number > Generic Placeholder ("藍牙來電")
         val incomingHasRealName = !ContactNameResolver.isGenericOrNumberOnly(state.callerName)
         val currentHasRealName = current.status != CallStatus.IDLE &&
             !ContactNameResolver.isGenericOrNumberOnly(current.callerName)
 
-        val mergedNumber = state.callerNumber.ifBlank {
-            if (current.status != CallStatus.IDLE) current.callerNumber else ""
+        val incomingNumFromName = if (!incomingHasRealName && !ContactNameResolver.isPureGenericPlaceholder(state.callerName)) {
+            ContactNameResolver.extractPlausiblePhoneNumber(state.callerName).ifBlank { state.callerName }
+        } else {
+            ""
         }
+        val currentNumFromName = if (current.status != CallStatus.IDLE &&
+            !currentHasRealName &&
+            !ContactNameResolver.isPureGenericPlaceholder(current.callerName)
+        ) {
+            ContactNameResolver.extractPlausiblePhoneNumber(current.callerName).ifBlank { current.callerName }
+        } else {
+            ""
+        }
+
+        val mergedNumber = state.callerNumber
+            .ifBlank { incomingNumFromName }
+            .ifBlank { if (current.status != CallStatus.IDLE) current.callerNumber else "" }
+            .ifBlank { currentNumFromName }
+
         val mergedName = when {
             incomingHasRealName -> state.callerName
             currentHasRealName -> current.callerName
             mergedNumber.isNotBlank() -> mergedNumber
+            !ContactNameResolver.isPureGenericPlaceholder(state.callerName) -> state.callerName
+            current.status != CallStatus.IDLE && !ContactNameResolver.isPureGenericPlaceholder(current.callerName) -> current.callerName
             state.callerName.isNotBlank() -> state.callerName
             else -> current.callerName.ifBlank { "藍牙來電" }
         }

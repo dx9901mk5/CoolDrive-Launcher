@@ -12,8 +12,8 @@ android {
     applicationId = "com.dxcar.launcher"
     minSdk = 28
     targetSdk = 35
-    versionCode = 27
-    versionName = "1.6.8"
+    versionCode = 28
+    versionName = "1.6.9"
   }
 
   flavorDimensions += "channel"

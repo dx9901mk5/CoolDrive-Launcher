@@ -7,11 +7,14 @@ import android.bluetooth.BluetoothProfile
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.telephony.TelephonyManager
 import com.dxcar.launcher.DxCarApp
 import com.dxcar.launcher.data.DeviceRole
 import com.dxcar.launcher.overlay.PersistentDockOverlayService
 import com.dxcar.launcher.system.WifiHotspotFastRestarter
+import java.util.UUID
 
 class BluetoothCallReceiver : BroadcastReceiver() {
 
@@ -87,34 +90,75 @@ class BluetoothCallReceiver : BroadcastReceiver() {
             TelephonyManager.ACTION_PHONE_STATE_CHANGED -> {
                 val stateStr = intent.getStringExtra(TelephonyManager.EXTRA_STATE) ?: return
                 @Suppress("DEPRECATION")
-                val number = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)?.trim().orEmpty()
+                val rawExtraNum = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)?.trim().orEmpty()
                 val status = when (stateStr) {
                     TelephonyManager.EXTRA_STATE_RINGING -> CallStatus.RINGING
                     TelephonyManager.EXTRA_STATE_OFFHOOK -> CallStatus.ACTIVE
                     else -> CallStatus.IDLE
                 }
-                val resolvedContact = if (status != CallStatus.IDLE) {
-                    ContactNameResolver.resolveDisplayName(context, number)
-                } else {
-                    null
-                }
                 val role = app?.preferences?.config?.value?.deviceRole
-                if (role == DeviceRole.PHONE_COMPANION) {
+
+                fun dispatchPhoneCallSnapshot(knownNum: String) {
+                    var effNum = knownNum
+                    var resolvedContact = if (status != CallStatus.IDLE && effNum.isNotBlank()) {
+                        ContactNameResolver.resolveDisplayName(context, effNum)
+                    } else {
+                        null
+                    }
+                    if (status != CallStatus.IDLE && effNum.isBlank()) {
+                        val recentLog = ContactNameResolver.queryRecentCallLogCaller(context)
+                        if (recentLog != null) {
+                            effNum = recentLog.phoneNumber
+                            if (!ContactNameResolver.isGenericOrNumberOnly(recentLog.displayName)) {
+                                resolvedContact = recentLog.displayName
+                            }
+                        }
+                    }
+                    val bestDisplay = resolvedContact ?: effNum.ifBlank { "行動電話來電" }
                     BluetoothCompanionService.sendPacketFromPhone(
                         BridgePacket(
                             type = PacketType.CALL_STATE,
-                            sender = resolvedContact ?: number.ifBlank { "行動電話來電" },
-                            phoneNumber = number,
+                            id = UUID.randomUUID().toString(),
+                            sender = bestDisplay,
+                            phoneNumber = effNum,
                             appName = "行動電話",
                             callStatus = status
                         )
                     )
+                }
+
+                if (role == DeviceRole.PHONE_COMPANION) {
+                    dispatchPhoneCallSnapshot(rawExtraNum)
+                    // If Android's first broadcast arrived before EXTRA_INCOMING_NUMBER / CallLog write, re-probe after 650ms!
+                    if (status == CallStatus.RINGING && rawExtraNum.isBlank()) {
+                        val appCtx = context.applicationContext
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            val recentLog = ContactNameResolver.queryRecentCallLogCaller(appCtx)
+                            if (recentLog != null) {
+                                BluetoothCompanionService.sendPacketFromPhone(
+                                    BridgePacket(
+                                        type = PacketType.CALL_STATE,
+                                        id = UUID.randomUUID().toString(),
+                                        sender = recentLog.displayName,
+                                        phoneNumber = recentLog.phoneNumber,
+                                        appName = "行動電話",
+                                        callStatus = CallStatus.RINGING
+                                    )
+                                )
+                            }
+                        }, 650L)
+                    }
                 } else {
+                    val resolvedContact = if (status != CallStatus.IDLE && rawExtraNum.isNotBlank()) {
+                        ContactNameResolver.resolveDisplayName(context, rawExtraNum)
+                    } else {
+                        null
+                    }
                     app?.notificationCenter?.updateCallState(
                         CarCallState(
                             status = status,
-                            callerName = resolvedContact ?: number.ifBlank { "藍牙來電" },
-                            callerNumber = number,
+                            callerName = resolvedContact ?: rawExtraNum.ifBlank { "藍牙來電" },
+                            callerNumber = rawExtraNum,
                             sourceApp = "藍牙電話",
                             fromPhoneBridge = false
                         )

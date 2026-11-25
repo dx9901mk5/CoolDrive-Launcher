@@ -108,7 +108,6 @@ class BluetoothCompanionService : Service() {
         capacity = 256,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
-    private val pendingImportantPackets = Collections.synchronizedList(mutableListOf<BridgePacket>())
 
     @Volatile
     private var forceOneShotUntilMs: Long = 0L
@@ -1287,13 +1286,31 @@ class BluetoothCompanionService : Service() {
             _bridgeState.value = _bridgeState.value.copy(isListenerBound = bound)
         }
 
+        private val pendingImportantPackets = Collections.synchronizedList(mutableListOf<BridgePacket>())
+
+        private fun bufferStaticImportantPacket(pkt: BridgePacket) {
+            val withId = if (pkt.id.isBlank()) pkt.copy(id = UUID.randomUUID().toString()) else pkt
+            synchronized(pendingImportantPackets) {
+                if (pendingImportantPackets.none { it.id == withId.id }) {
+                    pendingImportantPackets.add(withId)
+                    while (pendingImportantPackets.size > 16) {
+                        pendingImportantPackets.removeAt(0)
+                    }
+                }
+            }
+        }
+
         fun sendPacketFromPhone(packet: BridgePacket): Boolean {
+            val normalized = if (packet.id.isBlank()) packet.copy(id = UUID.randomUUID().toString()) else packet
             val svc = activeService
             if (svc == null) {
+                if (normalized.type == PacketType.MESSAGE || normalized.type == PacketType.CALL_STATE) {
+                    bufferStaticImportantPacket(normalized)
+                }
                 DxCarApp.instance?.let { startOrReconnect(it) }
                 return false
             }
-            return svc.enqueueOutbound(packet)
+            return svc.enqueueOutbound(normalized)
         }
     }
 }

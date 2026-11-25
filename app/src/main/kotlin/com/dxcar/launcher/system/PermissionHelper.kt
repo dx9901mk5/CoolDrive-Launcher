@@ -11,6 +11,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import androidx.core.content.ContextCompat
+import com.dxcar.launcher.BuildConfig
 import com.dxcar.launcher.accessibility.DxCarAccessibilityService
 import com.dxcar.launcher.comms.BoxNotificationListenerService
 
@@ -23,6 +24,7 @@ data class PermissionHealth(
     val hasBluetooth: Boolean,
     val hasPhoneState: Boolean,
     val hasContacts: Boolean = false,
+    val hasCallLog: Boolean = true,
     val hasWriteSettings: Boolean,
     val hasIgnoreBatteryOpt: Boolean,
     val hasPostNotifications: Boolean
@@ -31,6 +33,7 @@ data class PermissionHealth(
         val checks = listOf(
             hasNotificationListener,
             hasBluetooth && hasPhoneState && hasPostNotifications,
+            hasContacts && hasCallLog,
             hasIgnoreBatteryOpt
         )
         return checks.count { it } to checks.size
@@ -101,6 +104,15 @@ object PermissionHelper {
             Manifest.permission.READ_CONTACTS
         ) == PackageManager.PERMISSION_GRANTED
 
+        val hasCallLog = if (BuildConfig.ENABLE_GITHUB_AUTO_UPDATE) {
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_CALL_LOG
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+
         val hasWriteSettings = Settings.System.canWrite(context)
 
         val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -124,6 +136,7 @@ object PermissionHelper {
             hasBluetooth = hasBluetooth,
             hasPhoneState = hasPhoneState,
             hasContacts = hasContacts,
+            hasCallLog = hasCallLog,
             hasWriteSettings = hasWriteSettings,
             hasIgnoreBatteryOpt = hasIgnoreBattery,
             hasPostNotifications = hasPostNotif

@@ -225,6 +225,10 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ANSWER_PHONE_CALLS,
             Manifest.permission.READ_CONTACTS
         )
+        if (BuildConfig.ENABLE_GITHUB_AUTO_UPDATE) {
+            // GitHub Direct flavor declares READ_CALL_LOG so Android 9+ delivers incoming phone numbers!
+            perms += Manifest.permission.READ_CALL_LOG
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             perms += Manifest.permission.BLUETOOTH_CONNECT
             perms += Manifest.permission.BLUETOOTH_SCAN

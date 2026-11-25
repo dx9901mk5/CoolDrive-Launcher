@@ -2048,15 +2048,6 @@ private fun CoolwalkSplitDashboard(
                 onCustomSlotLaunch = onCustomSlotLaunch,
                 onCustomSlotRemove = onCustomSlotRemove
             )
-            if (!primary && !isPlanC) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(top = 66.dp)
-                        .zIndex(30f)
-                        .clickable { onSwapPanes() }
-                )
-            }
         }
     }
 

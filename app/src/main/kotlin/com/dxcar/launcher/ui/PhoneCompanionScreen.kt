@@ -230,6 +230,13 @@ fun PhoneCompanionScreen(
     val allPermsOk = grantedPerms == totalPerms
     val isConnected = bridgeStatus.status == BridgeConnectionStatus.CONNECTED
 
+    // Automatically prompt newly required Contacts / Call Log / Phone permissions once when Phone Companion opens!
+    LaunchedEffect(Unit) {
+        if (!permissionHealth.hasContacts || !permissionHealth.hasCallLog || !permissionHealth.hasPhoneState || !permissionHealth.hasBluetooth) {
+            onRequestRuntimePermissions()
+        }
+    }
+
     DisposableEffect(lifecycleOwner) {
         val obs = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -980,7 +987,12 @@ fun PhoneCompanionScreen(
                             onClick = onRequestRuntimePermissions
                         )
                         CompanionPermButton(
-                            label = "3. 忽略電池最佳化（鎖屏後保持連線不斷開）",
+                            label = "3. 手機聯絡人與來電號碼權限（顯示聯絡人姓名與陌生純號碼）",
+                            ok = permissionHealth.hasContacts && permissionHealth.hasCallLog,
+                            onClick = onRequestRuntimePermissions
+                        )
+                        CompanionPermButton(
+                            label = "4. 忽略電池最佳化（鎖屏後保持連線不斷開）",
                             ok = permissionHealth.hasIgnoreBatteryOpt,
                             onClick = { PermissionHelper.requestIgnoreBatteryOptimizations(context) }
                         )
