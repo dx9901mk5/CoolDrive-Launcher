@@ -423,7 +423,12 @@ class PersistentDockOverlayService :
                                 isOverlayPinnedOpen = pinnedOpen,
                                 is3DCursorActive = cursor3DOn,
                                 onToggleAppDrawer = { bringDxCarToFront(MainActivity.EXTRA_OPEN_DRAWER) },
-                                onGoDashboard = { bringDxCarToFront(null) },
+                                onGoDashboard = {
+                                    if (config.overlayAutoCollapseEnabled && !pinnedOpen) {
+                                        isCollapsed.value = true
+                                    }
+                                    bringDxCarToFront(MainActivity.EXTRA_GO_DASHBOARD)
+                                },
                                 onSlotClick = { slot ->
                                     when {
                                         slot.packageName == "ACTION_DIAL" -> app.installedAppsRepository.launchDialer()
@@ -458,10 +463,7 @@ class PersistentDockOverlayService :
                                     }
                                 },
                                 onWifiClick = {
-                                    val pulledSystem = DxCarAccessibilityService.instance?.openQuickSettings() == true
-                                    if (!pulledSystem) {
-                                        bringDxCarToFront(MainActivity.EXTRA_OPEN_QUICK_PANEL)
-                                    }
+                                    SystemStatusMonitor.openWifiSettings(this@PersistentDockOverlayService)
                                     if (config.overlayAutoCollapseEnabled && !pinnedOpen) isCollapsed.value = true
                                 },
                                 onWifiLongClick = {
@@ -472,7 +474,10 @@ class PersistentDockOverlayService :
                                     SystemStatusMonitor.openBluetoothSettings(this@PersistentDockOverlayService)
                                     if (config.overlayAutoCollapseEnabled && !pinnedOpen) isCollapsed.value = true
                                 },
-                                onClockClick = { bringDxCarToFront(MainActivity.EXTRA_OPEN_QUICK_PANEL) },
+                                onClockClick = {
+                                    DxCarAccessibilityService.instance?.openQuickSettings()
+                                    if (config.overlayAutoCollapseEnabled && !pinnedOpen) isCollapsed.value = true
+                                },
                                 onNotificationsClick = { bringDxCarToFront(MainActivity.EXTRA_OPEN_NOTIFICATIONS) },
                                 onBackClick = {
                                     interactionTick.value++
@@ -731,12 +736,15 @@ class PersistentDockOverlayService :
                     ) {
                         IncomingCallBanner(
                             callState = callState,
+                            scale = config.notificationBannerScale,
                             onAnswer = { app.notificationCenter.performCallAction(CallActionCommand.ANSWER) },
                             onDecline = { app.notificationCenter.performCallAction(CallActionCommand.DECLINE) }
                         )
                         IncomingMessageBanner(
                             message = popupMessage,
                             quickReplies = config.quickReplies,
+                            scale = config.notificationBannerScale,
+                            onExpandQuickReplies = { app.notificationCenter.pausePopupDismiss() },
                             onReadAloud = { app.notificationCenter.readMessageAloud(it) },
                             onQuickReply = { item, reply -> app.notificationCenter.sendQuickReply(item, reply) },
                             onMarkRead = { app.notificationCenter.markMessageRead(it) },

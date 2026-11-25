@@ -1,7 +1,6 @@
 package com.dxcar.launcher.map
 
 import android.content.Context
-import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import com.dxcar.launcher.data.LauncherPreferences
@@ -19,8 +18,12 @@ import org.maplibre.android.offline.OfflineRegion
 import org.maplibre.android.offline.OfflineRegionError
 import org.maplibre.android.offline.OfflineRegionStatus
 import org.maplibre.android.offline.OfflineTilePyramidRegionDefinition
-import java.io.File
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.InetAddress
+import java.net.ServerSocket
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
 
 data class OfflineRegionPreset(
     val id: String,
@@ -62,10 +65,12 @@ data class OfflineMapUiState(
 )
 
 /**
- * Plan A Offline Map Downloader with Automatic Current-Region & Entire-Country Batch Download:
- * - Detects vehicle's current Local Region ("所在區域") and Current Country ("所在國家") from live GPS.
- * - Supports one-tap "下載目前所在區域" and one-tap "一鍵全下載所在國家（全區完整快取）" sequential queue.
- * - Automatically detects staleness (7 / 15 / 30 days / Manual) and region shifts.
+ * Plan A Offline Map Downloader with Local Loopback HTTP Style Server:
+ * - MapLibre Native's C++ OfflineDownload uses HttpFileSource (OkHttp), which strictly requires
+ *   http:// or https:// style URLs (passing file:// hangs forever at initial state).
+ * - Serves canonical Google Standard (lyrs=m) & Satellite (lyrs=y) Style JSON over 127.0.0.1 loopback
+ *   with pixelRatio = 1.0f (since tiles already carry &scale=2 retina HD), enabling fast 0% -> 100%
+ *   downloads and 100% offline cache hits.
  */
 class OfflineMapManager(
     private val context: Context,
@@ -84,13 +89,17 @@ class OfflineMapManager(
     private var lastBatchLon = 121.5654
     private var lastBatchStyle = MapEngineStyle.GOOGLE_TRAFFIC_TILES
 
+    @Volatile
+    private var styleServerPort: Int = 0
+    private val serverLock = Any()
+
     val presets: List<OfflineRegionPreset> = listOf(
         OfflineRegionPreset(
             id = "current_gps_20km",
             titleZh = "目前車機周邊 (30km 高精細)",
             subtitleZh = "依當前 GPS 自動框選最常用街道生活圈（支援街巷級縮放）",
             minLat = 24.90, maxLat = 25.16, minLon = 121.42, maxLon = 121.70,
-            minZoom = 10.0, maxZoom = 15.2,
+            minZoom = 10.0, maxZoom = 15.0,
             isDynamicAroundGps = true
         ),
         OfflineRegionPreset(
@@ -98,51 +107,89 @@ class OfflineMapManager(
             titleZh = "北北基桃地區",
             subtitleZh = "台北 · 新北 · 基隆 · 桃園主要路網",
             minLat = 24.78, maxLat = 25.24, minLon = 121.12, maxLon = 121.92,
-            minZoom = 8.5, maxZoom = 13.8
+            minZoom = 8.5, maxZoom = 13.5
         ),
         OfflineRegionPreset(
             id = "tw_hsinchu_miaoli",
             titleZh = "竹苗地區",
             subtitleZh = "新竹縣市 · 苗栗主要路網",
             minLat = 24.35, maxLat = 24.92, minLon = 120.65, maxLon = 121.25,
-            minZoom = 8.5, maxZoom = 13.8
+            minZoom = 8.5, maxZoom = 13.5
         ),
         OfflineRegionPreset(
             id = "tw_central",
             titleZh = "中彰投地區",
             subtitleZh = "台中 · 彰化 · 南投主要路網",
             minLat = 23.78, maxLat = 24.38, minLon = 120.32, maxLon = 121.10,
-            minZoom = 8.5, maxZoom = 13.8
+            minZoom = 8.5, maxZoom = 13.5
         ),
         OfflineRegionPreset(
             id = "tw_yunlin_chiayi_tainan",
             titleZh = "雲嘉南地區",
             subtitleZh = "雲林 · 嘉義 · 台南主要路網",
             minLat = 22.88, maxLat = 23.78, minLon = 120.02, maxLon = 120.68,
-            minZoom = 8.5, maxZoom = 13.8
+            minZoom = 8.5, maxZoom = 13.5
         ),
         OfflineRegionPreset(
             id = "tw_kaohsiung_pingtung",
             titleZh = "高屏地區",
             subtitleZh = "高雄 · 屏東 · 墾丁主要路網",
             minLat = 21.88, maxLat = 22.95, minLon = 120.15, maxLon = 120.90,
-            minZoom = 8.5, maxZoom = 13.8
+            minZoom = 8.5, maxZoom = 13.5
         ),
         OfflineRegionPreset(
             id = "tw_east",
             titleZh = "宜花東地區",
             subtitleZh = "宜蘭 · 花蓮 · 台東山海線",
             minLat = 22.55, maxLat = 24.85, minLon = 120.95, maxLon = 121.95,
-            minZoom = 8.0, maxZoom = 13.3
+            minZoom = 8.0, maxZoom = 13.0
         ),
         OfflineRegionPreset(
             id = "tw_islands",
             titleZh = "澎金馬離島地區",
             subtitleZh = "澎湖 · 金門 · 馬祖主要路網",
             minLat = 23.15, maxLat = 26.35, minLon = 118.20, maxLon = 120.05,
-            minZoom = 8.5, maxZoom = 13.2
+            minZoom = 8.5, maxZoom = 13.0
         )
     )
+
+    private fun ensureLocalStyleServer(): Int {
+        if (styleServerPort > 0) return styleServerPort
+        synchronized(serverLock) {
+            if (styleServerPort > 0) return styleServerPort
+            val server = ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"))
+            styleServerPort = server.localPort
+            thread(name = "DxCarOfflineStyleServer", isDaemon = true) {
+                while (!server.isClosed) {
+                    val client = runCatching { server.accept() }.getOrNull() ?: break
+                    thread(name = "DxCarOfflineStyleReq", isDaemon = true) {
+                        runCatching {
+                            client.soTimeout = 3_000
+                            val reader = BufferedReader(InputStreamReader(client.getInputStream(), Charsets.UTF_8))
+                            val reqLine = reader.readLine().orEmpty()
+                            val isSat = reqLine.contains("/style/y")
+                            val bodyBytes = MapStyleFactory
+                                .buildOfflineCompatibleGoogleStyleJson(if (isSat) "y" else "m")
+                                .toByteArray(Charsets.UTF_8)
+                            val header = buildString {
+                                append("HTTP/1.1 200 OK\r\n")
+                                append("Content-Type: application/json; charset=utf-8\r\n")
+                                append("Content-Length: ${bodyBytes.size}\r\n")
+                                append("Cache-Control: no-cache\r\n")
+                                append("Connection: close\r\n\r\n")
+                            }.toByteArray(Charsets.UTF_8)
+                            val out = client.getOutputStream()
+                            out.write(header)
+                            out.write(bodyBytes)
+                            out.flush()
+                        }
+                        runCatching { client.close() }
+                    }
+                }
+            }
+            return styleServerPort
+        }
+    }
 
     fun evaluateUpdateNeeded(currentLat: Double, currentLon: Double) {
         val cfg = preferences.config.value
@@ -244,14 +291,14 @@ class OfflineMapManager(
         return when (detected.countryCode) {
             "TW" -> presets
                 .filterNot { it.id == "current_gps_20km" }
-                .map { it.copy(maxZoom = it.maxZoom.coerceAtMost(13.0)) }
+                .map { it.copy(maxZoom = it.maxZoom.coerceAtMost(12.8)) }
             "HK_MO" -> listOf(
                 OfflineRegionPreset(
                     id = "country_hk_mo",
                     titleZh = "港澳全境地圖",
                     subtitleZh = "香港 · 九龍 · 新界 · 澳門完整路網",
                     minLat = 22.10, maxLat = 22.58, minLon = 113.52, maxLon = 114.45,
-                    minZoom = 9.0, maxZoom = 14.5
+                    minZoom = 9.0, maxZoom = 14.2
                 )
             )
             "JP" -> listOf(
@@ -296,6 +343,7 @@ class OfflineMapManager(
         if (preset == null) {
             activeDownloadingRegion = null
             _state.value = OfflineMapUiState(
+                progress = 1f,
                 statusMessage = if (activeBatchTotal > 1) {
                     "✓ 已完成全部 $activeBatchTotal 區離線地圖下載！"
                 } else {
@@ -320,16 +368,17 @@ class OfflineMapManager(
         val cLat = (minLat + maxLat) / 2.0
         val cLon = (minLon + maxLon) / 2.0
         val styleUri = resolveOfflineCapableStyleUri(lastBatchStyle)
+        val initialOverallPct = (activeBatchCompleted.toFloat() / safeBatchTotal.toFloat()).coerceIn(0f, 0.99f)
 
         _state.value = _state.value.copy(
             downloadingRegionId = preset.id,
             downloadingTitleZh = preset.titleZh,
-            progress = 0.02f,
+            progress = initialOverallPct,
             completedTiles = 0L,
             requiredTiles = 0L,
             batchIndex = stepIdx,
             batchTotal = safeBatchTotal,
-            statusMessage = "${stepPrefix}正在準備下載「${preset.titleZh}」離線圖磚…"
+            statusMessage = "${stepPrefix}正在連線圖磚伺服器「${preset.titleZh}」 (0%)…"
         )
 
         runCatching {
@@ -342,12 +391,13 @@ class OfflineMapManager(
                 .include(LatLng(maxLat, maxLon))
                 .build()
 
+            // pixelRatio = 1.0f because Google tiles already specify &scale=2 retina HD
             val definition = OfflineTilePyramidRegionDefinition(
                 styleUri,
                 bounds,
                 preset.minZoom,
                 preset.maxZoom,
-                context.resources.displayMetrics.density.coerceIn(1f, 2f)
+                1.0f
             )
             val metadataBytes = "${preset.id}|${preset.titleZh}".toByteArray(Charsets.UTF_8)
 
@@ -360,90 +410,110 @@ class OfflineMapManager(
                         activeDownloadingRegion = offlineRegion
                         offlineRegion.setObserver(object : OfflineRegion.OfflineRegionObserver {
                             override fun onStatusChanged(status: OfflineRegionStatus) {
-                                runCatching {
-                                    val req = status.requiredResourceCount.coerceAtLeast(1L)
-                                    val comp = status.completedResourceCount
-                                    val pct = (comp.toFloat() / req.toFloat()).coerceIn(0f, 1f)
-                                    val sizeMb = status.completedResourceSize / (1024f * 1024f)
-
-                                    if (status.isComplete) {
-                                        if (!completedOnce.compareAndSet(false, true)) return
-                                        runCatching { offlineRegion.setObserver(null) }
-                                        runCatching { offlineRegion.setDownloadState(OfflineRegion.STATE_INACTIVE) }
-                                        activeDownloadingRegion = null
-                                        val rec = OfflineRegionRecord(
-                                            regionId = preset.id,
-                                            titleZh = preset.titleZh,
-                                            centerLat = cLat,
-                                            centerLon = cLon,
-                                            minLat = minLat,
-                                            maxLat = maxLat,
-                                            minLon = minLon,
-                                            maxLon = maxLon,
-                                            downloadedAtMs = System.currentTimeMillis(),
-                                            approxSizeMb = sizeMb.coerceAtLeast(0.1f),
-                                            maplibreRegionId = offlineRegion.id
-                                        )
-                                        preferences.update { cur ->
-                                            val nextList = cur.offlineRegions.filterNot { it.regionId == preset.id } + rec
-                                            cur.copy(offlineRegions = nextList)
-                                        }
-                                        activeBatchCompleted++
-                                        if (pendingQueue.isNotEmpty()) {
-                                            mainHandler.post { startNextInQueue() }
+                                mainHandler.post {
+                                    runCatching {
+                                        val req = status.requiredResourceCount
+                                        val comp = status.completedResourceCount
+                                        val regionPct = if (req > 0L) {
+                                            (comp.toFloat() / req.toFloat()).coerceIn(0f, 1f)
                                         } else {
-                                            _state.value = OfflineMapUiState(
-                                                statusMessage = if (safeBatchTotal > 1) {
-                                                    "✓ 所在國家／區域共 $safeBatchTotal 區離線地圖已全數下載完成！"
-                                                } else {
-                                                    "✓ 「${preset.titleZh}」離線地圖下載完成（約 %.1f MB）".format(sizeMb.coerceAtLeast(0.1f))
-                                                },
-                                                updateSuggestion = null
+                                            0f
+                                        }
+                                        val sizeMb = status.completedResourceSize / (1024f * 1024f)
+
+                                        if (status.isComplete && req > 0L) {
+                                            if (!completedOnce.compareAndSet(false, true)) return@post
+                                            runCatching { offlineRegion.setObserver(null) }
+                                            runCatching { offlineRegion.setDownloadState(OfflineRegion.STATE_INACTIVE) }
+                                            activeDownloadingRegion = null
+                                            val rec = OfflineRegionRecord(
+                                                regionId = preset.id,
+                                                titleZh = preset.titleZh,
+                                                centerLat = cLat,
+                                                centerLon = cLon,
+                                                minLat = minLat,
+                                                maxLat = maxLat,
+                                                minLon = minLon,
+                                                maxLon = maxLon,
+                                                downloadedAtMs = System.currentTimeMillis(),
+                                                approxSizeMb = sizeMb.coerceAtLeast(0.1f),
+                                                maplibreRegionId = offlineRegion.id
+                                            )
+                                            preferences.update { cur ->
+                                                val nextList = cur.offlineRegions.filterNot { it.regionId == preset.id } + rec
+                                                cur.copy(offlineRegions = nextList)
+                                            }
+                                            activeBatchCompleted++
+                                            if (pendingQueue.isNotEmpty()) {
+                                                startNextInQueue()
+                                            } else {
+                                                _state.value = OfflineMapUiState(
+                                                    progress = 1f,
+                                                    statusMessage = if (safeBatchTotal > 1) {
+                                                        "✓ 所在國家／區域共 $safeBatchTotal 區離線地圖已全數下載完成 (100%)！"
+                                                    } else {
+                                                        "✓ 「${preset.titleZh}」離線地圖下載完成 100%（約 %.1f MB）".format(sizeMb.coerceAtLeast(0.1f))
+                                                    },
+                                                    updateSuggestion = null
+                                                )
+                                            }
+                                        } else {
+                                            val overallPct = ((activeBatchCompleted + regionPct) / safeBatchTotal.toFloat()).coerceIn(0f, 0.99f)
+                                            val displayPctInt = (overallPct * 100f).toInt()
+                                            val regionPctInt = (regionPct * 100f).toInt()
+                                            val detailText = if (req > 0L) {
+                                                "${stepPrefix}下載中 ${preset.titleZh}：$regionPctInt% ($comp / $req 圖磚 · %.1f MB)".format(sizeMb)
+                                            } else {
+                                                "${stepPrefix}正在計算「${preset.titleZh}」圖磚清單 ($displayPctInt%)…"
+                                            }
+                                            _state.value = _state.value.copy(
+                                                progress = overallPct,
+                                                completedTiles = comp,
+                                                requiredTiles = req,
+                                                statusMessage = detailText
                                             )
                                         }
-                                    } else {
-                                        val overallPct = ((activeBatchCompleted + pct) / safeBatchTotal.toFloat()).coerceIn(0.02f, 1f)
-                                        _state.value = _state.value.copy(
-                                            progress = overallPct,
-                                            completedTiles = comp,
-                                            requiredTiles = req,
-                                            statusMessage = "${stepPrefix}下載中 ${preset.titleZh}：${(pct * 100).toInt()}% ($comp / $req 圖磚 · %.1f MB)".format(sizeMb)
-                                        )
                                     }
                                 }
                             }
 
                             override fun onError(error: OfflineRegionError) {
-                                runCatching { offlineRegion.setObserver(null) }
-                                runCatching { activeDownloadingRegion?.setDownloadState(OfflineRegion.STATE_INACTIVE) }
-                                activeDownloadingRegion = null
-                                pendingQueue.clear()
-                                _state.value = _state.value.copy(
-                                    downloadingRegionId = null,
-                                    statusMessage = "下載中斷：${error.message}（請確認網路連線後重試）"
-                                )
+                                mainHandler.post {
+                                    runCatching { offlineRegion.setObserver(null) }
+                                    runCatching { activeDownloadingRegion?.setDownloadState(OfflineRegion.STATE_INACTIVE) }
+                                    activeDownloadingRegion = null
+                                    pendingQueue.clear()
+                                    _state.value = _state.value.copy(
+                                        downloadingRegionId = null,
+                                        statusMessage = "下載中斷：${error.message}（請確認網路連線後重試）"
+                                    )
+                                }
                             }
 
                             override fun mapboxTileCountLimitExceeded(limit: Long) {
-                                runCatching { offlineRegion.setObserver(null) }
-                                runCatching { activeDownloadingRegion?.setDownloadState(OfflineRegion.STATE_INACTIVE) }
-                                activeDownloadingRegion = null
-                                pendingQueue.clear()
-                                _state.value = _state.value.copy(
-                                    downloadingRegionId = null,
-                                    statusMessage = "已達圖磚儲存上限 ($limit)，已保存目前已下載範圍"
-                                )
+                                mainHandler.post {
+                                    runCatching { offlineRegion.setObserver(null) }
+                                    runCatching { activeDownloadingRegion?.setDownloadState(OfflineRegion.STATE_INACTIVE) }
+                                    activeDownloadingRegion = null
+                                    pendingQueue.clear()
+                                    _state.value = _state.value.copy(
+                                        downloadingRegionId = null,
+                                        statusMessage = "已達圖磚儲存上限 ($limit)，已保存目前已下載範圍"
+                                    )
+                                }
                             }
                         })
                         offlineRegion.setDownloadState(OfflineRegion.STATE_ACTIVE)
                     }
 
                     override fun onError(error: String) {
-                        pendingQueue.clear()
-                        _state.value = _state.value.copy(
-                            downloadingRegionId = null,
-                            statusMessage = "建立離線區域失敗：$error"
-                        )
+                        mainHandler.post {
+                            pendingQueue.clear()
+                            _state.value = _state.value.copy(
+                                downloadingRegionId = null,
+                                statusMessage = "建立離線區域失敗：$error"
+                            )
+                        }
                     }
                 }
             )
@@ -459,11 +529,13 @@ class OfflineMapManager(
     fun cancelCurrentDownload() {
         pendingQueue.clear()
         runCatching {
+            activeDownloadingRegion?.setObserver(null)
             activeDownloadingRegion?.setDownloadState(OfflineRegion.STATE_INACTIVE)
         }
         activeDownloadingRegion = null
         _state.value = _state.value.copy(
             downloadingRegionId = null,
+            progress = 0f,
             statusMessage = "已取消離線地圖下載"
         )
     }
@@ -495,14 +567,13 @@ class OfflineMapManager(
         return when (style) {
             MapEngineStyle.OPENFREEMAP_VECTOR_3D -> MapStyleFactory.OPENFREEMAP_DAY_URL
             MapEngineStyle.OPENFREEMAP_DARK -> MapStyleFactory.OPENFREEMAP_NIGHT_URL
-            MapEngineStyle.GOOGLE_SATELLITE_HYBRID,
+            MapEngineStyle.GOOGLE_SATELLITE_HYBRID -> {
+                val port = ensureLocalStyleServer()
+                "http://127.0.0.1:$port/style/y.json"
+            }
             MapEngineStyle.GOOGLE_TRAFFIC_TILES -> {
-                val lyrs = if (style == MapEngineStyle.GOOGLE_SATELLITE_HYBRID) "y" else "m"
-                val styleJson = (MapStyleFactory.resolve(style, isNight = false, trafficEnabled = false)
-                    as? MapStyleFactory.ResolvedMapStyle.StyleJson)?.json.orEmpty()
-                val file = File(context.filesDir, "offline_style_$lyrs.json")
-                runCatching { file.writeText(styleJson, Charsets.UTF_8) }
-                Uri.fromFile(file).toString()
+                val port = ensureLocalStyleServer()
+                "http://127.0.0.1:$port/style/m.json"
             }
         }
     }

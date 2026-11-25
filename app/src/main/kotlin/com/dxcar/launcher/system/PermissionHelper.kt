@@ -22,6 +22,7 @@ data class PermissionHealth(
     val hasLocation: Boolean,
     val hasBluetooth: Boolean,
     val hasPhoneState: Boolean,
+    val hasContacts: Boolean = false,
     val hasWriteSettings: Boolean,
     val hasIgnoreBatteryOpt: Boolean,
     val hasPostNotifications: Boolean
@@ -95,6 +96,11 @@ object PermissionHelper {
             Manifest.permission.READ_PHONE_STATE
         ) == PackageManager.PERMISSION_GRANTED
 
+        val hasContacts = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.READ_CONTACTS
+        ) == PackageManager.PERMISSION_GRANTED
+
         val hasWriteSettings = Settings.System.canWrite(context)
 
         val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -117,6 +123,7 @@ object PermissionHelper {
             hasLocation = hasLocation,
             hasBluetooth = hasBluetooth,
             hasPhoneState = hasPhoneState,
+            hasContacts = hasContacts,
             hasWriteSettings = hasWriteSettings,
             hasIgnoreBatteryOpt = hasIgnoreBattery,
             hasPostNotifications = hasPostNotif

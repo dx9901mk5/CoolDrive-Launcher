@@ -145,6 +145,15 @@ data class AppFolderItem(
 )
 
 @Serializable
+enum class NotificationBannerScale(val factor: Float, val label: String) {
+    SCALE_0_5X(0.5f, "0.5X"),
+    SCALE_0_75X(0.75f, "0.75X"),
+    SCALE_1_0X(1.0f, "1X"),
+    SCALE_1_5X(1.5f, "1.5X"),
+    SCALE_2_0X(2.0f, "2X")
+}
+
+@Serializable
 enum class OfflineUpdatePolicy(val days: Int, val labelZh: String) {
     DAYS_7(7, "每 7 天提醒更新"),
     DAYS_15(15, "每 15 天提醒更新"),
@@ -223,6 +232,7 @@ data class LauncherConfig(
     val overlayHandlePositionPercent: Float = 0.50f,
     val launchAppsAvoidDockFreeform: Boolean = false,
     val globalCallMessageBannerEnabled: Boolean = true,
+    val notificationBannerScale: NotificationBannerScale = NotificationBannerScale.SCALE_1_0X,
     val autoReadMessagesTts: Boolean = false,
     val geminiVoiceMode: GeminiVoiceMode = GeminiVoiceMode.SMART_AUTO,
     val geminiApiKey: String = "",

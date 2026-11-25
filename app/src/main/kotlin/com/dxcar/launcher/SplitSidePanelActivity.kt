@@ -342,12 +342,15 @@ class SplitSidePanelActivity : ComponentActivity() {
                     ) {
                         IncomingCallBanner(
                             callState = activeCall,
+                            scale = config.notificationBannerScale,
                             onAnswer = { app.notificationCenter.performCallAction(CallActionCommand.ANSWER) },
                             onDecline = { app.notificationCenter.performCallAction(CallActionCommand.DECLINE) }
                         )
                         IncomingMessageBanner(
                             message = popupMessage,
                             quickReplies = config.quickReplies,
+                            scale = config.notificationBannerScale,
+                            onExpandQuickReplies = { app.notificationCenter.pausePopupDismiss() },
                             onReadAloud = { app.notificationCenter.readMessageAloud(it) },
                             onQuickReply = { item, reply -> app.notificationCenter.sendQuickReply(item, reply) },
                             onMarkRead = { app.notificationCenter.markMessageRead(it) },

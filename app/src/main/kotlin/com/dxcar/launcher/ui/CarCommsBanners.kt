@@ -2,10 +2,14 @@ package com.dxcar.launcher.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
@@ -33,12 +37,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Chat
+import androidx.compose.material.icons.automirrored.rounded.Reply
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.CallEnd
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Done
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -48,6 +54,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -62,10 +69,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.dxcar.launcher.comms.CallActionCommand
 import com.dxcar.launcher.comms.CallStatus
 import com.dxcar.launcher.comms.CarCallState
 import com.dxcar.launcher.comms.CarMessageItem
+import com.dxcar.launcher.data.NotificationBannerScale
 import com.dxcar.launcher.i18n.DxCarI18n.str
 import com.dxcar.launcher.theme.LocalDxCarColors
 import kotlinx.coroutines.delay
@@ -79,6 +86,7 @@ import kotlin.math.roundToInt
 @Composable
 fun SwipeHorizontalToDismissBox(
     resetKey: Any?,
+    thresholdDp: Float = 80f,
     onDismissed: () -> Unit,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
@@ -90,10 +98,10 @@ fun SwipeHorizontalToDismissBox(
         modifier = modifier
             .offset { IntOffset(offsetX.value.roundToInt(), 0) }
             .graphicsLayer {
-                alpha = (1f - (abs(offsetX.value) / 520f)).coerceIn(0.15f, 1f)
+                alpha = (1f - (abs(offsetX.value) / 460f)).coerceIn(0.15f, 1f)
             }
-            .pointerInput(resetKey) {
-                val thresholdPx = 95.dp.toPx()
+            .pointerInput(resetKey, thresholdDp) {
+                val thresholdPx = thresholdDp.dp.toPx()
                 detectHorizontalDragGestures(
                     onHorizontalDrag = { change, dragAmount ->
                         change.consume()
@@ -106,13 +114,13 @@ fun SwipeHorizontalToDismissBox(
                         if (abs(cur) >= thresholdPx) {
                             val target = if (cur > 0f) 1100f else -1100f
                             scope.launch {
-                                offsetX.animateTo(target, tween(170))
+                                offsetX.animateTo(target, tween(165))
                                 onDismissed()
                                 offsetX.snapTo(0f)
                             }
                         } else {
                             scope.launch {
-                                offsetX.animateTo(0f, spring())
+                                offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMedium))
                             }
                         }
                     },
@@ -127,16 +135,21 @@ fun SwipeHorizontalToDismissBox(
 }
 
 /**
- * Authentic Android Auto floating Incoming Call Banner & Active Call Capsule.
+ * Proportional Incoming Call Banner & Active Call Capsule:
+ * - Scales smoothly with NotificationBannerScale (0.5X / 0.75X / 1X / 1.5X / 2X).
+ * - Slightly wider than message banner and keeps generous Answer/Decline buttons so driving taps are effortless.
+ * - Displays Contact Name prominently with caller phone number underneath.
  */
 @Composable
 fun IncomingCallBanner(
     callState: CarCallState,
+    scale: NotificationBannerScale = NotificationBannerScale.SCALE_1_0X,
     onAnswer: () -> Unit,
     onDecline: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalDxCarColors.current
+    val s = scale.factor
     var elapsedSec by remember(callState.startedAtMs, callState.status) { mutableLongStateOf(0L) }
 
     LaunchedEffect(callState.status, callState.startedAtMs) {
@@ -152,33 +165,46 @@ fun IncomingCallBanner(
         exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
         modifier = modifier
     ) {
+        val maxCardW = (450f * s).coerceIn(280f, 780f).dp
+        val cornerDp = (20f * s).coerceIn(14f, 28f).dp
+        val padH = (14f * s).coerceIn(10f, 22f).dp
+        val padV = (11f * s).coerceIn(8f, 18f).dp
+        val leadAvatarDp = (40f * s).coerceIn(28f, 60f).dp
+        val leadIconDp = (22f * s).coerceIn(16f, 34f).dp
+        val callerSp = (19.5f * s).coerceIn(13.5f, 34f).sp
+        val subSp = (13f * s).coerceIn(10f, 23f).sp
+        // Answer / Decline buttons kept slightly larger with a safe 44.dp minimum floor
+        val callBtnDp = (52f * s).coerceIn(44f, 68f).dp
+        val callBtnIconDp = (26f * s).coerceIn(22f, 34f).dp
+
         SwipeHorizontalToDismissBox(
             resetKey = "${callState.status}_${callState.startedAtMs}",
+            thresholdDp = (80f * s).coerceIn(52f, 115f),
             onDismissed = onDecline
         ) {
             Surface(
                 color = colors.glassOverlay,
-                shape = RoundedCornerShape(28.dp),
-                shadowElevation = 18.dp,
+                shape = RoundedCornerShape(cornerDp),
+                shadowElevation = 16.dp,
                 modifier = Modifier
-                    .widthIn(max = 760.dp)
+                    .widthIn(max = maxCardW)
                     .fillMaxWidth()
                     .border(
-                        width = 2.dp,
+                        width = 1.8.dp,
                         color = if (callState.status == CallStatus.RINGING) colors.callAcceptGreen else colors.accent,
-                        shape = RoundedCornerShape(28.dp)
+                        shape = RoundedCornerShape(cornerDp)
                     )
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 22.dp, vertical = 18.dp),
+                        .padding(horizontal = padH, vertical = padV),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .size(60.dp)
+                            .size(leadAvatarDp)
                             .clip(CircleShape)
                             .background(colors.callAcceptGreen.copy(alpha = 0.22f))
                     ) {
@@ -186,47 +212,57 @@ fun IncomingCallBanner(
                             imageVector = Icons.Rounded.Call,
                             contentDescription = null,
                             tint = colors.callAcceptGreen,
-                            modifier = Modifier.size(34.dp)
+                            modifier = Modifier.size(leadIconDp)
                         )
                     }
 
-                    Spacer(Modifier.width(16.dp))
+                    Spacer(Modifier.width((10f * s).coerceIn(6f, 16f).dp))
+
+                    val displayTitle = callState.callerName.ifBlank {
+                        callState.callerNumber.ifBlank { str("藍牙來電", "Incoming Call", "着信") }
+                    }
+                    val showDistinctNumber = callState.callerNumber.isNotBlank() &&
+                        !callState.callerNumber.equals(displayTitle, ignoreCase = true)
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = callState.callerName.ifBlank { callState.callerNumber.ifBlank { "藍牙來電" } },
+                            text = displayTitle,
                             color = colors.primaryText,
-                            fontSize = 34.sp,
+                            fontSize = callerSp,
                             fontWeight = FontWeight.ExtraBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         val subtitle = when (callState.status) {
-                            CallStatus.RINGING ->
-                                "${callState.sourceApp} · 來電中 ${callState.callerNumber}"
-                            CallStatus.ACTIVE ->
-                                "${callState.sourceApp} · 通話中 %02d:%02d".format(elapsedSec / 60, elapsedSec % 60)
+                            CallStatus.RINGING -> {
+                                val numPart = if (showDistinctNumber) " · ${callState.callerNumber}" else ""
+                                "${callState.sourceApp} · ${str("來電中", "Incoming", "着信中")}$numPart"
+                            }
+                            CallStatus.ACTIVE -> {
+                                val timer = "%02d:%02d".format(elapsedSec / 60, elapsedSec % 60)
+                                "${callState.sourceApp} · ${str("通話中", "In Call", "通話中")} $timer"
+                            }
                             CallStatus.IDLE -> ""
                         }
                         Text(
                             text = subtitle,
                             color = colors.secondaryText,
-                            fontSize = 24.sp,
+                            fontSize = subSp,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
 
-                    Spacer(Modifier.width(14.dp))
+                    Spacer(Modifier.width((10f * s).coerceIn(6f, 14f).dp))
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy((10f * s).coerceIn(7f, 14f).dp)) {
                         if (callState.status == CallStatus.RINGING) {
                             Surface(
                                 color = colors.callAcceptGreen,
                                 shape = CircleShape,
                                 modifier = Modifier
-                                    .size(62.dp)
+                                    .size(callBtnDp)
                                     .bouncyClickable(pressedScale = 0.86f, onClick = onAnswer)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
@@ -234,7 +270,7 @@ fun IncomingCallBanner(
                                         imageVector = Icons.Rounded.Call,
                                         contentDescription = "接聽",
                                         tint = Color.White,
-                                        modifier = Modifier.size(32.dp)
+                                        modifier = Modifier.size(callBtnIconDp)
                                     )
                                 }
                             }
@@ -244,7 +280,7 @@ fun IncomingCallBanner(
                             color = colors.callDeclineRed,
                             shape = CircleShape,
                             modifier = Modifier
-                                .size(62.dp)
+                                .size(callBtnDp)
                                 .bouncyClickable(pressedScale = 0.86f, onClick = onDecline)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
@@ -252,7 +288,7 @@ fun IncomingCallBanner(
                                     imageVector = Icons.Rounded.CallEnd,
                                     contentDescription = "掛斷",
                                     tint = Color.White,
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(callBtnIconDp)
                                 )
                             }
                         }
@@ -264,15 +300,18 @@ fun IncomingCallBanner(
 }
 
 /**
- * Top-Left Extra-Large (2X Font) Incoming Message Banner with Left/Right Touch Swipe-to-Dismiss:
- * - Positioned in Top-Left corner of Car Launcher & Fullscreen Overlay
- * - 2X Extra-Large Typography (Sender 32sp, Content 28sp, App Badge 20sp, Reply Chips 22sp)
- * - Swipe Left or Right anywhere on the card to dismiss!
+ * Compact 1X Default (0.5X / 0.75X / 1X / 1.5X / 2X user-selectable) Incoming Message Banner:
+ * - Calibrated so 1X matches the compact top-left red-box footprint (~380.dp max width, crisp scaled font).
+ * - Intuitive Left/Right swipe-to-dismiss with NO cluttering hint text.
+ * - Single compact "快速回覆" pill button; tapping expands a smooth spring-animated horizontal carousel
+ *   whose horizontal drag is isolated so sliding quick replies never dismisses the banner.
  */
 @Composable
 fun IncomingMessageBanner(
     message: CarMessageItem?,
     quickReplies: List<String>,
+    scale: NotificationBannerScale = NotificationBannerScale.SCALE_1_0X,
+    onExpandQuickReplies: () -> Unit = {},
     onReadAloud: (CarMessageItem) -> Unit,
     onQuickReply: (CarMessageItem, String) -> Unit,
     onVoiceReply: ((CarMessageItem) -> Unit)? = null,
@@ -281,6 +320,8 @@ fun IncomingMessageBanner(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalDxCarColors.current
+    val s = scale.factor
+
     AnimatedVisibility(
         visible = message != null,
         enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
@@ -289,25 +330,51 @@ fun IncomingMessageBanner(
     ) {
         val item = message ?: return@AnimatedVisibility
         val appTint = messageBrandColor(item.appPackage, colors.accent)
+        var repliesExpanded by remember(item.id) { mutableStateOf(false) }
+
+        val maxCardW = (380f * s).coerceIn(210f, 770f).dp
+        val cornerDp = (18f * s).coerceIn(12f, 26f).dp
+        val padH = (12f * s).coerceIn(8f, 20f).dp
+        val padV = (9.5f * s).coerceIn(6f, 16f).dp
+        val avatarDp = (34f * s).coerceIn(22f, 54f).dp
+        val avatarIconDp = (18f * s).coerceIn(12f, 29f).dp
+        val senderSp = (17f * s).coerceIn(11f, 32f).sp
+        val badgeSp = (11f * s).coerceIn(8.5f, 19f).sp
+        val bodySp = (14.5f * s).coerceIn(10f, 27f).sp
+        val bodyLineH = (19.5f * s).coerceIn(13.5f, 35f).sp
+        val actionBtnDp = (29f * s).coerceIn(22f, 46f).dp
+        val actionIconDp = (16f * s).coerceIn(12f, 26f).dp
+        val replyBtnSp = (12f * s).coerceIn(9.5f, 20f).sp
+        val replyChipSp = (12.5f * s).coerceIn(10f, 21f).sp
+
+        val chevronRotation by animateFloatAsState(
+            targetValue = if (repliesExpanded) 180f else 0f,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioMediumBouncy,
+                stiffness = Spring.StiffnessMedium
+            ),
+            label = "quickReplyChevron"
+        )
 
         SwipeHorizontalToDismissBox(
             resetKey = item.id,
+            thresholdDp = (75f * s).coerceIn(48f, 110f),
             onDismissed = onDismiss
         ) {
             Surface(
                 color = colors.glassOverlay,
-                shape = RoundedCornerShape(26.dp),
-                shadowElevation = 18.dp,
+                shape = RoundedCornerShape(cornerDp),
+                shadowElevation = 14.dp,
                 modifier = Modifier
-                    .widthIn(max = 780.dp)
+                    .widthIn(max = maxCardW)
                     .fillMaxWidth()
-                    .border(2.dp, appTint.copy(alpha = 0.8f), RoundedCornerShape(26.dp))
+                    .border(1.5.dp, appTint.copy(alpha = 0.8f), RoundedCornerShape(cornerDp))
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .padding(horizontal = padH, vertical = padV),
+                    verticalArrangement = Arrangement.spacedBy((6f * s).coerceIn(4f, 11f).dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -316,8 +383,8 @@ fun IncomingMessageBanner(
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
-                                .padding(top = 4.dp)
-                                .size(56.dp)
+                                .padding(top = 2.dp)
+                                .size(avatarDp)
                                 .clip(CircleShape)
                                 .background(appTint.copy(alpha = 0.22f))
                         ) {
@@ -325,19 +392,19 @@ fun IncomingMessageBanner(
                                 imageVector = Icons.AutoMirrored.Rounded.Chat,
                                 contentDescription = null,
                                 tint = appTint,
-                                modifier = Modifier.size(30.dp)
+                                modifier = Modifier.size(avatarIconDp)
                             )
                         }
-                        Spacer(Modifier.width(14.dp))
+                        Spacer(Modifier.width((9f * s).coerceIn(6f, 14f).dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                horizontalArrangement = Arrangement.spacedBy((6f * s).coerceIn(4f, 10f).dp)
                             ) {
                                 Text(
                                     text = item.sender,
                                     color = colors.primaryText,
-                                    fontSize = 32.sp,
+                                    fontSize = senderSp,
                                     fontWeight = FontWeight.ExtraBold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -345,89 +412,190 @@ fun IncomingMessageBanner(
                                 )
                                 Surface(
                                     color = appTint.copy(alpha = 0.24f),
-                                    shape = RoundedCornerShape(10.dp)
+                                    shape = RoundedCornerShape((7f * s).coerceIn(5f, 10f).dp)
                                 ) {
                                     Text(
                                         text = item.appName,
                                         color = appTint,
-                                        fontSize = 20.sp,
+                                        fontSize = badgeSp,
                                         fontWeight = FontWeight.ExtraBold,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                                        maxLines = 1,
+                                        modifier = Modifier.padding(
+                                            horizontal = (6f * s).coerceIn(4f, 10f).dp,
+                                            vertical = (1.5f * s).coerceIn(1f, 3f).dp
+                                        )
                                     )
                                 }
                             }
-                            Spacer(Modifier.height(6.dp))
+                            Spacer(Modifier.height((3f * s).coerceIn(2f, 6f).dp))
                             Text(
                                 text = item.text,
                                 color = colors.primaryText.copy(alpha = 0.94f),
-                                fontSize = 28.sp,
-                                lineHeight = 36.sp,
+                                fontSize = bodySp,
+                                lineHeight = bodyLineH,
                                 fontWeight = FontWeight.SemiBold,
-                                maxLines = 3,
+                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                text = "⇄ 左右滑動可直接關閉通知",
-                                color = colors.secondaryText,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Medium
                             )
                         }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy((2f * s).coerceIn(1f, 4f).dp)) {
                             IconButton(
                                 onClick = { onReadAloud(item) },
-                                modifier = Modifier.size(50.dp)
+                                modifier = Modifier.size(actionBtnDp)
                             ) {
-                                Icon(Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = "語音朗讀", tint = colors.accent, modifier = Modifier.size(28.dp))
+                                Icon(Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = "語音朗讀", tint = colors.accent, modifier = Modifier.size(actionIconDp))
                             }
                             if (onVoiceReply != null && item.canReply) {
                                 IconButton(
                                     onClick = { onVoiceReply(item) },
-                                    modifier = Modifier.size(50.dp)
+                                    modifier = Modifier.size(actionBtnDp)
                                 ) {
-                                    Icon(Icons.Rounded.Mic, contentDescription = "語音回覆", tint = colors.accent, modifier = Modifier.size(28.dp))
+                                    Icon(Icons.Rounded.Mic, contentDescription = "語音回覆", tint = colors.accent, modifier = Modifier.size(actionIconDp))
                                 }
                             }
                             IconButton(
                                 onClick = { onMarkRead(item) },
-                                modifier = Modifier.size(50.dp)
+                                modifier = Modifier.size(actionBtnDp)
                             ) {
-                                Icon(Icons.Rounded.Done, contentDescription = "已讀", tint = colors.statusConnected, modifier = Modifier.size(28.dp))
+                                Icon(Icons.Rounded.Done, contentDescription = "已讀", tint = colors.statusConnected, modifier = Modifier.size(actionIconDp))
                             }
                             IconButton(
                                 onClick = onDismiss,
-                                modifier = Modifier.size(50.dp)
+                                modifier = Modifier.size(actionBtnDp)
                             ) {
-                                Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.secondaryText, modifier = Modifier.size(28.dp))
+                                Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.secondaryText, modifier = Modifier.size(actionIconDp))
                             }
                         }
                     }
 
-                    // Quick Reply Chips (2X Extra-Large Font when Direct Reply is supported)
+                    // Single compact Quick Reply trigger button -> expands animated horizontal sliding list
                     if (item.canReply && quickReplies.isNotEmpty()) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Start
                         ) {
-                            quickReplies.forEach { reply ->
-                                Surface(
-                                    color = colors.cardSurfaceElevated,
-                                    shape = RoundedCornerShape(18.dp),
-                                    modifier = Modifier
-                                        .border(1.2.dp, colors.cardBorder, RoundedCornerShape(18.dp))
-                                        .bouncyClickable(pressedScale = 0.90f) { onQuickReply(item, reply) }
-                                ) {
-                                    Text(
-                                        text = str("回覆：$reply", "Reply: $reply", "返信：$reply"),
-                                        color = colors.primaryText,
-                                        fontSize = 22.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                            Surface(
+                                color = if (repliesExpanded) appTint.copy(alpha = 0.24f) else colors.cardSurfaceElevated,
+                                shape = RoundedCornerShape((12f * s).coerceIn(8f, 16f).dp),
+                                modifier = Modifier
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (repliesExpanded) appTint else colors.cardBorder,
+                                        shape = RoundedCornerShape((12f * s).coerceIn(8f, 16f).dp)
                                     )
+                                    .bouncyClickable(pressedScale = 0.90f) {
+                                        val next = !repliesExpanded
+                                        repliesExpanded = next
+                                        if (next) onExpandQuickReplies()
+                                    }
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy((4f * s).coerceIn(3f, 6f).dp),
+                                    modifier = Modifier.padding(
+                                        horizontal = (10f * s).coerceIn(7f, 15f).dp,
+                                        vertical = (4.5f * s).coerceIn(3f, 8f).dp
+                                    )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Rounded.Reply,
+                                        contentDescription = null,
+                                        tint = if (repliesExpanded) appTint else colors.accent,
+                                        modifier = Modifier.size((14f * s).coerceIn(10f, 20f).dp)
+                                    )
+                                    Text(
+                                        text = str("快速回覆", "Quick Reply", "クイック返信"),
+                                        color = colors.primaryText,
+                                        fontSize = replyBtnSp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Rounded.ExpandMore,
+                                        contentDescription = null,
+                                        tint = colors.secondaryText,
+                                        modifier = Modifier
+                                            .size((15f * s).coerceIn(11f, 22f).dp)
+                                            .graphicsLayer { rotationZ = chevronRotation }
+                                    )
+                                }
+                            }
+                        }
+
+                        AnimatedVisibility(
+                            visible = repliesExpanded,
+                            enter = expandVertically(
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                            ) + fadeIn(tween(180)),
+                            exit = shrinkVertically(tween(150)) + fadeOut(tween(120))
+                        ) {
+                            val scrollState = rememberScrollState()
+                            val chipAppear = remember { Animatable(0f) }
+                            LaunchedEffect(Unit) {
+                                chipAppear.animateTo(
+                                    targetValue = 1f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
+                                )
+                            }
+                            // Absorb overscroll horizontal drag so sliding quick-reply options NEVER dismisses the banner
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .pointerInput(item.id) {
+                                        detectHorizontalDragGestures { change, _ ->
+                                            change.consume()
+                                        }
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(scrollState)
+                                        .padding(top = 2.dp, bottom = 2.dp),
+                                    horizontalArrangement = Arrangement.spacedBy((7f * s).coerceIn(5f, 11f).dp)
+                                ) {
+                                    quickReplies.forEachIndexed { idx, reply ->
+                                        val itemProgress = (chipAppear.value - idx * 0.05f).coerceIn(0f, 1f)
+                                        Surface(
+                                            color = colors.cardSurfaceElevated,
+                                            shape = RoundedCornerShape((13f * s).coerceIn(9f, 18f).dp),
+                                            modifier = Modifier
+                                                .graphicsLayer {
+                                                    val sc = 0.86f + 0.14f * itemProgress
+                                                    scaleX = sc
+                                                    scaleY = sc
+                                                    alpha = itemProgress
+                                                    translationX = (1f - itemProgress) * 24f
+                                                }
+                                                .border(
+                                                    1.dp,
+                                                    appTint.copy(alpha = 0.55f),
+                                                    RoundedCornerShape((13f * s).coerceIn(9f, 18f).dp)
+                                                )
+                                                .bouncyClickable(pressedScale = 0.90f) {
+                                                    repliesExpanded = false
+                                                    onQuickReply(item, reply)
+                                                }
+                                        ) {
+                                            Text(
+                                                text = reply,
+                                                color = colors.primaryText,
+                                                fontSize = replyChipSp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                modifier = Modifier.padding(
+                                                    horizontal = (11f * s).coerceIn(8f, 16f).dp,
+                                                    vertical = (6f * s).coerceIn(4f, 10f).dp
+                                                )
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }

@@ -221,7 +221,9 @@ class MainActivity : ComponentActivity() {
         val perms = mutableListOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.READ_PHONE_STATE
+            Manifest.permission.READ_PHONE_STATE,
+            Manifest.permission.ANSWER_PHONE_CALLS,
+            Manifest.permission.READ_CONTACTS
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             perms += Manifest.permission.BLUETOOTH_CONNECT
@@ -327,6 +329,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_ACTION = "dxcar_extra_action"
+        const val EXTRA_GO_DASHBOARD = "go_dashboard"
         const val EXTRA_OPEN_DRAWER = "open_drawer"
         const val EXTRA_OPEN_YOUTUBE = "open_youtube"
         const val EXTRA_OPEN_QUICK_PANEL = "open_quick_panel"

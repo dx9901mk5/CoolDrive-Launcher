@@ -474,14 +474,6 @@ fun LiveMapCard(
                                 highlight = showOfflineSheet || offlineState.updateSuggestion != null || offlineState.downloadingRegionId != null,
                                 onClick = { showOfflineSheet = !showOfflineSheet }
                             )
-                            MapChipButton(
-                                icon = Icons.Rounded.Traffic,
-                                label = if (trafficEnabled) "路況 開" else "路況 關",
-                                highlight = trafficEnabled &&
-                                    (mapEngineStyle == MapEngineStyle.GOOGLE_TRAFFIC_TILES ||
-                                        mapEngineStyle == MapEngineStyle.GOOGLE_SATELLITE_HYBRID),
-                                onClick = onToggleTraffic
-                            )
                             if (homeAddress.isNotBlank()) {
                                 MapChipButton(
                                     icon = Icons.Rounded.Home,
@@ -570,36 +562,6 @@ fun LiveMapCard(
                                         Text(str("開始導航 →", "Start Nav →", "案内開始 →"), color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
-                            }
-                        }
-                    }
-
-                    // Quick Layer Pills (Plan A)
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        MapEngineStyle.entries.forEach { st ->
-                            val active = mapEngineStyle == st
-                            Surface(
-                                color = if (active) colors.accent else colors.glassOverlay.copy(alpha = 0.85f),
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier
-                                    .border(1.dp, if (active) colors.accent else colors.cardBorder, RoundedCornerShape(14.dp))
-                                    .bouncyClickable { onSelectMapStyle(st) }
-                            ) {
-                                Text(
-                                    text = when (st) {
-                                        MapEngineStyle.GOOGLE_TRAFFIC_TILES -> str("G標準", "Google", "標準")
-                                        MapEngineStyle.GOOGLE_SATELLITE_HYBRID -> str("G衛星", "Satellite", "衛星")
-                                        MapEngineStyle.OPENFREEMAP_VECTOR_3D -> str("3D向量", "3D Map", "3D地図")
-                                        MapEngineStyle.OPENFREEMAP_DARK -> str("深色向量", "Dark", "ダーク")
-                                    },
-                                    color = if (active) colors.onAccent else colors.primaryText,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                                )
                             }
                         }
                     }
@@ -775,7 +737,7 @@ fun LiveMapCard(
                     SmallGlassCircleButton(
                         icon = Icons.Rounded.Layers,
                         contentDescription = "切換底圖圖層與即時路況",
-                        active = showLayerPicker || mapEngineStyle != MapEngineStyle.GOOGLE_TRAFFIC_TILES,
+                        active = showLayerPicker || trafficEnabled || mapEngineStyle != MapEngineStyle.GOOGLE_TRAFFIC_TILES,
                         onClick = { showLayerPicker = !showLayerPicker }
                     )
                     SmallGlassCircleButton(
@@ -839,7 +801,6 @@ fun LiveMapCard(
                                     .border(1.dp, if (selected) colors.accent else colors.cardBorder, RoundedCornerShape(12.dp))
                                     .bouncyClickable {
                                         onSelectMapStyle(styleItem)
-                                        showLayerPicker = false
                                     }
                             ) {
                                 Text(
@@ -963,11 +924,24 @@ fun LiveMapCard(
                     }
 
                     if (offlineState.downloadingRegionId != null) {
+                        val pctInt = (offlineState.progress * 100f).toInt().coerceIn(0, 100)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
+                            Surface(
+                                color = colors.accent.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text(
+                                    text = "$pctInt%",
+                                    color = colors.accent,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
                             LinearProgressIndicator(
                                 progress = { offlineState.progress },
                                 color = colors.accent,

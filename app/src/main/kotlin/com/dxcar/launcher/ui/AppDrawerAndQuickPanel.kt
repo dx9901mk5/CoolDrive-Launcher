@@ -1,6 +1,10 @@
 package com.dxcar.launcher.ui
 
 import android.annotation.SuppressLint
+import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Handler
@@ -10,6 +14,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -58,9 +63,13 @@ import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.FastForward
+import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
@@ -82,7 +91,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -1509,13 +1521,52 @@ object EmbeddedYoutubeBridge {
 }
 
 /**
+ * Custom WebView that keeps Chromium's media decoder alive when switching to external apps
+ * (Google Maps, Browser, System Settings, or Stock AI Box Launcher), pausing ONLY when another
+ * media app takes AudioFocus or the user explicitly pauses!
+ */
+private class BackgroundPlayableWebView(context: Context) : WebView(context) {
+    @Volatile
+    var keepBackgroundPlaying: Boolean = true
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        if (visibility != View.VISIBLE && keepBackgroundPlaying) {
+            super.onWindowVisibilityChanged(View.VISIBLE)
+        } else {
+            super.onWindowVisibilityChanged(visibility)
+        }
+    }
+
+    override fun onVisibilityChanged(changedView: View, visibility: Int) {
+        if (visibility != View.VISIBLE && keepBackgroundPlaying) {
+            super.onVisibilityChanged(changedView, View.VISIBLE)
+        } else {
+            super.onVisibilityChanged(changedView, visibility)
+        }
+    }
+}
+
+private enum class YtGestureHudZone { LEFT, CENTER, RIGHT, TOP }
+
+private data class YtGestureHudState(
+    val zone: YtGestureHudZone,
+    val label: String,
+    val seq: Int = 0
+)
+
+/**
  * Inline Playable YouTube Card for Page 2 (1:1 Split Right Pane):
- * - Plays YouTube videos directly inside the right 50% card.
- * - Swipe UP in the center video area -> enters Right-Half YouTube Fullscreen (hides top bar & traps
- *   HTML5 customView inside this right 50% card so left 50% map ratio NEVER moves!).
- * - Swipe DOWN on the right half while in fullscreen -> exits back to normal YouTube view.
- * - Registers an active MediaSession + EmbeddedYoutubeBridge so steering wheel Play/Pause buttons
- *   reliably play & pause YouTube!
+ * - Defaults video resolution to 720p (hd720).
+ * - Swipe UP in the upper video player zone (top 48%) OR tap YouTube's bottom-right fullscreen icon
+ *   -> enters true full-bleed Right-Half Fullscreen (CSS + CustomView lock, left 1:1 map untouched).
+ * - Fullscreen-only YouTube gestures:
+ *   * Double-tap Center 1/3 -> Play / Pause
+ *   * Double-tap Left 1/3 / Right 1/3 -> Rewind -10s / Fast-forward +10s (accumulating)
+ *   * Double-tap & HOLD Left 1/3 or Right 1/3 -> Continuous accelerated rewind / fast-forward
+ *   * Horizontal swipe/drag -> Smooth timeline scrub with live timestamp preview
+ *   * Vertical swipe DOWN (or tap bottom-right exit fullscreen button) -> Exit fullscreen
+ * - True cross-system background audio playback (continues in Stock Box Launcher, Google Maps,
+ *   Browser, System Settings; pauses automatically ONLY when another media app starts playing).
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -1524,32 +1575,124 @@ fun EmbeddedYoutubePlayerCard(
 ) {
     val colors = LocalDxCarColors.current
     val context = LocalContext.current
+    val app = com.dxcar.launcher.DxCarApp.instance
+    val externalMedia = app?.mediaControlBridge?.mediaState?.collectAsState()?.value
+
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var isRightPaneFullscreen by remember { mutableStateOf(false) }
     var showFsHintBanner by remember { mutableStateOf(false) }
+    var gestureHud by remember { mutableStateOf<YtGestureHudState?>(null) }
+    var gestureSeq by remember { mutableIntStateOf(0) }
     var exitCustomViewTrigger by remember { mutableStateOf<(() -> Unit)?>(null) }
 
+    // Live video playback state mirrored from JS for 0ms gesture scrubbing
+    var videoCurrentSec by remember { mutableFloatStateOf(0f) }
+    var videoDurationSec by remember { mutableFloatStateOf(0f) }
+    var isYoutubePlayingNow by remember { mutableStateOf(false) }
+
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+
     fun evalYoutubeJs(js: String) {
-        Handler(Looper.getMainLooper()).post {
+        mainHandler.post {
             webViewRef?.evaluateJavascript(js, null)
         }
+    }
+
+    fun flashGestureHud(zone: YtGestureHudZone, text: String) {
+        gestureSeq++
+        gestureHud = YtGestureHudState(zone = zone, label = text, seq = gestureSeq)
+    }
+
+    LaunchedEffect(gestureHud?.seq) {
+        val currentSeq = gestureHud?.seq ?: return@LaunchedEffect
+        // Keep TOP hold indicator visible until explicitly cleared; auto-fade transient badges
+        if (gestureHud?.zone != YtGestureHudZone.TOP) {
+            kotlinx.coroutines.delay(850L)
+            if (gestureHud?.seq == currentSeq) {
+                gestureHud = null
+            }
+        }
+    }
+
+    val applyRightPaneFsCssJs = """
+        (function() {
+          if (!document.getElementById('dxcar-yt-fs-lock')) {
+            var st = document.createElement('style');
+            st.id = 'dxcar-yt-fs-lock';
+            st.textContent = `
+              html, body { overflow: hidden !important; background: #000 !important; margin: 0 !important; padding: 0 !important; }
+              ytm-mobile-topbar-renderer, .mobile-topbar-header, header,
+              ytm-watch-next-secondary-results-renderer,
+              ytm-item-section-renderer, ytm-slim-video-metadata-section-renderer,
+              ytm-engagement-panel-section-list-renderer, .related-chips-slot-wrapper,
+              ytm-pivot-bar-renderer, .watch-below-the-player { display: none !important; }
+              #player-container-id, .player-container, #player, #movie_player,
+              .html5-video-player, .html5-video-container {
+                position: fixed !important;
+                inset: 0 !important;
+                top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+                width: 100vw !important; height: 100vh !important;
+                max-width: 100vw !important; max-height: 100vh !important;
+                z-index: 2147483000 !important;
+                background: #000 !important;
+              }
+              video.video-stream, video {
+                position: fixed !important;
+                top: 0 !important; left: 0 !important;
+                width: 100vw !important; height: 100vh !important;
+                max-width: 100vw !important; max-height: 100vh !important;
+                object-fit: contain !important;
+                background: #000 !important;
+              }
+            `;
+            (document.head || document.documentElement).appendChild(st);
+          }
+          window.scrollTo(0, 0);
+        })();
+    """.trimIndent()
+
+    val removeRightPaneFsCssJs = """
+        (function() {
+          var st = document.getElementById('dxcar-yt-fs-lock');
+          if (st) st.remove();
+          if (document.fullscreenElement && document.exitFullscreen) {
+            document.exitFullscreen().catch(function(){});
+          }
+        })();
+    """.trimIndent()
+
+    fun enterRightPaneFullscreen() {
+        isRightPaneFullscreen = true
+        evalYoutubeJs(applyRightPaneFsCssJs)
+    }
+
+    fun exitRightPaneFullscreen() {
+        exitCustomViewTrigger?.invoke()
+        evalYoutubeJs(removeRightPaneFsCssJs)
+        isRightPaneFullscreen = false
     }
 
     val togglePlayPauseJs = """
         (function() {
           var v = document.querySelector('video');
           if (v) {
-            if (v.paused) { v.play(); return 'PLAY'; }
-            else { v.pause(); return 'PAUSE'; }
+            if (v.paused) {
+              window.__dxcarUserPaused = false;
+              v.play();
+              return 'PLAY';
+            } else {
+              window.__dxcarUserPaused = true;
+              v.pause();
+              return 'PAUSE';
+            }
           }
-          var btn = document.querySelector('button[aria-label*="Play"], button[aria-label*="Pause"], button[aria-label*="播放"], button[aria-label*="暫停"], .ytp-play-button');
-          if (btn) btn.click();
-          return 'BTN';
+          return 'NONE';
         })();
     """.trimIndent()
 
     val playOnlyJs = """
         (function() {
+          window.__dxcarUserPaused = false;
           var v = document.querySelector('video');
           if (v && v.paused) { v.play(); return 'PLAY'; }
           return 'OK';
@@ -1558,43 +1701,117 @@ fun EmbeddedYoutubePlayerCard(
 
     val pauseOnlyJs = """
         (function() {
+          window.__dxcarUserPaused = true;
           var v = document.querySelector('video');
           if (v && !v.paused) { v.pause(); return 'PAUSE'; }
           return 'OK';
         })();
     """.trimIndent()
 
-    val enterFullscreenJs = """
-        (function() {
-          var fsBtn = document.querySelector('button.fullscreen-icon, button[aria-label*="Full screen"], button[aria-label*="全螢幕"], button[aria-label*="Enter full screen"], .ytp-fullscreen-button');
-          if (fsBtn) { fsBtn.click(); return 'CLICKED_FS'; }
-          var v = document.querySelector('video');
-          if (v && v.requestFullscreen) { v.requestFullscreen().catch(function(){}); return 'REQ_FS'; }
-          if (v && v.webkitEnterFullscreen) { v.webkitEnterFullscreen(); return 'WEBKIT_FS'; }
-          return 'NO_BTN';
-        })();
-    """.trimIndent()
+    fun seekRelativeSec(deltaSec: Float) {
+        evalYoutubeJs(
+            """
+            (function() {
+              var v = document.querySelector('video');
+              if (v) {
+                var dur = (v.duration && isFinite(v.duration)) ? v.duration : 999999;
+                v.currentTime = Math.max(0, Math.min(dur, (v.currentTime || 0) + ($deltaSec)));
+              }
+            })();
+            """.trimIndent()
+        )
+    }
 
-    val exitFullscreenJs = """
-        (function() {
-          if (document.fullscreenElement && document.exitFullscreen) { document.exitFullscreen().catch(function(){}); }
-          var fsBtn = document.querySelector('button[aria-label*="Exit full screen"], button[aria-label*="退出全螢幕"]');
-          if (fsBtn) { fsBtn.click(); }
-        })();
-    """.trimIndent()
+    fun seekAbsoluteSec(targetSec: Float) {
+        evalYoutubeJs(
+            """
+            (function() {
+              var v = document.querySelector('video');
+              if (v) {
+                var dur = (v.duration && isFinite(v.duration)) ? v.duration : 999999;
+                v.currentTime = Math.max(0, Math.min(dur, $targetSec));
+              }
+            })();
+            """.trimIndent()
+        )
+    }
+
+    fun setPlaybackRateJs(rate: Float) {
+        evalYoutubeJs(
+            """
+            (function() {
+              var v = document.querySelector('video');
+              if (v) { v.playbackRate = $rate; }
+            })();
+            """.trimIndent()
+        )
+    }
+
+    fun formatYtTime(sec: Float): String {
+        val total = sec.toInt().coerceAtLeast(0)
+        val h = total / 3600
+        val m = (total % 3600) / 60
+        val s = total % 60
+        return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%02d:%02d".format(m, s)
+    }
 
     LaunchedEffect(isRightPaneFullscreen) {
         if (isRightPaneFullscreen) {
+            evalYoutubeJs(applyRightPaneFsCssJs)
             showFsHintBanner = true
-            kotlinx.coroutines.delay(2400L)
+            kotlinx.coroutines.delay(2200L)
             showFsHintBanner = false
         } else {
             showFsHintBanner = false
+            gestureHud = null
         }
     }
 
-    // Bind steering wheel MediaSession + KeyEvent bridge while Page 2 YouTube is active
+    // Pause Page 2 YouTube automatically ONLY when another external Media App actively starts playing!
+    var prevExternalPlayingKey by remember { mutableStateOf("") }
+    LaunchedEffect(externalMedia?.packageName, externalMedia?.isPlaying) {
+        val pkg = externalMedia?.packageName.orEmpty()
+        val extPlaying = externalMedia?.isPlaying == true &&
+            pkg.isNotBlank() &&
+            pkg != context.packageName
+        val key = if (extPlaying) "$pkg:PLAYING" else ""
+        if (extPlaying && key != prevExternalPlayingKey && isYoutubePlayingNow) {
+            evalYoutubeJs(pauseOnlyJs)
+        }
+        prevExternalPlayingKey = key
+    }
+
+    // AudioFocus + Steering Wheel MediaSession Management
     DisposableEffect(context) {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        val focusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+            when (focusChange) {
+                AudioManager.AUDIOFOCUS_LOSS,
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                    // Another media app requested playback focus -> pause Page 2 YouTube!
+                    evalYoutubeJs(pauseOnlyJs)
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                    // Navigation TTS prompt -> duck gently without pausing!
+                    evalYoutubeJs("(function(){ var v=document.querySelector('video'); if(v) v.volume=0.35; })();")
+                }
+                AudioManager.AUDIOFOCUS_GAIN -> {
+                    evalYoutubeJs("(function(){ var v=document.querySelector('video'); if(v) v.volume=1.0; })();")
+                }
+            }
+        }
+        val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+            )
+            .setAcceptsDelayedFocusGain(true)
+            .setWillPauseWhenDucked(false)
+            .setOnAudioFocusChangeListener(focusListener, mainHandler)
+            .build()
+
         val actions = PlaybackState.ACTION_PLAY_PAUSE or
             PlaybackState.ACTION_PLAY or
             PlaybackState.ACTION_PAUSE or
@@ -1610,6 +1827,7 @@ fun EmbeddedYoutubePlayerCard(
                 )
                 setCallback(object : MediaSession.Callback() {
                     override fun onPlay() {
+                        audioManager?.requestAudioFocus(focusRequest)
                         evalYoutubeJs(playOnlyJs)
                     }
 
@@ -1644,7 +1862,10 @@ fun EmbeddedYoutubePlayerCard(
 
         EmbeddedYoutubeBridge.isActive = true
         EmbeddedYoutubeBridge.onTogglePlayPause = { evalYoutubeJs(togglePlayPauseJs) }
-        EmbeddedYoutubeBridge.onPlay = { evalYoutubeJs(playOnlyJs) }
+        EmbeddedYoutubeBridge.onPlay = {
+            audioManager?.requestAudioFocus(focusRequest)
+            evalYoutubeJs(playOnlyJs)
+        }
         EmbeddedYoutubeBridge.onPause = { evalYoutubeJs(pauseOnlyJs) }
         EmbeddedYoutubeBridge.onNext = {
             evalYoutubeJs("document.querySelector('button[aria-label*=\"Next\"], .ytp-next-button')?.click();")
@@ -1660,9 +1881,34 @@ fun EmbeddedYoutubePlayerCard(
             EmbeddedYoutubeBridge.onPause = null
             EmbeddedYoutubeBridge.onNext = null
             EmbeddedYoutubeBridge.onPrevious = null
+            runCatching { audioManager?.abandonAudioFocusRequest(focusRequest) }
             runCatching {
                 session?.isActive = false
                 session?.release()
+            }
+        }
+    }
+
+    // Request AudioFocus whenever YouTube transitions to playing so other media apps yield cleanly
+    LaunchedEffect(isYoutubePlayingNow) {
+        if (isYoutubePlayingNow) {
+            val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            runCatching {
+                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                            .build()
+                    )
+                    .setWillPauseWhenDucked(false)
+                    .setOnAudioFocusChangeListener({ fc ->
+                        if (fc == AudioManager.AUDIOFOCUS_LOSS || fc == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                            evalYoutubeJs(pauseOnlyJs)
+                        }
+                    }, mainHandler)
+                    .build()
+                am?.requestAudioFocus(req)
             }
         }
     }
@@ -1700,7 +1946,7 @@ fun EmbeddedYoutubePlayerCard(
                         }
                         Spacer(Modifier.width(7.dp))
                         Text(
-                            text = "YouTube 視窗播放",
+                            text = "YouTube 視窗播放 · 720p",
                             color = colors.primaryText,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
@@ -1745,51 +1991,236 @@ fun EmbeddedYoutubePlayerCard(
                 }
             }
 
-            // Video WebView + In-Card CustomView Trap + Swipe-Up/Down Right-Half Fullscreen Gesture
+            // Video WebView + Full-Bleed Right-Pane Fullscreen + Native YouTube Gestures
             AndroidView(
                 factory = { ctx ->
                     var inlineCustomView: View? = null
                     var inlineCustomCallback: WebChromeClient.CustomViewCallback? = null
+
+                    val density = ctx.resources.displayMetrics.density
                     var downX = 0f
                     var downY = 0f
-                    var swipeConsumed = false
+                    var downTimeMs = 0L
+                    var gestureHandled = false
+                    var isHorizontalScrubbing = false
+                    var scrubStartSec = 0f
+
+                    // Double-tap & Double-tap-and-hold state (active ONLY in Right-Pane Fullscreen)
+                    var lastTapUpMs = 0L
+                    var lastTapX = 0f
+                    var lastTapY = 0f
+                    var isSecondTapDown = false
+                    var isDoubleTapHolding = false
+                    var doubleTapZone = 0 // -1 = left 1/3, 0 = center 1/3, +1 = right 1/3
+                    var accumulatedSeekSec = 0
+                    var lastAccumulatedMs = 0L
+                    var holdRepeatRunnable: Runnable? = null
+
+                    fun stopHoldAcceleration() {
+                        holdRepeatRunnable?.let { mainHandler.removeCallbacks(it) }
+                        holdRepeatRunnable = null
+                        if (isDoubleTapHolding) {
+                            isDoubleTapHolding = false
+                            setPlaybackRateJs(1.0f)
+                            gestureHud = null
+                        }
+                    }
 
                     val cardVideoContainer = object : FrameLayout(ctx) {
                         override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+                            val w = width.toFloat().coerceAtLeast(240f)
+                            val h = height.toFloat().coerceAtLeast(200f)
+
+                            if (!isRightPaneFullscreen) {
+                                // Normal Page 2 state: ONLY swipe UP inside the upper video circle zone (top 48%, Image 4) enters Fullscreen!
+                                when (ev.actionMasked) {
+                                    MotionEvent.ACTION_DOWN -> {
+                                        downX = ev.x
+                                        downY = ev.y
+                                        gestureHandled = false
+                                    }
+                                    MotionEvent.ACTION_MOVE -> {
+                                        if (!gestureHandled) {
+                                            val dx = ev.x - downX
+                                            val dy = ev.y - downY
+                                            // Upper red-circle video zone: top 4%..48% of the card height
+                                            if (downY in (h * 0.03f)..(h * 0.48f) &&
+                                                dy < -(62f * density.coerceAtLeast(1f) / 1.6f) &&
+                                                kotlin.math.abs(dy) > kotlin.math.abs(dx) * 1.3f
+                                            ) {
+                                                gestureHandled = true
+                                                enterRightPaneFullscreen()
+                                                return true
+                                            }
+                                        }
+                                    }
+                                }
+                                return super.dispatchTouchEvent(ev)
+                            }
+
+                            // === RIGHT-PANE FULLSCREEN GESTURES ===
+                            // Let direct taps on top-right (CC / Gear settings) or bottom-right (native Fullscreen button, Image 6) pass straight through!
+                            val inTopRightControls = ev.y < 60f * density && ev.x > w * 0.62f
+                            val inBottomRightFsCorner = ev.y > h - 64f * density && ev.x > w - 76f * density
+                            if (inTopRightControls || inBottomRightFsCorner) {
+                                return super.dispatchTouchEvent(ev)
+                            }
+
                             when (ev.actionMasked) {
                                 MotionEvent.ACTION_DOWN -> {
                                     downX = ev.x
                                     downY = ev.y
-                                    swipeConsumed = false
-                                }
-                                MotionEvent.ACTION_MOVE -> {
-                                    if (!swipeConsumed) {
-                                        val dx = ev.x - downX
-                                        val dy = ev.y - downY
-                                        val h = height.toFloat().coerceAtLeast(240f)
-                                        if (!isRightPaneFullscreen) {
-                                            // Swipe UP from center/video zone -> Right-Half YouTube Fullscreen
-                                            if (downY in (h * 0.08f)..(h * 0.78f) &&
-                                                dy < -95f &&
-                                                kotlin.math.abs(dy) > kotlin.math.abs(dx) * 1.35f
-                                            ) {
-                                                swipeConsumed = true
-                                                isRightPaneFullscreen = true
-                                                evalYoutubeJs(enterFullscreenJs)
-                                                return true
+                                    downTimeMs = System.currentTimeMillis()
+                                    gestureHandled = false
+                                    isHorizontalScrubbing = false
+                                    isSecondTapDown = false
+                                    stopHoldAcceleration()
+
+                                    val dt = downTimeMs - lastTapUpMs
+                                    val dist = kotlin.math.hypot((ev.x - lastTapX).toDouble(), (ev.y - lastTapY).toDouble())
+                                    if (dt in 25L..320L && dist < 76f * density) {
+                                        // 2nd tap detected! Consume so WebView doesn't double-toggle controls
+                                        isSecondTapDown = true
+                                        gestureHandled = true
+                                        doubleTapZone = when {
+                                            ev.x < w / 3f -> -1
+                                            ev.x > w * 2f / 3f -> 1
+                                            else -> 0
+                                        }
+                                        // Schedule Double-Tap & HOLD acceleration for Left 1/3 or Right 1/3!
+                                        if (doubleTapZone != 0) {
+                                            val holdStartMs = downTimeMs
+                                            val runner = object : Runnable {
+                                                override fun run() {
+                                                    if (!isSecondTapDown) return
+                                                    if (!isDoubleTapHolding) {
+                                                        isDoubleTapHolding = true
+                                                        if (doubleTapZone > 0) {
+                                                            setPlaybackRateJs(2.0f)
+                                                            flashGestureHud(YtGestureHudZone.TOP, "⏩ 持續加速快轉中…")
+                                                        } else {
+                                                            flashGestureHud(YtGestureHudZone.TOP, "⏪ 持續加速倒退中…")
+                                                        }
+                                                    }
+                                                    val heldElapsed = System.currentTimeMillis() - holdStartMs
+                                                    val stepSec = if (heldElapsed > 1600L) 4.5f else 2.5f
+                                                    seekRelativeSec(if (doubleTapZone > 0) stepSec else -stepSec)
+                                                    mainHandler.postDelayed(this, 160L)
+                                                }
                                             }
+                                            holdRepeatRunnable = runner
+                                            mainHandler.postDelayed(runner, 230L)
+                                        }
+                                        return true
+                                    }
+                                }
+
+                                MotionEvent.ACTION_MOVE -> {
+                                    val dx = ev.x - downX
+                                    val dy = ev.y - downY
+                                    if (isSecondTapDown) {
+                                        return true
+                                    }
+                                    if (isHorizontalScrubbing) {
+                                        val deltaSec = (dx / w) * 90f
+                                        val dur = videoDurationSec.coerceAtLeast(1f)
+                                        val target = if (videoDurationSec > 1f) {
+                                            (scrubStartSec + deltaSec).coerceIn(0f, dur)
                                         } else {
-                                            // Swipe DOWN anywhere on right half -> Exit Right-Half Fullscreen
-                                            if (dy > 95f &&
-                                                kotlin.math.abs(dy) > kotlin.math.abs(dx) * 1.35f
-                                            ) {
-                                                swipeConsumed = true
-                                                exitCustomViewTrigger?.invoke()
-                                                evalYoutubeJs(exitFullscreenJs)
-                                                isRightPaneFullscreen = false
-                                                return true
+                                            (scrubStartSec + deltaSec).coerceAtLeast(0f)
+                                        }
+                                        seekAbsoluteSec(target)
+                                        val sign = if (deltaSec >= 0f) "+" else ""
+                                        val durPart = if (videoDurationSec > 1f) " / ${formatYtTime(videoDurationSec)}" else ""
+                                        flashGestureHud(
+                                            YtGestureHudZone.CENTER,
+                                            "${if (deltaSec >= 0f) "⏩" else "⏪"} ${formatYtTime(target)}$durPart ($sign${deltaSec.toInt()}秒)"
+                                        )
+                                        return true
+                                    }
+                                    if (!gestureHandled) {
+                                        // Swipe DOWN -> Exit Right-Pane Fullscreen
+                                        if (dy > 75f && kotlin.math.abs(dy) > kotlin.math.abs(dx) * 1.3f) {
+                                            gestureHandled = true
+                                            val cancelEv = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_CANCEL }
+                                            super.dispatchTouchEvent(cancelEv)
+                                            cancelEv.recycle()
+                                            exitRightPaneFullscreen()
+                                            return true
+                                        }
+                                        // Horizontal Swipe -> Scrub Video Timeline!
+                                        if (kotlin.math.abs(dx) > 28f * density.coerceAtLeast(1f) / 1.5f &&
+                                            kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.35f
+                                        ) {
+                                            gestureHandled = true
+                                            isHorizontalScrubbing = true
+                                            scrubStartSec = videoCurrentSec
+                                            val cancelEv = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_CANCEL }
+                                            super.dispatchTouchEvent(cancelEv)
+                                            cancelEv.recycle()
+                                            return true
+                                        }
+                                    }
+                                }
+
+                                MotionEvent.ACTION_UP,
+                                MotionEvent.ACTION_CANCEL -> {
+                                    val nowUp = System.currentTimeMillis()
+                                    if (isSecondTapDown) {
+                                        val wasHolding = isDoubleTapHolding
+                                        stopHoldAcceleration()
+                                        isSecondTapDown = false
+                                        if (!wasHolding && ev.actionMasked == MotionEvent.ACTION_UP) {
+                                            when (doubleTapZone) {
+                                                0 -> {
+                                                    // Center 1/3 Double-Tap -> Play / Pause
+                                                    val nextPaused = isYoutubePlayingNow
+                                                    evalYoutubeJs(togglePlayPauseJs)
+                                                    flashGestureHud(
+                                                        YtGestureHudZone.CENTER,
+                                                        if (nextPaused) "⏸ 暫停" else "▶ 播放"
+                                                    )
+                                                }
+                                                1 -> {
+                                                    // Right 1/3 Double-Tap -> +10s (accumulating)
+                                                    accumulatedSeekSec = if (nowUp - lastAccumulatedMs < 900L && accumulatedSeekSec > 0) {
+                                                        accumulatedSeekSec + 10
+                                                    } else {
+                                                        10
+                                                    }
+                                                    lastAccumulatedMs = nowUp
+                                                    seekRelativeSec(10f)
+                                                    lastTapUpMs = nowUp
+                                                    lastTapX = ev.x
+                                                    lastTapY = ev.y
+                                                    flashGestureHud(YtGestureHudZone.RIGHT, "⏩ +${accumulatedSeekSec} 秒")
+                                                }
+                                                -1 -> {
+                                                    // Left 1/3 Double-Tap -> -10s (accumulating)
+                                                    accumulatedSeekSec = if (nowUp - lastAccumulatedMs < 900L && accumulatedSeekSec < 0) {
+                                                        accumulatedSeekSec - 10
+                                                    } else {
+                                                        -10
+                                                    }
+                                                    lastAccumulatedMs = nowUp
+                                                    seekRelativeSec(-10f)
+                                                    lastTapUpMs = nowUp
+                                                    lastTapX = ev.x
+                                                    lastTapY = ev.y
+                                                    flashGestureHud(YtGestureHudZone.LEFT, "⏪ ${accumulatedSeekSec} 秒")
+                                                }
                                             }
                                         }
+                                        return true
+                                    }
+                                    if (isHorizontalScrubbing) {
+                                        isHorizontalScrubbing = false
+                                        return true
+                                    }
+                                    if (!gestureHandled && ev.actionMasked == MotionEvent.ACTION_UP && (nowUp - downTimeMs) < 280L) {
+                                        lastTapUpMs = nowUp
+                                        lastTapX = ev.x
+                                        lastTapY = ev.y
                                     }
                                 }
                             }
@@ -1807,7 +2238,109 @@ fun EmbeddedYoutubePlayerCard(
                     }
                     exitCustomViewTrigger = { hideCustomInline() }
 
-                    val wv = WebView(ctx).apply {
+                    val bootstrapYoutubeEnhancementsJs = """
+                        (function() {
+                          if (window.__dxcarYtBootstrapped) return;
+                          window.__dxcarYtBootstrapped = true;
+
+                          // 1. Spoof Page Visibility & Focus so background playback NEVER pauses in other apps / stock launcher!
+                          try {
+                            Object.defineProperty(document, 'hidden', { get: function() { return false; }, configurable: true });
+                            Object.defineProperty(document, 'webkitHidden', { get: function() { return false; }, configurable: true });
+                            Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; }, configurable: true });
+                            document.hasFocus = function() { return true; };
+                            var blockEv = function(e) { e.stopImmediatePropagation(); };
+                            document.addEventListener('visibilitychange', blockEv, true);
+                            document.addEventListener('webkitvisibilitychange', blockEv, true);
+                            window.addEventListener('pagehide', blockEv, true);
+                            window.addEventListener('freeze', blockEv, true);
+                            window.addEventListener('blur', blockEv, true);
+                          } catch (e) {}
+
+                          // 2. Default video playback quality to 720p (hd720)
+                          function apply720pPreference() {
+                            try {
+                              var now = Date.now();
+                              var qPayload = JSON.stringify({
+                                data: JSON.stringify({ quality: 720, previousQuality: 720 }),
+                                expiration: now + 31536000000,
+                                creation: now
+                              });
+                              localStorage.setItem('yt-player-quality', qPayload);
+                              sessionStorage.setItem('yt-player-quality', qPayload);
+                            } catch (e) {}
+                          }
+                          apply720pPreference();
+
+                          var lastQualitySrc = '';
+                          function enforcePlayer720pOnce() {
+                            try {
+                              var v = document.querySelector('video');
+                              var curSrc = v ? (v.currentSrc || location.href) : '';
+                              if (curSrc && curSrc !== lastQualitySrc) {
+                                apply720pPreference();
+                                var mp = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+                                if (mp) {
+                                  if (mp.setPlaybackQualityRange) mp.setPlaybackQualityRange('hd720', 'hd720');
+                                  if (mp.setPlaybackQuality) mp.setPlaybackQuality('hd720');
+                                  lastQualitySrc = curSrc;
+                                }
+                              }
+                            } catch (e) {}
+                          }
+
+                          // 3. Hook YouTube player's own bottom-right Fullscreen button (Image 6) so clicking it toggles Right-Pane Fullscreen!
+                          document.addEventListener('click', function(e) {
+                            try {
+                              var t = e.target;
+                              var btn = t && t.closest ? t.closest('button.fullscreen-icon, .fullscreen-icon, .ytp-fullscreen-button, button[aria-label*="Full screen"], button[aria-label*="Exit full screen"], button[aria-label*="全螢幕"], button[aria-label*="退出全螢幕"]') : null;
+                              if (btn && window.DxCarYtBridge) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                window.DxCarYtBridge.onPlayerFullscreenButtonClicked();
+                              }
+                            } catch (err) {}
+                          }, true);
+
+                          // 4. Report live playback time + guard against unwanted background auto-pause!
+                          setInterval(function() {
+                            try {
+                              var v = document.querySelector('video');
+                              if (v && window.DxCarYtBridge) {
+                                enforcePlayer720pOnce();
+                                window.DxCarYtBridge.onVideoProgress(
+                                  v.currentTime || 0,
+                                  (v.duration && isFinite(v.duration)) ? v.duration : 0,
+                                  !v.paused && !v.ended
+                                );
+                                if (!v.__dxcarBound) {
+                                  v.__dxcarBound = true;
+                                  v.addEventListener('play', function() {
+                                    window.__dxcarLastActivePlayMs = Date.now();
+                                    enforcePlayer720pOnce();
+                                  });
+                                  v.addEventListener('playing', function() {
+                                    window.__dxcarLastActivePlayMs = Date.now();
+                                  });
+                                  v.addEventListener('pause', function() {
+                                    // If Android Launcher is in background (Google Maps / Browser / Stock Launcher)
+                                    // and pause was NOT triggered by user or external media AudioFocus, resume immediately!
+                                    if (!v.ended && !window.__dxcarUserPaused && window.DxCarYtBridge && window.DxCarYtBridge.shouldKeepPlayingInBackground()) {
+                                      setTimeout(function() {
+                                        if (v.paused && !v.ended && !window.__dxcarUserPaused) {
+                                          v.play().catch(function(){});
+                                        }
+                                      }, 90);
+                                    }
+                                  });
+                                }
+                              }
+                            } catch (err) {}
+                          }, 280);
+                        })();
+                    """.trimIndent()
+
+                    val wv = BackgroundPlayableWebView(ctx).apply {
                         layoutParams = FrameLayout.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
@@ -1824,24 +2357,51 @@ fun EmbeddedYoutubePlayerCard(
                             userAgentString =
                                 "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
                         }
+                        addJavascriptInterface(
+                            object {
+                                @JavascriptInterface
+                                fun onPlayerFullscreenButtonClicked() {
+                                    mainHandler.post {
+                                        if (isRightPaneFullscreen) {
+                                            exitRightPaneFullscreen()
+                                        } else {
+                                            enterRightPaneFullscreen()
+                                        }
+                                    }
+                                }
+
+                                @JavascriptInterface
+                                fun onVideoProgress(cur: Float, dur: Float, playing: Boolean) {
+                                    videoCurrentSec = cur
+                                    videoDurationSec = dur
+                                    if (isYoutubePlayingNow != playing) {
+                                        mainHandler.post { isYoutubePlayingNow = playing }
+                                    }
+                                }
+
+                                @JavascriptInterface
+                                fun shouldKeepPlayingInBackground(): Boolean {
+                                    val dxApp = com.dxcar.launcher.DxCarApp.instance
+                                    return dxApp != null && !dxApp.isLauncherForeground.value
+                                }
+                            },
+                            "DxCarYtBridge"
+                        )
                         webViewClient = object : WebViewClient() {
+                            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                                super.onPageStarted(view, url, favicon)
+                                view?.evaluateJavascript(bootstrapYoutubeEnhancementsJs, null)
+                                if (isRightPaneFullscreen) {
+                                    view?.evaluateJavascript(applyRightPaneFsCssJs, null)
+                                }
+                            }
+
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
-                                // Spoof Page Visibility API so YouTube keeps playing audio in background
-                                // (when switching to Page 1 or opening Google Maps / another app)
-                                view?.evaluateJavascript(
-                                    """
-                                    (function() {
-                                      try {
-                                        Object.defineProperty(document, 'hidden', { get: function() { return false; }, configurable: true });
-                                        Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; }, configurable: true });
-                                        document.addEventListener('visibilitychange', function(e) { e.stopImmediatePropagation(); }, true);
-                                        window.addEventListener('pagehide', function(e) { e.stopImmediatePropagation(); }, true);
-                                      } catch (e) {}
-                                    })();
-                                    """.trimIndent(),
-                                    null
-                                )
+                                view?.evaluateJavascript(bootstrapYoutubeEnhancementsJs, null)
+                                if (isRightPaneFullscreen) {
+                                    view?.evaluateJavascript(applyRightPaneFsCssJs, null)
+                                }
                             }
                         }
                         webChromeClient = object : WebChromeClient() {
@@ -1862,9 +2422,11 @@ fun EmbeddedYoutubePlayerCard(
 
                             override fun onHideCustomView() {
                                 hideCustomInline()
+                                evalYoutubeJs(removeRightPaneFsCssJs)
                                 isRightPaneFullscreen = false
                             }
                         }
+                        resumeTimers()
                         loadUrl("https://m.youtube.com")
                     }
                     webViewRef = wv
@@ -1877,7 +2439,39 @@ fun EmbeddedYoutubePlayerCard(
             )
         }
 
-        // Brief 2.4s hint when entering right-half YouTube fullscreen
+        // Fullscreen Gesture Feedback Overlays (Left -10s / Center Play-Pause-Scrub / Right +10s / Top Hold Speed)
+        val activeHud = gestureHud
+        AnimatedVisibility(
+            visible = isRightPaneFullscreen && activeHud != null,
+            enter = fadeIn(tween(110)),
+            exit = fadeOut(tween(180)),
+            modifier = Modifier
+                .align(
+                    when (activeHud?.zone) {
+                        YtGestureHudZone.LEFT -> Alignment.CenterStart
+                        YtGestureHudZone.RIGHT -> Alignment.CenterEnd
+                        YtGestureHudZone.TOP -> Alignment.TopCenter
+                        else -> Alignment.Center
+                    }
+                )
+                .padding(horizontal = 24.dp, vertical = 18.dp)
+        ) {
+            Surface(
+                color = Color(0xCC0F172A),
+                shape = RoundedCornerShape(22.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f))
+            ) {
+                Text(
+                    text = activeHud?.label.orEmpty(),
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp)
+                )
+            }
+        }
+
+        // Brief 2.2s hint when entering right-half YouTube fullscreen
         AnimatedVisibility(
             visible = showFsHintBanner,
             enter = fadeIn(),
@@ -1891,7 +2485,7 @@ fun EmbeddedYoutubePlayerCard(
                 shape = RoundedCornerShape(16.dp)
             ) {
                 Text(
-                    text = "已進入右半邊全螢幕 · 下滑可退出",
+                    text = "已進入右半邊全螢幕 · 下滑或點右下角按鈕可退出",
                     color = Color.White,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,

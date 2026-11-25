@@ -105,16 +105,49 @@ class CarNotificationCenter(
 
     fun updateCallState(state: CarCallState) {
         val current = _activeCall.value
+        if (state.status == CallStatus.IDLE) {
+            _activeCall.value = CarCallState(status = CallStatus.IDLE)
+            return
+        }
         val startedAt = when {
             state.status == CallStatus.ACTIVE && current.status != CallStatus.ACTIVE ->
                 System.currentTimeMillis()
             state.status == CallStatus.ACTIVE ->
                 current.startedAtMs.takeIf { it > 0 } ?: System.currentTimeMillis()
+            state.status == CallStatus.RINGING && current.status == CallStatus.RINGING && current.startedAtMs > 0 ->
+                current.startedAtMs
             state.status == CallStatus.RINGING ->
                 System.currentTimeMillis()
             else -> 0L
         }
-        _activeCall.value = state.copy(startedAtMs = startedAt)
+
+        // Preserve resolved contact name & phone number across rapid HFP / PhoneState / Notification broadcasts
+        val incomingHasRealName = !ContactNameResolver.isGenericOrNumberOnly(state.callerName)
+        val currentHasRealName = current.status != CallStatus.IDLE &&
+            !ContactNameResolver.isGenericOrNumberOnly(current.callerName)
+
+        val mergedNumber = state.callerNumber.ifBlank {
+            if (current.status != CallStatus.IDLE) current.callerNumber else ""
+        }
+        val mergedName = when {
+            incomingHasRealName -> state.callerName
+            currentHasRealName -> current.callerName
+            mergedNumber.isNotBlank() -> mergedNumber
+            state.callerName.isNotBlank() -> state.callerName
+            else -> current.callerName.ifBlank { "藍牙來電" }
+        }
+        val mergedSource = if (incomingHasRealName || current.status == CallStatus.IDLE) {
+            state.sourceApp
+        } else {
+            current.sourceApp.ifBlank { state.sourceApp }
+        }
+
+        _activeCall.value = state.copy(
+            callerName = mergedName,
+            callerNumber = mergedNumber,
+            sourceApp = mergedSource,
+            startedAtMs = startedAt
+        )
     }
 
     fun performCallAction(action: CallActionCommand) {

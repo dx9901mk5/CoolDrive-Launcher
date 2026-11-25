@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.BluetoothConnected
 import androidx.compose.material.icons.rounded.BluetoothDisabled
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.Dashboard
+import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.Mic
@@ -71,6 +72,7 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -134,6 +136,9 @@ fun CoolwalkDock(
 ) {
     val colors = LocalDxCarColors.current
     val timeText = if (is24HourClock) systemStatus.time24h else systemStatus.time12h
+    // Default bottom-left button ALWAYS returns to Launcher Home unless ALREADY at Launcher Home!
+    val isAtLauncherHome = isDashboardActive && !isAppDrawerOpen && !isOverlayMode
+    val launcherClickAction = if (isAtLauncherHome) onToggleAppDrawer else onGoDashboard
 
     if (placement.isHorizontalBar) {
         val launcherCluster: @Composable () -> Unit = {
@@ -142,9 +147,9 @@ fun CoolwalkDock(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 DockLauncherButton(
+                    showAppGridIcon = isAtLauncherHome,
                     isAppDrawerOpen = isAppDrawerOpen,
-                    isDashboardActive = isDashboardActive,
-                    onClick = if (isAppDrawerOpen) onGoDashboard else onToggleAppDrawer,
+                    onClick = launcherClickAction,
                     onLongClick = onGoDashboard
                 )
                 BackRecentsComboButton(
@@ -305,8 +310,9 @@ fun CoolwalkDock(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // TOP: Status Cluster [Time] -> [Notification Icon in middle] -> [Wi-Fi + Bluetooth]
+                // TOP: Status Cluster [Full-Width Time + AM/PM bottom-right] -> [Wi-Fi + Bluetooth] -> [Notification Number/Bell + Mic/3D]
                 Column(
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
@@ -315,13 +321,8 @@ fun CoolwalkDock(
                         compact = true,
                         onClick = onClockClick
                     )
-                    NotificationBellButton(
-                        unreadCount = unreadCount,
-                        compact = true,
-                        onClick = onNotificationsClick
-                    )
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         WifiStatusChip(
@@ -339,7 +340,15 @@ fun CoolwalkDock(
                             onLongClick = onBluetoothLongClick
                         )
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        NotificationBellButton(
+                            unreadCount = unreadCount,
+                            compact = true,
+                            onClick = onNotificationsClick
+                        )
                         if (onVoiceNavClick != null) {
                             SmallDockUtilityIcon(
                                 icon = Icons.Rounded.Mic,
@@ -348,29 +357,36 @@ fun CoolwalkDock(
                                 onClick = onVoiceNavClick
                             )
                         }
-                        if (onToggle3DCursor != null) {
-                            SmallDockUtilityIcon(
-                                icon = Icons.Rounded.ViewInAr,
-                                contentDescription = "開啟 3D 俯瞰類滑鼠指標",
-                                tint = if (is3DCursorActive) Color(0xFF22C55E) else colors.accent,
-                                onClick = onToggle3DCursor
-                            )
-                        }
-                        if (isOverlayMode && onTogglePinOverlay != null) {
-                            SmallDockUtilityIcon(
-                                icon = Icons.Rounded.PushPin,
-                                contentDescription = if (isOverlayPinnedOpen) "取消釘選常駐" else "暫時釘選展開",
-                                tint = if (isOverlayPinnedOpen) colors.accent else colors.secondaryText,
-                                onClick = onTogglePinOverlay
-                            )
-                        }
-                        if (isOverlayMode && onCollapseOverlay != null) {
-                            SmallDockUtilityIcon(
-                                icon = Icons.Rounded.ChevronLeft,
-                                contentDescription = "收合常駐列",
-                                tint = colors.secondaryText,
-                                onClick = onCollapseOverlay
-                            )
+                    }
+                    if (onToggle3DCursor != null || (isOverlayMode && (onTogglePinOverlay != null || onCollapseOverlay != null))) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (onToggle3DCursor != null) {
+                                SmallDockUtilityIcon(
+                                    icon = Icons.Rounded.ViewInAr,
+                                    contentDescription = "開啟 3D 俯瞰類滑鼠指標",
+                                    tint = if (is3DCursorActive) Color(0xFF22C55E) else colors.accent,
+                                    onClick = onToggle3DCursor
+                                )
+                            }
+                            if (isOverlayMode && onTogglePinOverlay != null) {
+                                SmallDockUtilityIcon(
+                                    icon = Icons.Rounded.PushPin,
+                                    contentDescription = if (isOverlayPinnedOpen) "取消釘選常駐" else "暫時釘選展開",
+                                    tint = if (isOverlayPinnedOpen) colors.accent else colors.secondaryText,
+                                    onClick = onTogglePinOverlay
+                                )
+                            }
+                            if (isOverlayMode && onCollapseOverlay != null) {
+                                SmallDockUtilityIcon(
+                                    icon = Icons.Rounded.ChevronLeft,
+                                    contentDescription = "收合常駐列",
+                                    tint = colors.secondaryText,
+                                    onClick = onCollapseOverlay
+                                )
+                            }
                         }
                     }
                 }
@@ -389,7 +405,7 @@ fun CoolwalkDock(
                     }
                 }
 
-                // BOTTOM-LEFT: Back/Recents Combo Button (Red zone above App Menu) + Classic AA 9-Dot App Menu Launcher Button
+                // BOTTOM-LEFT: Back/Recents Combo Button + Home / App Drawer Button
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -400,9 +416,9 @@ fun CoolwalkDock(
                         onRecentsClick = onRecentsClick
                     )
                     DockLauncherButton(
+                        showAppGridIcon = isAtLauncherHome,
                         isAppDrawerOpen = isAppDrawerOpen,
-                        isDashboardActive = isDashboardActive,
-                        onClick = if (isAppDrawerOpen) onGoDashboard else onToggleAppDrawer,
+                        onClick = launcherClickAction,
                         onLongClick = onGoDashboard
                     )
                 }
@@ -414,15 +430,15 @@ fun CoolwalkDock(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DockLauncherButton(
+    showAppGridIcon: Boolean,
     isAppDrawerOpen: Boolean,
-    isDashboardActive: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
     val colors = LocalDxCarColors.current
     val highlighted = isAppDrawerOpen
     val iconRotation by animateFloatAsState(
-        targetValue = if (highlighted) 90f else 0f,
+        targetValue = if (highlighted) 360f else 0f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
@@ -447,12 +463,8 @@ private fun DockLauncherButton(
             )
     ) {
         Icon(
-            imageVector = if (isAppDrawerOpen || !isDashboardActive) {
-                Icons.Rounded.Dashboard
-            } else {
-                Icons.Rounded.Apps
-            },
-            contentDescription = if (isAppDrawerOpen) "回到分割首頁" else "展開 App 選單",
+            imageVector = if (showAppGridIcon) Icons.Rounded.Apps else Icons.Rounded.Home,
+            contentDescription = if (showAppGridIcon) "展開 App 選單" else "回到啟動器首頁",
             tint = if (highlighted) colors.onAccent else colors.primaryText,
             modifier = Modifier
                 .size(26.dp)
@@ -614,23 +626,77 @@ private fun ClockChip(
     onClick: () -> Unit
 ) {
     val colors = LocalDxCarColors.current
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .bouncyClickable(pressedScale = 0.90f, onClick = onClick)
-            .padding(horizontal = if (compact) 1.dp else 8.dp, vertical = 3.dp)
-    ) {
-        Text(
-            text = timeText,
-            color = colors.primaryText,
-            fontSize = if (compact) 12.sp else 17.sp,
-            letterSpacing = if (compact) (-0.3).sp else 0.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Clip
-        )
+    val trimmed = timeText.trim()
+    val parts = trimmed.split(" ")
+    val mainDigits = parts.firstOrNull().orEmpty().ifBlank { trimmed }
+    val amPm = if (parts.size >= 2) parts.drop(1).joinToString(" ").uppercase() else ""
+
+    if (compact) {
+        // Fill Dock left-to-right with large crisp digits, and hang small AM/PM at bottom-right!
+        val mainFontSize = if (mainDigits.length >= 5) 18.sp else 20.5.sp
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .bouncyClickable(pressedScale = 0.90f, onClick = onClick)
+                .padding(horizontal = 0.dp, vertical = 1.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = mainDigits,
+                color = colors.primaryText,
+                fontSize = mainFontSize,
+                lineHeight = mainFontSize,
+                letterSpacing = (-0.6).sp,
+                fontWeight = FontWeight.ExtraBold,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Visible,
+                modifier = Modifier.fillMaxWidth()
+            )
+            if (amPm.isNotEmpty()) {
+                Text(
+                    text = amPm,
+                    color = colors.secondaryText,
+                    fontSize = 9.sp,
+                    lineHeight = 9.5.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .padding(end = 2.dp)
+                )
+            }
+        }
+    } else {
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .bouncyClickable(pressedScale = 0.90f, onClick = onClick)
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+        ) {
+            Text(
+                text = mainDigits,
+                color = colors.primaryText,
+                fontSize = 21.sp,
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = 1,
+                softWrap = false
+            )
+            if (amPm.isNotEmpty()) {
+                Spacer(Modifier.width(3.dp))
+                Text(
+                    text = amPm,
+                    color = colors.secondaryText,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                    modifier = Modifier.padding(bottom = 2.dp)
+                )
+            }
+        }
     }
 }
 
@@ -641,37 +707,45 @@ private fun NotificationBellButton(
     onClick: () -> Unit
 ) {
     val colors = LocalDxCarColors.current
-    val btnSize = if (compact) 28.dp else 36.dp
+    val btnSize = if (compact) 29.dp else 36.dp
+    val hasUnread = unreadCount > 0
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .size(btnSize)
             .clip(CircleShape)
-            .background(colors.dockIconContainer.copy(alpha = 0.9f))
+            .background(
+                if (hasUnread) Color(0xFFEF4444)
+                else colors.dockIconContainer.copy(alpha = 0.9f)
+            )
+            .then(
+                if (hasUnread) Modifier.border(1.2.dp, Color.White.copy(alpha = 0.75f), CircleShape)
+                else Modifier
+            )
             .bouncyClickable(pressedScale = 0.88f, onClick = onClick)
     ) {
-        Icon(
-            imageVector = Icons.Rounded.Notifications,
-            contentDescription = "訊息通知中心",
-            tint = if (unreadCount > 0) colors.accent else colors.secondaryText,
-            modifier = Modifier.size(if (compact) 16.dp else 19.dp)
-        )
-        if (unreadCount > 0) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .size(if (compact) 13.dp else 16.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFEF4444))
-            ) {
-                Text(
-                    text = if (unreadCount > 9) "9+" else "$unreadCount",
-                    color = Color.White,
-                    fontSize = if (compact) 8.sp else 9.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
+        if (hasUnread) {
+            // Directly display notification count as bold crisp digits!
+            val countStr = if (unreadCount > 99) "99+" else "$unreadCount"
+            Text(
+                text = countStr,
+                color = Color.White,
+                fontSize = when {
+                    countStr.length >= 3 -> if (compact) 9.5.sp else 11.sp
+                    countStr.length == 2 -> if (compact) 11.5.sp else 13.sp
+                    else -> if (compact) 13.5.sp else 15.sp
+                },
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = 1,
+                softWrap = false
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Rounded.Notifications,
+                contentDescription = "訊息通知中心",
+                tint = colors.secondaryText,
+                modifier = Modifier.size(if (compact) 16.dp else 19.dp)
+            )
         }
     }
 }

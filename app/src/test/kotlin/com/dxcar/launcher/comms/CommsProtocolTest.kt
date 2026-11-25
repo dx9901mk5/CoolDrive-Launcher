@@ -1,10 +1,15 @@
 package com.dxcar.launcher.comms
 
+import com.dxcar.launcher.data.LauncherConfig
+import com.dxcar.launcher.data.MapEngineStyle
+import com.dxcar.launcher.data.NotificationBannerScale
+import com.dxcar.launcher.map.MapStyleFactory
 import com.dxcar.launcher.map.OfflineMapManager
 import com.dxcar.launcher.voice.GeminiVoiceNavController
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -93,5 +98,32 @@ class CommsProtocolTest {
         assertEquals("台中高鐵站", GeminiVoiceNavController.extractDestinationFromMandarin("請幫我導航到台中高鐵站"))
         assertEquals("台北101", GeminiVoiceNavController.extractDestinationFromMandarin("Gemini 帶我去台北101怎麼走"))
         assertEquals("加油站", GeminiVoiceNavController.extractDestinationFromMandarin("幫我找附近的加油站"))
+    }
+
+    @Test
+    fun `contact name resolver distinguishes real contact names from generic or numeric labels`() {
+        assertTrue(ContactNameResolver.isGenericOrNumberOnly("藍牙來電"))
+        assertTrue(ContactNameResolver.isGenericOrNumberOnly("行動電話來電"))
+        assertTrue(ContactNameResolver.isGenericOrNumberOnly("+886 912-345-678"))
+        assertFalse(ContactNameResolver.isGenericOrNumberOnly("阿醬(俊和)"))
+        assertFalse(ContactNameResolver.isGenericOrNumberOnly("王小明"))
+        assertEquals("0912-345-678", ContactNameResolver.extractPlausiblePhoneNumber("來電 0912-345-678"))
+    }
+
+    @Test
+    fun `notification banner scale defaults to 1X and offline style shares canonical base tile urls`() {
+        val defaultCfg = LauncherConfig()
+        assertEquals(NotificationBannerScale.SCALE_1_0X, defaultCfg.notificationBannerScale)
+        assertEquals(listOf(0.5f, 0.75f, 1.0f, 1.5f, 2.0f), NotificationBannerScale.entries.map { it.factor })
+
+        val onlineWithTraffic = (MapStyleFactory.resolve(
+            MapEngineStyle.GOOGLE_TRAFFIC_TILES,
+            isNight = false,
+            trafficEnabled = true
+        ) as MapStyleFactory.ResolvedMapStyle.StyleJson).json
+        val offlineBase = MapStyleFactory.buildOfflineCompatibleGoogleStyleJson("m")
+        assertTrue(onlineWithTraffic.contains("lyrs=m&hl=zh-TW&gl=TW&scale=2"))
+        assertTrue(offlineBase.contains("lyrs=m&hl=zh-TW&gl=TW&scale=2"))
+        assertTrue(onlineWithTraffic.contains("lyrs=traffic&hl=zh-TW&gl=TW&scale=2"))
     }
 }

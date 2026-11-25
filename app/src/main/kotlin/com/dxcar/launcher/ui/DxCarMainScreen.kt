@@ -284,6 +284,10 @@ fun DxCarRootScreen(
 
     LaunchedEffect(externalNavCommand) {
         when (externalNavCommand) {
+            com.dxcar.launcher.MainActivity.EXTRA_GO_DASHBOARD -> {
+                destination = LauncherDestination.DASHBOARD_SPLIT
+                onExternalNavConsumed()
+            }
             com.dxcar.launcher.MainActivity.EXTRA_OPEN_DRAWER -> {
                 destination = LauncherDestination.APP_DRAWER
                 onExternalNavConsumed()
@@ -293,7 +297,7 @@ fun DxCarRootScreen(
                 onExternalNavConsumed()
             }
             com.dxcar.launcher.MainActivity.EXTRA_OPEN_QUICK_PANEL -> {
-                showQuickControlCenter = true
+                DxCarAccessibilityService.instance?.openQuickSettings()
                 onExternalNavConsumed()
             }
             com.dxcar.launcher.MainActivity.EXTRA_OPEN_NOTIFICATIONS -> {
@@ -597,16 +601,17 @@ fun DxCarRootScreen(
                             else -> destination = LauncherDestination.APP_DRAWER
                         }
                     },
-                    // Top-left Wi-Fi click expands Dropdown Quick Toggles Shade! Long-press opens System Wi-Fi!
-                    onWifiClick = { showQuickControlCenter = !showQuickControlCenter },
+                    // Direct System Menus: Wi-Fi opens System Wi-Fi, Bluetooth opens System Bluetooth, Clock pulls System Quick Settings!
+                    onWifiClick = { SystemStatusMonitor.openWifiSettings(context) },
                     onWifiLongClick = { SystemStatusMonitor.openWifiSettings(context) },
                     onBluetoothClick = { SystemStatusMonitor.openBluetoothSettings(context) },
-                    onBluetoothLongClick = {
-                        permissionHealth = PermissionHelper.check(context)
-                        app.installedAppsRepository.refreshHomeLaunchers()
-                        destination = LauncherDestination.SETTINGS
+                    onBluetoothLongClick = { SystemStatusMonitor.openBluetoothSettings(context) },
+                    onClockClick = {
+                        val ok = DxCarAccessibilityService.instance?.openQuickSettings() == true
+                        if (!ok) {
+                            SystemStatusMonitor.openWifiSettings(context)
+                        }
                     },
-                    onClockClick = { showQuickControlCenter = !showQuickControlCenter },
                     onNotificationsClick = { showNotificationCenter = !showNotificationCenter },
                     onToggle3DCursor = ::toggle3DPointerGlobal,
                     onVoiceNavClick = {
@@ -1327,12 +1332,15 @@ fun DxCarRootScreen(
             ) {
                 IncomingCallBanner(
                     callState = activeCall,
+                    scale = config.notificationBannerScale,
                     onAnswer = { app.notificationCenter.performCallAction(CallActionCommand.ANSWER) },
                     onDecline = { app.notificationCenter.performCallAction(CallActionCommand.DECLINE) }
                 )
                 IncomingMessageBanner(
                     message = popupMessage,
                     quickReplies = config.quickReplies,
+                    scale = config.notificationBannerScale,
+                    onExpandQuickReplies = { app.notificationCenter.pausePopupDismiss() },
                     onReadAloud = { app.notificationCenter.readMessageAloud(it) },
                     onQuickReply = { item, reply ->
                         app.notificationCenter.sendQuickReply(item, reply)
@@ -1352,37 +1360,6 @@ fun DxCarRootScreen(
                 text = gestureHudText,
                 modifier = Modifier.align(Alignment.Center)
             )
-
-            // DROPDOWN QUICK TOGGLES SHADE (Opened by tapping Top-Left Wi-Fi icon OR Clock!)
-            AnimatedVisibility(
-                visible = showQuickControlCenter,
-                enter = slideInVertically(initialOffsetY = { -it / 2 }, animationSpec = tween(190)) + fadeIn(tween(160)),
-                exit = slideOutVertically(targetOffsetY = { -it / 2 }, animationSpec = tween(140)) + fadeOut(tween(130))
-            ) {
-                QuickControlCenterOverlay(
-                    systemStatus = sysStatus,
-                    isNight = isNight,
-                    onVolumeChange = { app.systemStatusMonitor.setMediaVolumePercent(it) },
-                    onBrightnessChange = { app.systemStatusMonitor.setBrightnessPercent(it) },
-                    onToggleDayNight = ::handleToggleDayNight,
-                    onSwapSplit = { isMapPrimary = !isMapPrimary },
-                    onOpenWifiSettings = { SystemStatusMonitor.openWifiSettings(context) },
-                    onOpenBluetoothSettings = { SystemStatusMonitor.openBluetoothSettings(context) },
-                    onOpenSystemQuickShade = {
-                        val ok = DxCarAccessibilityService.instance?.openQuickSettings() == true
-                        if (!ok) {
-                            gestureHudText = "開啟無障礙服務即可拉下系統原生通知欄"
-                        }
-                    },
-                    onToggle3DCursor = ::toggle3DPointerGlobal,
-                    onOpenSettings = {
-                        permissionHealth = PermissionHelper.check(context)
-                        app.installedAppsRepository.refreshHomeLaunchers()
-                        destination = LauncherDestination.SETTINGS
-                    },
-                    onDismiss = { showQuickControlCenter = false }
-                )
-            }
 
             // NOTIFICATION CENTER OVERLAY
             AnimatedVisibility(
@@ -2095,7 +2072,7 @@ private fun CoolwalkSplitDashboard(
             swapProgress.animateTo(
                 targetValue = target,
                 animationSpec = tween(
-                    durationMillis = 1500,
+                    durationMillis = 680,
                     easing = CubicBezierEasing(0.32f, 0.0f, 0.18f, 1.0f)
                 )
             )

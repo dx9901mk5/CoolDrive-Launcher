@@ -87,18 +87,23 @@ class BluetoothCallReceiver : BroadcastReceiver() {
             TelephonyManager.ACTION_PHONE_STATE_CHANGED -> {
                 val stateStr = intent.getStringExtra(TelephonyManager.EXTRA_STATE) ?: return
                 @Suppress("DEPRECATION")
-                val number = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER).orEmpty()
+                val number = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)?.trim().orEmpty()
                 val status = when (stateStr) {
                     TelephonyManager.EXTRA_STATE_RINGING -> CallStatus.RINGING
                     TelephonyManager.EXTRA_STATE_OFFHOOK -> CallStatus.ACTIVE
                     else -> CallStatus.IDLE
+                }
+                val resolvedContact = if (status != CallStatus.IDLE) {
+                    ContactNameResolver.resolveDisplayName(context, number)
+                } else {
+                    null
                 }
                 val role = app?.preferences?.config?.value?.deviceRole
                 if (role == DeviceRole.PHONE_COMPANION) {
                     BluetoothCompanionService.sendPacketFromPhone(
                         BridgePacket(
                             type = PacketType.CALL_STATE,
-                            sender = number.ifBlank { "行動電話來電" },
+                            sender = resolvedContact ?: number.ifBlank { "行動電話來電" },
                             phoneNumber = number,
                             appName = "行動電話",
                             callStatus = status
@@ -108,7 +113,7 @@ class BluetoothCallReceiver : BroadcastReceiver() {
                     app?.notificationCenter?.updateCallState(
                         CarCallState(
                             status = status,
-                            callerName = number.ifBlank { "藍牙來電" },
+                            callerName = resolvedContact ?: number.ifBlank { "藍牙來電" },
                             callerNumber = number,
                             sourceApp = "藍牙電話",
                             fromPhoneBridge = false
@@ -124,7 +129,10 @@ class BluetoothCallReceiver : BroadcastReceiver() {
                 if (callObj != null && app != null) {
                     val number = runCatching {
                         callObj.javaClass.getMethod("getNumber").invoke(callObj) as? String
-                    }.getOrNull().orEmpty()
+                    }.getOrNull()?.trim().orEmpty()
+                    val hfpCallerName = runCatching {
+                        callObj.javaClass.getMethod("getName").invoke(callObj) as? String
+                    }.getOrNull()?.trim().orEmpty()
                     val rawState = runCatching {
                         callObj.javaClass.getMethod("getState").invoke(callObj) as? Int
                     }.getOrNull() ?: -1
@@ -136,10 +144,16 @@ class BluetoothCallReceiver : BroadcastReceiver() {
                         0, 1, 2, 3 -> CallStatus.ACTIVE
                         else -> CallStatus.IDLE
                     }
+                    val resolvedContact = if (mapped != CallStatus.IDLE) {
+                        hfpCallerName.takeIf { !ContactNameResolver.isGenericOrNumberOnly(it) }
+                            ?: ContactNameResolver.resolveDisplayName(context, number)
+                    } else {
+                        null
+                    }
                     app.notificationCenter.updateCallState(
                         CarCallState(
                             status = mapped,
-                            callerName = number.ifBlank { "藍牙免持來電" },
+                            callerName = resolvedContact ?: hfpCallerName.ifBlank { number.ifBlank { "藍牙免持來電" } },
                             callerNumber = number,
                             sourceApp = "藍牙 HFP",
                             fromPhoneBridge = false

@@ -470,16 +470,29 @@ fun SettingsScreen(
                                     Text(offlineState.statusMessage, color = colors.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                 }
                                 if (offlineState.downloadingRegionId != null) {
+                                    val pctInt = (offlineState.progress * 100f).toInt().coerceIn(0, 100)
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
+                                        Surface(
+                                            color = colors.accent.copy(alpha = 0.2f),
+                                            shape = RoundedCornerShape(10.dp)
+                                        ) {
+                                            Text(
+                                                text = "$pctInt%",
+                                                color = colors.accent,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                                            )
+                                        }
                                         LinearProgressIndicator(
                                             progress = { offlineState.progress },
                                             color = colors.accent,
                                             trackColor = colors.cardBorder,
-                                            modifier = Modifier.weight(1f).height(7.dp).clip(RoundedCornerShape(4.dp))
+                                            modifier = Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(4.dp))
                                         )
                                         OutlinedButton(onClick = onCancelOfflineDownload, shape = RoundedCornerShape(10.dp)) {
                                             Text("取消", fontSize = 11.sp)
@@ -1088,12 +1101,132 @@ fun SettingsScreen(
                             onCheckedChange = { checked -> onUpdateConfig { it.copy(autoReadMessagesTts = checked) } }
                         )
 
+                        // Notification & Incoming Call Scale Selector (0.5X / 0.75X / 1X Default / 1.5X / 2X)
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = str(
+                                    "左上通知與來電橫幅大小（預設 1X 精簡紅框尺寸，字體連動縮放）",
+                                    "Notification & Call Banner Scale (1X Compact Default)",
+                                    "左上通知・着信バナーサイズ（標準 1X コンパクト）"
+                                ),
+                                color = colors.primaryText,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                com.dxcar.launcher.data.NotificationBannerScale.entries.forEach { scaleOpt ->
+                                    val labelText = if (scaleOpt == com.dxcar.launcher.data.NotificationBannerScale.SCALE_1_0X) {
+                                        "${scaleOpt.label} (${str("預設", "Default", "標準")})"
+                                    } else {
+                                        scaleOpt.label
+                                    }
+                                    SelectablePill(
+                                        text = labelText,
+                                        selected = config.notificationBannerScale == scaleOpt,
+                                        onClick = { onUpdateConfig { it.copy(notificationBannerScale = scaleOpt) } }
+                                    )
+                                }
+                            }
+                        }
+
+                        // Custom Quick Replies Editor
+                        var newQuickReplyInput by remember { mutableStateOf("") }
+                        Surface(
+                            color = colors.cardSurfaceElevated,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, colors.cardBorder, RoundedCornerShape(14.dp))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = str("💬 自訂快速回覆選項（點擊通知「快速回覆」展開滑動選擇）", "💬 Custom Quick Replies", "💬 クイック返信のカスタマイズ"),
+                                        color = colors.primaryText,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    OutlinedButton(
+                                        onClick = {
+                                            onUpdateConfig { it.copy(quickReplies = LauncherConfig.DEFAULT_QUICK_REPLIES) }
+                                        },
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Text(str("恢復預設", "Reset", "初期化"), fontSize = 11.sp)
+                                    }
+                                }
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    config.quickReplies.forEachIndexed { idx, replyItem ->
+                                        Surface(
+                                            color = colors.cardSurface,
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.border(1.dp, colors.cardBorder, RoundedCornerShape(10.dp))
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
+                                            ) {
+                                                Text(replyItem, color = colors.primaryText, fontSize = 12.sp)
+                                                IconButton(
+                                                    onClick = {
+                                                        onUpdateConfig { cur ->
+                                                            cur.copy(quickReplies = cur.quickReplies.filterIndexed { i, _ -> i != idx })
+                                                        }
+                                                    },
+                                                    modifier = Modifier.size(22.dp)
+                                                ) {
+                                                    Icon(Icons.Rounded.Close, contentDescription = "刪除", tint = colors.secondaryText, modifier = Modifier.size(14.dp))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedTextField(
+                                        value = newQuickReplyInput,
+                                        onValueChange = { newQuickReplyInput = it },
+                                        singleLine = true,
+                                        placeholder = { Text(str("輸入新增快速回覆詞（例如：正在停車中）…", "Add quick reply phrase…", "返信フレーズを追加…"), fontSize = 12.sp) },
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Button(
+                                        onClick = {
+                                            val trimmed = newQuickReplyInput.trim()
+                                            if (trimmed.isNotEmpty()) {
+                                                onUpdateConfig { cur ->
+                                                    cur.copy(quickReplies = (cur.quickReplies + trimmed).distinct())
+                                                }
+                                                newQuickReplyInput = ""
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text(str("＋ 新增", "+ Add", "＋ 追加"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = onSimulateCall, shape = RoundedCornerShape(12.dp)) {
-                                Text(str("測試來電橫幅", "Test Call Banner", "着信バナーテスト"), fontSize = 12.sp)
+                                Text(str("測試來電橫幅 (${config.notificationBannerScale.label})", "Test Call (${config.notificationBannerScale.label})", "着信テスト (${config.notificationBannerScale.label})"), fontSize = 12.sp)
                             }
                             OutlinedButton(onClick = onSimulateMessage, shape = RoundedCornerShape(12.dp)) {
-                                Text(str("測試左上 2X 通知", "Test 2X Alert", "2X 通知テスト"), fontSize = 12.sp)
+                                Text(str("測試左上通知 (${config.notificationBannerScale.label})", "Test Alert (${config.notificationBannerScale.label})", "通知テスト (${config.notificationBannerScale.label})"), fontSize = 12.sp)
                             }
                             TutorialPillButton(
                                 label = str("教學", "Guide", "ガイド"),

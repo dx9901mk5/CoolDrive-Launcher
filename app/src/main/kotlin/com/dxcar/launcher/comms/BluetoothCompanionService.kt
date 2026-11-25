@@ -850,16 +850,26 @@ class BluetoothCompanionService : Service() {
             }
             PacketType.CALL_STATE -> {
                 if (isAiBox) {
+                    val resolvedOnBox = if (ContactNameResolver.isGenericOrNumberOnly(packet.sender)) {
+                        ContactNameResolver.resolveDisplayName(
+                            this@BluetoothCompanionService,
+                            packet.phoneNumber.ifBlank { packet.sender }
+                        )
+                    } else {
+                        null
+                    }
+                    val bestName = resolvedOnBox
+                        ?: packet.sender.ifBlank { packet.phoneNumber.ifBlank { "來電" } }
                     app.notificationCenter.updateCallState(
                         CarCallState(
                             status = packet.callStatus,
-                            callerName = packet.sender.ifBlank { packet.phoneNumber.ifBlank { "來電" } },
+                            callerName = bestName,
                             callerNumber = packet.phoneNumber,
                             sourceApp = packet.appName.ifBlank { "手機來電" },
                             fromPhoneBridge = true
                         )
                     )
-                    appendLog("來電狀態：${packet.callStatus.name} ${packet.sender}")
+                    appendLog("來電狀態：${packet.callStatus.name} $bestName")
                 }
             }
             PacketType.REPLY_COMMAND -> {

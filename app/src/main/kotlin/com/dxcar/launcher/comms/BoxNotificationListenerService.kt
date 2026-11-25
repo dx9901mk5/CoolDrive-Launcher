@@ -81,9 +81,34 @@ class BoxNotificationListenerService : NotificationListenerService() {
         // Ignore silent group summary shells
         if ((notif.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return
 
-        val title = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()
+        val rawTitle = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
             ?: ""
+        val callPersonName = runCatching {
+            val person = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                extras.getParcelable(Notification.EXTRA_CALL_PERSON, android.app.Person::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                extras.getParcelable("android.callPerson") as? android.app.Person
+            }
+            val directName = person?.name?.toString()?.trim().orEmpty()
+            if (directName.isNotBlank()) {
+                directName
+            } else {
+                val peopleList = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    extras.getParcelableArrayList(Notification.EXTRA_PEOPLE_LIST, android.app.Person::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    extras.getParcelableArrayList(Notification.EXTRA_PEOPLE_LIST)
+                }
+                peopleList?.firstOrNull()?.name?.toString()?.trim().orEmpty()
+            }
+        }.getOrDefault("")
+        val title = if (callPersonName.isNotBlank() && ContactNameResolver.isGenericOrNumberOnly(rawTitle)) {
+            callPersonName
+        } else {
+            rawTitle.ifBlank { callPersonName }
+        }
         val text = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
             ?: ""
@@ -158,6 +183,15 @@ class BoxNotificationListenerService : NotificationListenerService() {
     ) {
         val cfg = app.preferences.config.value
         if (isCall) {
+            val extractedNum = ContactNameResolver.extractPlausiblePhoneNumber(title)
+                .ifBlank { ContactNameResolver.extractPlausiblePhoneNumber(text) }
+            val resolvedName = if (ContactNameResolver.isGenericOrNumberOnly(title)) {
+                ContactNameResolver.resolveDisplayName(this, title.ifBlank { extractedNum })
+                    ?: ContactNameResolver.resolveDisplayName(this, text)
+            } else {
+                null
+            }
+            val finalCallerName = resolvedName ?: title.ifBlank { extractedNum.ifBlank { "未知來電" } }
             val ok = BluetoothCompanionService.sendPacketFromPhone(
                 BridgePacket(
                     type = PacketType.CALL_STATE,
@@ -165,13 +199,14 @@ class BoxNotificationListenerService : NotificationListenerService() {
                     notificationKey = sbnKey,
                     appPackage = pkg,
                     appName = appLabel,
-                    sender = title.ifBlank { "未知來電" },
+                    sender = finalCallerName,
+                    phoneNumber = extractedNum,
                     text = text,
                     callStatus = CallStatus.RINGING
                 )
             )
             BluetoothCompanionService.appendExternalLog(
-                if (ok) "已轉傳來電 [$appLabel] $title" else "攔截來電但尚未連線車機"
+                if (ok) "已轉傳來電 [$appLabel] $finalCallerName" else "攔截來電但尚未連線車機"
             )
             return
         }
@@ -217,11 +252,18 @@ class BoxNotificationListenerService : NotificationListenerService() {
         canReply: Boolean
     ) {
         if (isCall) {
+            val extractedNum = ContactNameResolver.extractPlausiblePhoneNumber(title)
+                .ifBlank { ContactNameResolver.extractPlausiblePhoneNumber(text) }
+            val resolvedName = if (ContactNameResolver.isGenericOrNumberOnly(title)) {
+                ContactNameResolver.resolveDisplayName(this, title.ifBlank { extractedNum })
+            } else {
+                null
+            }
             app.notificationCenter.updateCallState(
                 CarCallState(
                     status = CallStatus.RINGING,
-                    callerName = title.ifBlank { "藍牙來電" },
-                    callerNumber = text,
+                    callerName = resolvedName ?: title.ifBlank { extractedNum.ifBlank { "藍牙來電" } },
+                    callerNumber = extractedNum.ifBlank { text },
                     sourceApp = appLabel,
                     fromPhoneBridge = false
                 )

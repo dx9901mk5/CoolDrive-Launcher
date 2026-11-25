@@ -4,16 +4,8 @@ import com.dxcar.launcher.data.MapEngineStyle
 
 /**
  * Zero-API-Key map styles for MapLibre OpenGL:
- * 1. GOOGLE_TRAFFIC_TILES:
- *    - Authentic Google Maps HD (scale=2) Standard tiles (zh-TW), with toggleable Real-Time Traffic.
- *    - Night Mode applies GPU Hue-Preserving Night ColorMatrix on TextureView.
- * 2. GOOGLE_SATELLITE_HYBRID:
- *    - Authentic Google Maps Satellite Hybrid tiles (zh-TW), with toggleable Real-Time Traffic.
- * 3. OPENFREEMAP_VECTOR_3D:
- *    - Day: OpenFreeMap Liberty 3D Vector (3D buildings, crisp scaling at any car DPI)
- *    - Night: OpenFreeMap Dark Vector
- * 4. OPENFREEMAP_DARK:
- *    - Always-dark clean vector map (zero API key, zero watermarks — replaces CartoDB).
+ * - Base raster tiles (lyrs=m or lyrs=y) are decoupled from the transparent traffic overlay (lyrs=traffic),
+ *   guaranteeing 100% URL parity with OfflineMapManager's cached tiles in mbgl-offline.db!
  */
 object MapStyleFactory {
 
@@ -40,17 +32,69 @@ object MapStyleFactory {
                 ResolvedMapStyle.StyleUrl(OPENFREEMAP_NIGHT_URL)
             }
             MapEngineStyle.GOOGLE_SATELLITE_HYBRID -> {
-                val lyrs = if (trafficEnabled) "y,traffic" else "y"
-                ResolvedMapStyle.StyleJson(buildGoogleTileJson("DX-Car Google Satellite Hybrid", lyrs))
+                ResolvedMapStyle.StyleJson(
+                    buildGoogleTileJson(
+                        name = "DX-Car Google Satellite Hybrid",
+                        baseLyrs = "y",
+                        includeTrafficOverlay = trafficEnabled
+                    )
+                )
             }
             MapEngineStyle.GOOGLE_TRAFFIC_TILES -> {
-                val lyrs = if (trafficEnabled) "m,traffic" else "m"
-                ResolvedMapStyle.StyleJson(buildGoogleTileJson("DX-Car Google Standard HD", lyrs))
+                ResolvedMapStyle.StyleJson(
+                    buildGoogleTileJson(
+                        name = "DX-Car Google Standard HD",
+                        baseLyrs = "m",
+                        includeTrafficOverlay = trafficEnabled
+                    )
+                )
             }
         }
     }
 
-    private fun buildGoogleTileJson(name: String, lyrs: String): String = """
+    fun buildOfflineCompatibleGoogleStyleJson(baseLyrs: String): String {
+        return buildGoogleTileJson(
+            name = "DX-Car Offline Google ($baseLyrs)",
+            baseLyrs = baseLyrs,
+            includeTrafficOverlay = false
+        )
+    }
+
+    private fun buildGoogleTileJson(
+        name: String,
+        baseLyrs: String,
+        includeTrafficOverlay: Boolean
+    ): String {
+        val trafficSourceBlock = if (includeTrafficOverlay) {
+            """,
+            "gmaps-traffic": {
+              "type": "raster",
+              "tiles": [
+                "https://mt0.google.com/vt/lyrs=traffic&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
+                "https://mt1.google.com/vt/lyrs=traffic&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
+                "https://mt2.google.com/vt/lyrs=traffic&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
+                "https://mt3.google.com/vt/lyrs=traffic&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}"
+              ],
+              "tileSize": 256
+            }"""
+        } else {
+            ""
+        }
+
+        val trafficLayerBlock = if (includeTrafficOverlay) {
+            """,
+            {
+              "id": "gmaps-traffic-layer",
+              "type": "raster",
+              "source": "gmaps-traffic",
+              "minzoom": 5,
+              "maxzoom": 20
+            }"""
+        } else {
+            ""
+        }
+
+        return """
         {
           "version": 8,
           "name": "$name",
@@ -58,13 +102,13 @@ object MapStyleFactory {
             "gmaps-hd": {
               "type": "raster",
               "tiles": [
-                "https://mt0.google.com/vt/lyrs=$lyrs&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
-                "https://mt1.google.com/vt/lyrs=$lyrs&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
-                "https://mt2.google.com/vt/lyrs=$lyrs&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
-                "https://mt3.google.com/vt/lyrs=$lyrs&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}"
+                "https://mt0.google.com/vt/lyrs=$baseLyrs&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
+                "https://mt1.google.com/vt/lyrs=$baseLyrs&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
+                "https://mt2.google.com/vt/lyrs=$baseLyrs&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}",
+                "https://mt3.google.com/vt/lyrs=$baseLyrs&hl=zh-TW&gl=TW&scale=2&x={x}&y={y}&z={z}"
               ],
               "tileSize": 256
-            }
+            }$trafficSourceBlock
           },
           "layers": [
             {
@@ -73,8 +117,9 @@ object MapStyleFactory {
               "source": "gmaps-hd",
               "minzoom": 0,
               "maxzoom": 20
-            }
+            }$trafficLayerBlock
           ]
         }
-    """.trimIndent()
+        """.trimIndent()
+    }
 }

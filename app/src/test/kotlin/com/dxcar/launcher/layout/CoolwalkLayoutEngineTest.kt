@@ -94,15 +94,18 @@ class CoolwalkLayoutEngineTest {
 
         val gTrafficOn = MapStyleFactory.resolve(MapEngineStyle.GOOGLE_TRAFFIC_TILES, isNight = false, trafficEnabled = true)
             as MapStyleFactory.ResolvedMapStyle.StyleJson
-        assertTrue(gTrafficOn.json.contains("lyrs=m,traffic"))
+        assertTrue(gTrafficOn.json.contains("lyrs=m&"))
+        assertTrue(gTrafficOn.json.contains("lyrs=traffic&"))
 
         val gTrafficOff = MapStyleFactory.resolve(MapEngineStyle.GOOGLE_TRAFFIC_TILES, isNight = false, trafficEnabled = false)
             as MapStyleFactory.ResolvedMapStyle.StyleJson
         assertTrue(gTrafficOff.json.contains("lyrs=m&"))
+        assertFalse(gTrafficOff.json.contains("lyrs=traffic&"))
 
         val satOn = MapStyleFactory.resolve(MapEngineStyle.GOOGLE_SATELLITE_HYBRID, isNight = true, trafficEnabled = true)
             as MapStyleFactory.ResolvedMapStyle.StyleJson
-        assertTrue(satOn.json.contains("lyrs=y,traffic"))
+        assertTrue(satOn.json.contains("lyrs=y&"))
+        assertTrue(satOn.json.contains("lyrs=traffic&"))
 
         val darkVector = MapStyleFactory.resolve(MapEngineStyle.OPENFREEMAP_DARK, isNight = false, trafficEnabled = true)
             as MapStyleFactory.ResolvedMapStyle.StyleUrl
