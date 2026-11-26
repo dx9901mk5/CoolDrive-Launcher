@@ -199,7 +199,7 @@ fun DxCarRootScreen(
     }
 
     var destination by remember { mutableStateOf(LauncherDestination.DASHBOARD_SPLIT) }
-    var currentDashboardPage by remember { mutableIntStateOf(0) } // 0 = 第一介面, 1 = 第二介面 (1:1 方案A地圖 + 內嵌YouTube)
+    var currentDashboardPage by remember { mutableIntStateOf(1) } // 0 = 第0介面(小工具), 1 = 第一介面(預設), 2 = 第二介面(1:1 方案A地圖 + YouTube)
     var isMapPrimary by remember { mutableStateOf(true) }
     var showQuickControlCenter by remember { mutableStateOf(false) }
     var showNotificationCenter by remember { mutableStateOf(false) }
@@ -270,7 +270,7 @@ fun DxCarRootScreen(
             config.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
             (destination == LauncherDestination.FULLSCREEN_MAP ||
                 (destination == LauncherDestination.DASHBOARD_SPLIT &&
-                    (currentDashboardPage == 1 || config.homeMapDisplayMode == HomeMapDisplayMode.BUILTIN_LIVE_MAP)))
+                    (currentDashboardPage == 2 || (currentDashboardPage == 1 && config.homeMapDisplayMode == HomeMapDisplayMode.BUILTIN_LIVE_MAP))))
         Cursor3DStateHolder.setBuiltinMapActive(hasBuiltinMapVisible)
     }
     var latestMapCardRect by remember { mutableStateOf<Rect?>(null) }
@@ -328,7 +328,7 @@ fun DxCarRootScreen(
             }
             com.dxcar.launcher.MainActivity.EXTRA_OPEN_YOUTUBE_HANDOFF -> {
                 destination = LauncherDestination.DASHBOARD_SPLIT
-                currentDashboardPage = 1
+                currentDashboardPage = 2
                 onExternalNavConsumed()
             }
             com.dxcar.launcher.MainActivity.EXTRA_OPEN_QUICK_PANEL -> {
@@ -410,6 +410,19 @@ fun DxCarRootScreen(
         now = sysStatus.now,
         systemIsDark = systemIsDark
     )
+
+    LaunchedEffect(
+        isNight,
+        config.deviceRole,
+        config.dayNightBrightnessEnabled,
+        config.dayBrightnessPercent,
+        config.nightBrightnessPercent
+    ) {
+        if (config.deviceRole == DeviceRole.AI_BOX_LAUNCHER && config.dayNightBrightnessEnabled) {
+            val targetPct = if (isNight) config.nightBrightnessPercent else config.dayBrightnessPercent
+            app.systemStatusMonitor.setBrightnessPercent(targetPct)
+        }
+    }
 
     val unreadCount = remember(messages) { messages.count { !it.isRead } }
     val dockSlots = remember(liveRecentPackages, config.recentDockPackages, config.pinnedDockPackages, installedApps, destination) {
@@ -758,15 +771,20 @@ fun DxCarRootScreen(
                                     currentDashboardPage = nextPage
                                     if (config.showUiSwitchHint) {
                                         isUiSwitchHud = true
-                                        gestureHudText = if (nextPage == 0) {
-                                            DxCarI18n.tr(
+                                        gestureHudText = when (nextPage) {
+                                            0 -> DxCarI18n.tr(
+                                                "⓪ 第零介面 · 自訂小工具看板",
+                                                "⓪ 第零界面 · 自定义小组件看板",
+                                                "⓪ Page 0 · Custom Widgets Board",
+                                                "⓪ ページ 0 · カスタムウィジェット"
+                                            )
+                                            1 -> DxCarI18n.tr(
                                                 "① 第一介面 · 導航與音樂天氣",
                                                 "① 第一界面 · 导航与音乐天气",
                                                 "① Page 1 · Navigation, Media & Weather",
                                                 "① ページ 1 · ナビ・音楽・天気"
                                             )
-                                        } else {
-                                            DxCarI18n.tr(
+                                            else -> DxCarI18n.tr(
                                                 "② 第二介面 · 1:1 方案A地圖 ＋ YouTube 視窗",
                                                 "② 第二界面 · 1:1 方案A地图 ＋ YouTube 窗口",
                                                 "② Page 2 · 1:1 Live Map + YouTube Window",
@@ -774,6 +792,48 @@ fun DxCarRootScreen(
                                             )
                                         }
                                     }
+                                },
+                                pageZeroContent = { onSeamDragDelta, onSeamDragEnd ->
+                                    PageZeroWidgetBoard(
+                                        config = config,
+                                        sysStatus = sysStatus,
+                                        location = location,
+                                        weather = weather,
+                                        isNight = isNight,
+                                        onAddWidget = { item ->
+                                            app.preferences.update { cur ->
+                                                cur.copy(pageZeroWidgets = cur.pageZeroWidgets + item)
+                                            }
+                                        },
+                                        onRemoveWidget = { item ->
+                                            app.preferences.update { cur ->
+                                                cur.copy(pageZeroWidgets = cur.pageZeroWidgets.filterNot { it.id == item.id })
+                                            }
+                                        },
+                                        onQuickNavigateQuery = { q ->
+                                            currentDashboardPage = 1
+                                            app.builtInNavEngine.navigateByQuery(
+                                                query = q,
+                                                startLat = startLatFallback,
+                                                startLon = startLonFallback,
+                                                onStatus = { msg -> gestureHudText = msg }
+                                            )
+                                        },
+                                        onWeatherClick = {
+                                            app.weatherRepository.openGoogleWeatherApp(context, config.weatherAppPackage)
+                                        },
+                                        onGoPageOne = { currentDashboardPage = 1 },
+                                        seamHandle = {
+                                            DashboardSeamSwipeHandle(
+                                                pageIndicator = "0/3",
+                                                onDragDelta = onSeamDragDelta,
+                                                onDragEnd = onSeamDragEnd,
+                                                modifier = Modifier
+                                                    .width(32.dp)
+                                                    .fillMaxHeight()
+                                            )
+                                        }
+                                    )
                                 },
                                 pageOneContent = { onSeamDragDelta, onSeamDragEnd ->
                                     CoolwalkSplitDashboard(
@@ -1706,6 +1766,7 @@ fun DxCarRootScreen(
 private fun InfiniteLoopTwoPageDashboard(
     currentPage: Int,
     onPageChanged: (Int) -> Unit,
+    pageZeroContent: @Composable (onSeamDragDelta: (Float) -> Unit, onSeamDragEnd: () -> Unit) -> Unit,
     pageOneContent: @Composable (onSeamDragDelta: (Float) -> Unit, onSeamDragEnd: () -> Unit) -> Unit,
     pageTwoContent: @Composable (onSeamDragDelta: (Float) -> Unit, onSeamDragEnd: () -> Unit) -> Unit
 ) {
@@ -1722,10 +1783,10 @@ private fun InfiniteLoopTwoPageDashboard(
 
         val handleDragDelta: (Float) -> Unit = { delta ->
             scope.launch {
-                val next = if (currentPage == 0) {
-                    (dragPx.value + delta).coerceIn(-widthPx * 0.95f, 0f)
-                } else {
-                    (dragPx.value + delta).coerceIn(0f, widthPx * 0.95f)
+                val next = when (currentPage) {
+                    0 -> (dragPx.value + delta).coerceIn(-widthPx * 0.95f, 0f)
+                    1 -> (dragPx.value + delta).coerceIn(-widthPx * 0.95f, widthPx * 0.95f)
+                    else -> (dragPx.value + delta).coerceIn(0f, widthPx * 0.95f)
                 }
                 dragPx.snapTo(next)
             }
@@ -1734,28 +1795,54 @@ private fun InfiniteLoopTwoPageDashboard(
         val handleDragEnd: () -> Unit = {
             val cur = dragPx.value
             scope.launch {
-                if (currentPage == 0 && cur <= -thresholdPx) {
-                    dragPx.animateTo(
-                        targetValue = -widthPx,
-                        animationSpec = tween(
-                            durationMillis = 360,
-                            easing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1.0f)
+                when {
+                    currentPage == 0 && cur <= -thresholdPx -> {
+                        dragPx.animateTo(
+                            targetValue = -widthPx,
+                            animationSpec = tween(
+                                durationMillis = 360,
+                                easing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1.0f)
+                            )
                         )
-                    )
-                    onPageChanged(1)
-                    dragPx.snapTo(0f)
-                } else if (currentPage == 1 && cur >= thresholdPx) {
-                    dragPx.animateTo(
-                        targetValue = widthPx,
-                        animationSpec = tween(
-                            durationMillis = 360,
-                            easing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1.0f)
+                        onPageChanged(1)
+                        dragPx.snapTo(0f)
+                    }
+                    currentPage == 1 && cur >= thresholdPx -> {
+                        dragPx.animateTo(
+                            targetValue = widthPx,
+                            animationSpec = tween(
+                                durationMillis = 360,
+                                easing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1.0f)
+                            )
                         )
-                    )
-                    onPageChanged(0)
-                    dragPx.snapTo(0f)
-                } else {
-                    dragPx.animateTo(0f, spring(stiffness = Spring.StiffnessMedium))
+                        onPageChanged(0)
+                        dragPx.snapTo(0f)
+                    }
+                    currentPage == 1 && cur <= -thresholdPx -> {
+                        dragPx.animateTo(
+                            targetValue = -widthPx,
+                            animationSpec = tween(
+                                durationMillis = 360,
+                                easing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1.0f)
+                            )
+                        )
+                        onPageChanged(2)
+                        dragPx.snapTo(0f)
+                    }
+                    currentPage == 2 && cur >= thresholdPx -> {
+                        dragPx.animateTo(
+                            targetValue = widthPx,
+                            animationSpec = tween(
+                                durationMillis = 360,
+                                easing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1.0f)
+                            )
+                        )
+                        onPageChanged(1)
+                        dragPx.snapTo(0f)
+                    }
+                    else -> {
+                        dragPx.animateTo(0f, spring(stiffness = Spring.StiffnessMedium))
+                    }
                 }
             }
         }
@@ -1765,20 +1852,26 @@ private fun InfiniteLoopTwoPageDashboard(
 
         val page0OffsetX = when (currentPage) {
             0 -> curDx.roundToInt()
-            else -> (-widthPx + curDx).roundToInt()
+            1 -> (-widthPx + curDx).roundToInt()
+            else -> (-2f * widthPx + curDx).roundToInt()
         }
-
         val page1OffsetX = when (currentPage) {
             1 -> curDx.roundToInt()
-            else -> (widthPx + curDx).roundToInt()
+            0 -> (widthPx + curDx).roundToInt()
+            else -> (-widthPx + curDx).roundToInt()
+        }
+        val page2OffsetX = when (currentPage) {
+            2 -> curDx.roundToInt()
+            1 -> (widthPx + curDx).roundToInt()
+            else -> (2f * widthPx + curDx).roundToInt()
         }
 
         var keepPageTwoAlive by remember { mutableStateOf(false) }
         LaunchedEffect(currentPage) {
-            if (currentPage == 1) keepPageTwoAlive = true
+            if (currentPage == 2) keepPageTwoAlive = true
         }
 
-        if (currentPage == 0 || isDragging) {
+        if (currentPage == 0 || (isDragging && currentPage == 1 && curDx > 0f)) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1786,17 +1879,29 @@ private fun InfiniteLoopTwoPageDashboard(
                     .zIndex(if (currentPage == 0) 2f else 1f)
                     .offset { IntOffset(page0OffsetX, 0) }
             ) {
-                pageOneContent(handleDragDelta, handleDragEnd)
+                pageZeroContent(handleDragDelta, handleDragEnd)
             }
         }
 
-        if (currentPage == 1 || isDragging || keepPageTwoAlive) {
+        if (currentPage == 1 || isDragging) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .clipToBounds()
-                    .zIndex(if (currentPage == 1) 2f else 0f)
+                    .zIndex(if (currentPage == 1) 2f else 1f)
                     .offset { IntOffset(page1OffsetX, 0) }
+            ) {
+                pageOneContent(handleDragDelta, handleDragEnd)
+            }
+        }
+
+        if (currentPage == 2 || isDragging || keepPageTwoAlive) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clipToBounds()
+                    .zIndex(if (currentPage == 2) 2f else 0f)
+                    .offset { IntOffset(page2OffsetX, 0) }
             ) {
                 pageTwoContent(handleDragDelta, handleDragEnd)
             }
@@ -2004,7 +2109,7 @@ private fun SecondEqualMapYoutubeDashboard(
 
             // Center 1:1 Seam Divider Line (Long-press to swap Left <-> Right; Drag to return to Page 1)
             DashboardSeamSwipeHandle(
-                pageIndicator = "2/2",
+                pageIndicator = "2/3",
                 onDragDelta = onSeamDragDelta,
                 onDragEnd = onSeamDragEnd,
                 onLongPress = { isMapFirst = !isMapFirst },
@@ -2076,7 +2181,7 @@ private fun SecondEqualMapYoutubeDashboard(
             }
 
             DashboardSeamSwipeHandle(
-                pageIndicator = "2/2",
+                pageIndicator = "2/3",
                 onDragDelta = onSeamDragDelta,
                 onDragEnd = onSeamDragEnd,
                 modifier = Modifier
@@ -2427,7 +2532,7 @@ private fun CoolwalkSplitDashboard(
             // Center Seam Divider Line between the two windows ("滑動第一介面兩個視窗中間的線就可以往右滑動切換，無限迴圈")
             val seamCenterX = (if (rightHandDrive) secondaryW else primaryW) + (gap / 2f)
             DashboardSeamSwipeHandle(
-                pageIndicator = "1/2",
+                pageIndicator = "1/3",
                 onDragDelta = onSeamDragDelta,
                 onDragEnd = onSeamDragEnd,
                 modifier = Modifier
@@ -2495,7 +2600,7 @@ private fun CoolwalkSplitDashboard(
             )
 
             DashboardSeamSwipeHandle(
-                pageIndicator = "1/2",
+                pageIndicator = "1/3",
                 onDragDelta = onSeamDragDelta,
                 onDragEnd = onSeamDragEnd,
                 modifier = Modifier

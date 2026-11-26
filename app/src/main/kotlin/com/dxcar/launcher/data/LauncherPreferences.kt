@@ -152,6 +152,14 @@ data class NavAddressShortcut(
 )
 
 @Serializable
+data class PageZeroWidgetItem(
+    val id: String = UUID.randomUUID().toString().take(8),
+    val type: String, // "CLOCK", "SPEED", "WEATHER", "QUICK_NAV", "SYSTEM", "APP_WIDGET"
+    val appWidgetId: Int = -1,
+    val label: String = ""
+)
+
+@Serializable
 enum class NotificationBannerScale(val factor: Float, val label: String) {
     SCALE_0_5X(0.5f, "0.5X"),
     SCALE_0_75X(0.75f, "0.75X"),
@@ -216,6 +224,9 @@ data class LauncherConfig(
     val dayStartMinute: Int = 30,
     val nightStartHour: Int = 18,
     val nightStartMinute: Int = 30,
+    val dayNightBrightnessEnabled: Boolean = false,
+    val dayBrightnessPercent: Int = 85,
+    val nightBrightnessPercent: Int = 35,
     val stylePreset: LauncherStylePreset = LauncherStylePreset.COOLWALK_CLASSIC,
     val accentColorIndex: Int = 0,
     val homeExperimentMode: HomeExperimentMode = HomeExperimentMode.PLAN_A_MULTI_LAYER,
@@ -273,6 +284,7 @@ data class LauncherConfig(
     val homeShortcutLabel: String = "",
     val workShortcutLabel: String = "",
     val customNavShortcuts: List<NavAddressShortcut> = emptyList(),
+    val pageZeroWidgets: List<PageZeroWidgetItem> = emptyList(),
     val companionTargetDeviceAddress: String = "",
     val companionTargetDeviceName: String = "",
     val companionAutoConnect: Boolean = true,

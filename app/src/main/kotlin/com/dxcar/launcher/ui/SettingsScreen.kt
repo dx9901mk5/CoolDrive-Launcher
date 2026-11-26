@@ -797,6 +797,123 @@ fun SettingsScreen(
                             )
                         }
 
+                        // PRESET CAR SCREEN BRIGHTNESS FOR DAY / NIGHT MODE
+                        val canWriteBrightness = remember(permissionHealth) {
+                            android.provider.Settings.System.canWrite(context)
+                        }
+                        Surface(
+                            color = colors.cardSurfaceElevated,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, colors.cardBorder, RoundedCornerShape(14.dp))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                SettingsToggleRow(
+                                    title = str(
+                                        "依日夜模式自動調整車機螢幕亮度",
+                                        "依日夜模式自动调整车机屏幕亮度",
+                                        "Auto-Apply Preset Screen Brightness",
+                                        "昼夜モード連動で画面輝度を自動調整"
+                                    ),
+                                    subtitle = str(
+                                        "切換白天／夜晚模式時，自動套用下方預設車機螢幕亮度",
+                                        "切换白天／夜晚模式时，自动套用下方预设车机屏幕亮度",
+                                        "Automatically applies your preset Day/Night screen brightness on mode switch",
+                                        "昼／夜モード切り替え時に下の既定輝度を自動適用します"
+                                    ),
+                                    checked = config.dayNightBrightnessEnabled,
+                                    onCheckedChange = { checked ->
+                                        onUpdateConfig { it.copy(dayNightBrightnessEnabled = checked) }
+                                    }
+                                )
+                                if (config.dayNightBrightnessEnabled && !canWriteBrightness) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            runCatching {
+                                                context.startActivity(
+                                                    Intent(
+                                                        android.provider.Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                                                        Uri.parse("package:${context.packageName}")
+                                                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                )
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text(
+                                            str(
+                                                "點此授權「修改系統設定」以調整車機亮度",
+                                                "点此授权「修改系统设置」以调整车机亮度",
+                                                "Grant Write Settings to Control Brightness",
+                                                "輝度変更のため「システム設定の変更」を許可"
+                                            ),
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = str(
+                                            "白天預設亮度：${config.dayBrightnessPercent}%",
+                                            "白天默认亮度：${config.dayBrightnessPercent}%",
+                                            "Day Brightness: ${config.dayBrightnessPercent}%",
+                                            "昼の既定輝度：${config.dayBrightnessPercent}%"
+                                        ),
+                                        color = colors.primaryText,
+                                        fontSize = 12.sp,
+                                        modifier = Modifier.width(150.dp)
+                                    )
+                                    Slider(
+                                        value = config.dayBrightnessPercent.toFloat(),
+                                        onValueChange = { v ->
+                                            val pct = v.roundToInt().coerceIn(10, 100)
+                                            onUpdateConfig {
+                                                it.copy(
+                                                    dayNightBrightnessEnabled = true,
+                                                    dayBrightnessPercent = pct
+                                                )
+                                            }
+                                        },
+                                        valueRange = 10f..100f,
+                                        colors = SliderDefaults.colors(thumbColor = colors.accent, activeTrackColor = colors.accent),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = str(
+                                            "夜晚預設亮度：${config.nightBrightnessPercent}%",
+                                            "夜晚默认亮度：${config.nightBrightnessPercent}%",
+                                            "Night Brightness: ${config.nightBrightnessPercent}%",
+                                            "夜の既定輝度：${config.nightBrightnessPercent}%"
+                                        ),
+                                        color = colors.primaryText,
+                                        fontSize = 12.sp,
+                                        modifier = Modifier.width(150.dp)
+                                    )
+                                    Slider(
+                                        value = config.nightBrightnessPercent.toFloat(),
+                                        onValueChange = { v ->
+                                            val pct = v.roundToInt().coerceIn(10, 100)
+                                            onUpdateConfig {
+                                                it.copy(
+                                                    dayNightBrightnessEnabled = true,
+                                                    nightBrightnessPercent = pct
+                                                )
+                                            }
+                                        },
+                                        valueRange = 10f..100f,
+                                        colors = SliderDefaults.colors(thumbColor = colors.accent, activeTrackColor = colors.accent),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+
                         Text(str("內建地圖圖層與路況", "内置地图图层与路况", "Map Layers & Traffic", "地図レイヤー・交通状況"), color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             MapEngineStyle.entries.forEach { styleItem ->
