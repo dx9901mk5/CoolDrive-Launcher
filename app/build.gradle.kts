@@ -12,8 +12,8 @@ android {
     applicationId = "com.dxcar.launcher"
     minSdk = 28
     targetSdk = 36
-    versionCode = 39
-    versionName = "1.8.0"
+    versionCode = 40
+    versionName = "1.8.1"
   }
 
   bundle {

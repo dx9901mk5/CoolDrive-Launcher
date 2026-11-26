@@ -4,6 +4,8 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -1072,13 +1074,45 @@ class PersistentDockOverlayService :
             height = WindowManager.LayoutParams.WRAP_CONTENT,
             gravity = Gravity.TOP or Gravity.START
         ).apply {
-            x = (14f * density).toInt()
-            y = (14f * density).toInt()
+            x = (18f * density).toInt()
+            y = (36f * density).toInt()
         }
         ytHandoffView = view
         ytHandoffParams = params
         view.visibility = View.GONE
         runCatching { windowManager.addView(view, params) }
+    }
+
+    private fun isYoutubeAppInForeground(): Boolean {
+        val acc = DxCarAccessibilityService.instance
+        if (acc?.isPackageInForegroundWindow("com.google.android.youtube") == true) {
+            return true
+        }
+        val fgAcc = DxCarAccessibilityService.foregroundPackage.value
+        if (fgAcc.startsWith("com.google.android.youtube")) {
+            return true
+        }
+        // Fallback via UsageStatsManager when Accessibility Service is not active or missed an event
+        return runCatching {
+            val usm = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return@runCatching false
+            val end = System.currentTimeMillis()
+            val begin = end - 30_000L
+            val events = usm.queryEvents(begin, end) ?: return@runCatching false
+            val evt = UsageEvents.Event()
+            var latestPkg = ""
+            var latestTs = 0L
+            while (events.hasNextEvent()) {
+                events.getNextEvent(evt)
+                @Suppress("DEPRECATION")
+                val isResumed = evt.eventType == UsageEvents.Event.ACTIVITY_RESUMED ||
+                    evt.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND
+                if (isResumed && evt.timeStamp >= latestTs && !evt.packageName.isNullOrBlank()) {
+                    latestTs = evt.timeStamp
+                    latestPkg = evt.packageName
+                }
+            }
+            latestPkg.startsWith("com.google.android.youtube")
+        }.getOrDefault(false)
     }
 
     private fun handoffFromYoutubeAppToPage2() {
@@ -1262,16 +1296,29 @@ class PersistentDockOverlayService :
             }
         }
 
-        // Observe YouTube App Foreground -> show tiny top-left YouTube handoff button
+        // Observe YouTube App Foreground -> keep tiny top-left YouTube handoff button reliably visible
         lifecycleScope.launch {
-            combine(
-                app.preferences.config,
-                app.isLauncherForeground,
-                DxCarAccessibilityService.foregroundPackage
-            ) { cfg, isHomeFg, fgPkg ->
-                !isHomeFg && cfg.deviceRole == DeviceRole.AI_BOX_LAUNCHER && fgPkg == "com.google.android.youtube"
-            }.collect { showYtHandoff ->
-                ytHandoffView?.visibility = if (showYtHandoff) View.VISIBLE else View.GONE
+            var lastShown = false
+            while (true) {
+                val cfg = app.preferences.config.value
+                val isHomeFg = app.isLauncherForeground.value
+                val showYtHandoff = !isHomeFg &&
+                    cfg.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
+                    isYoutubeAppInForeground()
+                val view = ytHandoffView
+                if (view != null) {
+                    val targetVis = if (showYtHandoff) View.VISIBLE else View.GONE
+                    if (view.visibility != targetVis) {
+                        view.visibility = targetVis
+                    }
+                    if (showYtHandoff && !lastShown) {
+                        ytHandoffParams?.let { p ->
+                            runCatching { windowManager.updateViewLayout(view, p) }
+                        }
+                    }
+                    lastShown = showYtHandoff
+                }
+                delay(650L)
             }
         }
 

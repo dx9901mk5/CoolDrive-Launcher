@@ -36,10 +36,33 @@ class DxCarAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
-        if (pkg.isBlank() || pkg == "com.android.systemui") return
+        if (pkg.isBlank() || isTransientSystemOrImePackage(pkg)) return
         _foregroundPackage.value = pkg
         if (pkg != packageName) {
             DxCarApp.instance?.installedAppsRepository?.recordRecent(pkg)
+        }
+    }
+
+    private fun isTransientSystemOrImePackage(pkg: String): Boolean {
+        val low = pkg.lowercase()
+        return low == "com.android.systemui" ||
+            low.contains("inputmethod") ||
+            low.contains("honeyboard") ||
+            low.contains("gboard") ||
+            low.endsWith(".ime") ||
+            low == "com.google.android.permissioncontroller" ||
+            low == "com.android.permissioncontroller" ||
+            low == "com.google.android.packageinstaller" ||
+            low == "com.android.packageinstaller" ||
+            low == "com.google.android.gms"
+    }
+
+    fun isPackageInForegroundWindow(targetPkgPrefix: String): Boolean {
+        val winList = runCatching { windows }.getOrNull().orEmpty()
+        return winList.any { win ->
+            win.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
+                runCatching { win.root?.packageName?.toString()?.startsWith(targetPkgPrefix) == true }
+                    .getOrDefault(false)
         }
     }
 
