@@ -2,6 +2,8 @@ package com.dxcar.roothelper
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -94,15 +96,29 @@ object HelperAutoUpdater {
             return@withContext "已透過 Root 自動更新至 v${info.latestVersion}"
         }
 
+        var needsUnknownSourcesPerm = false
         withContext(Dispatchers.Main) {
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apkFile)
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "application/vnd.android.package-archive")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            if (!context.packageManager.canRequestPackageInstalls()) {
+                needsUnknownSourcesPerm = true
+                val permIntent = Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:${context.packageName}")
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                runCatching { context.startActivity(permIntent) }
+            } else {
+                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apkFile)
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/vnd.android.package-archive")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                runCatching { context.startActivity(intent) }
             }
-            runCatching { context.startActivity(intent) }
         }
-        "已下載 v${info.latestVersion} 至本機，請確認安裝"
+        if (needsUnknownSourcesPerm) {
+            "請先開啟「允許安裝未知應用程式」，再點一次檢查更新即可安裝 v${info.latestVersion}"
+        } else {
+            "已下載 v${info.latestVersion}，正在開啟安裝畫面..."
+        }
     }
 
     private fun compareSemver(a: String, b: String): Int {

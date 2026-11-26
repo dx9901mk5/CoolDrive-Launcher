@@ -36,25 +36,19 @@ data class Display60HzReport(
 
 object RootShell {
     private val SU_CANDIDATES = listOf(
-        "/product/bin/su",
+        "su",
+        "/debug_ramdisk/su",
+        "/sbin/su",
         "/system/bin/su",
         "/system/xbin/su",
-        "/sbin/su",
-        "/debug_ramdisk/su",
-        "su"
+        "/product/bin/su"
     )
 
-    private fun resolveSuBinary(): String {
-        for (path in SU_CANDIDATES) {
-            if (path == "su") return path
-            if (File(path).exists()) return path
-        }
-        return "su"
-    }
+    @Volatile
+    private var workingSuPath: String? = null
 
-    suspend fun execSu(command: String, timeoutSec: Long = 5L): ShellResult = withContext(Dispatchers.IO) {
-        val suBin = resolveSuBinary()
-        runCatching {
+    private fun runWithBinary(suBin: String, command: String, timeoutSec: Long): ShellResult {
+        return runCatching {
             val process = ProcessBuilder(suBin, "-c", command)
                 .redirectErrorStream(false)
                 .start()
@@ -69,6 +63,24 @@ object RootShell {
         }.getOrElse { e ->
             ShellResult(-1, "", e.message ?: "su execution failed")
         }
+    }
+
+    suspend fun execSu(command: String, timeoutSec: Long = 5L): ShellResult = withContext(Dispatchers.IO) {
+        val cached = workingSuPath
+        if (cached != null) {
+            return@withContext runWithBinary(cached, command, timeoutSec)
+        }
+        var lastFail = ShellResult(-1, "", "No working su binary")
+        for (bin in SU_CANDIDATES) {
+            if (bin != "su" && !File(bin).exists()) continue
+            val res = runWithBinary(bin, command, timeoutSec)
+            if (res.isSuccess) {
+                workingSuPath = bin
+                return@withContext res
+            }
+            lastFail = ShellResult(res.exitCode, res.stdout, "$bin: ${res.stderr.ifBlank { res.stdout }}")
+        }
+        lastFail
     }
 
     suspend fun probeRootStatus(): RootStatusInfo {
