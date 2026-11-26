@@ -189,6 +189,30 @@ class CarNotificationCenter(
         }
     }
 
+    private val _useCarBoxAudio = MutableStateFlow(true)
+    val useCarBoxAudio: StateFlow<Boolean> = _useCarBoxAudio.asStateFlow()
+
+    @Suppress("DEPRECATION")
+    fun toggleCallAudioRoute(context: android.content.Context): Boolean {
+        val nextCarBox = !_useCarBoxAudio.value
+        _useCarBoxAudio.value = nextCarBox
+        val am = context.getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager
+        if (am != null) {
+            runCatching {
+                if (nextCarBox) {
+                    am.isSpeakerphoneOn = false
+                    am.isBluetoothScoOn = true
+                    am.startBluetoothSco()
+                } else {
+                    am.stopBluetoothSco()
+                    am.isBluetoothScoOn = false
+                    am.isSpeakerphoneOn = true
+                }
+            }
+        }
+        return nextCarBox
+    }
+
     fun updateActiveNavigation(banner: ActiveNavBanner?) {
         _activeNavigation.value = banner
     }

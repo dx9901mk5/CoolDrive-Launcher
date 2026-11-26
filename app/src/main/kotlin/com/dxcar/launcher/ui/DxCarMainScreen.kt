@@ -238,6 +238,16 @@ fun DxCarRootScreen(
                 pickingShortcutSlotIndex = null
                 true
             }
+            destination == LauncherDestination.DASHBOARD_SPLIT && currentDashboardPage == 2 &&
+                EmbeddedYoutubeBridge.isFullscreen?.invoke() == true -> {
+                EmbeddedYoutubeBridge.exitFullscreen?.invoke()
+                true
+            }
+            destination == LauncherDestination.DASHBOARD_SPLIT && currentDashboardPage == 2 &&
+                EmbeddedYoutubeBridge.canGoBack?.invoke() == true -> {
+                EmbeddedYoutubeBridge.goBack?.invoke()
+                true
+            }
             destination != LauncherDestination.DASHBOARD_SPLIT -> {
                 destination = if (destination == LauncherDestination.SETTINGS) {
                     LauncherDestination.APP_DRAWER
@@ -642,6 +652,9 @@ fun DxCarRootScreen(
                 onToggleSyncAllApps = { checked ->
                     app.preferences.update { it.copy(companionSyncAllApps = checked) }
                 },
+                onTogglePhoneCallCapture = { checked ->
+                    app.preferences.update { it.copy(phoneCallCaptureEnabled = checked) }
+                },
                 onChangeTouchpadSensitivity = { sens ->
                     app.preferences.update { it.copy(phoneTouchpadSensitivity = sens) }
                 },
@@ -808,6 +821,11 @@ fun DxCarRootScreen(
                                         onRemoveWidget = { item ->
                                             app.preferences.update { cur ->
                                                 cur.copy(pageZeroWidgets = cur.pageZeroWidgets.filterNot { it.id == item.id })
+                                            }
+                                        },
+                                        onUpdateWidget = { updated ->
+                                            app.preferences.update { cur ->
+                                                cur.copy(pageZeroWidgets = cur.pageZeroWidgets.map { if (it.id == updated.id) updated else it })
                                             }
                                         },
                                         onQuickNavigateQuery = { q ->
@@ -1584,6 +1602,7 @@ fun DxCarRootScreen(
             } else {
                 14.dp
             }
+            val useCarBoxAudio by app.notificationCenter.useCarBoxAudio.collectAsState()
             Column(
                 horizontalAlignment = Alignment.Start,
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -1594,6 +1613,15 @@ fun DxCarRootScreen(
                 IncomingCallBanner(
                     callState = activeCall,
                     scale = config.notificationBannerScale,
+                    useCarBoxAudio = useCarBoxAudio,
+                    onToggleAudioRoute = {
+                        val isCar = app.notificationCenter.toggleCallAudioRoute(context)
+                        gestureHudText = if (isCar) {
+                            DxCarI18n.tr("🔊 通話音源：車機盒", "🔊 通话音源：车机盒", "🔊 Call Audio: Car Box", "🔊 通話音声：車載機")
+                        } else {
+                            DxCarI18n.tr("📱 通話音源：手機", "📱 通话音源：手机", "📱 Call Audio: Phone", "📱 通話音声：スマホ")
+                        }
+                    },
                     onAnswer = { app.notificationCenter.performCallAction(CallActionCommand.ANSWER) },
                     onDecline = { app.notificationCenter.performCallAction(CallActionCommand.DECLINE) }
                 )

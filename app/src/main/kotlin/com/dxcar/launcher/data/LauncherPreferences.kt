@@ -156,7 +156,11 @@ data class PageZeroWidgetItem(
     val id: String = UUID.randomUUID().toString().take(8),
     val type: String, // "CLOCK", "SPEED", "WEATHER", "QUICK_NAV", "SYSTEM", "APP_WIDGET"
     val appWidgetId: Int = -1,
-    val label: String = ""
+    val label: String = "",
+    val xDp: Float = -1f,
+    val yDp: Float = -1f,
+    val widthDp: Float = 280f,
+    val heightDp: Float = 190f
 )
 
 @Serializable
@@ -285,6 +289,10 @@ data class LauncherConfig(
     val workShortcutLabel: String = "",
     val customNavShortcuts: List<NavAddressShortcut> = emptyList(),
     val pageZeroWidgets: List<PageZeroWidgetItem> = emptyList(),
+    val phoneCallCaptureEnabled: Boolean = false,
+    val ytHandoffAlwaysVisible: Boolean = true,
+    val ytHandoffPosX: Int = 18,
+    val ytHandoffPosY: Int = 36,
     val companionTargetDeviceAddress: String = "",
     val companionTargetDeviceName: String = "",
     val companionAutoConnect: Boolean = true,
@@ -293,7 +301,9 @@ data class LauncherConfig(
     val companionAllowedPackages: List<String> = DEFAULT_COMPANION_PACKAGES,
     val quickReplies: List<String> = DEFAULT_QUICK_REPLIES,
     val lastKnownLat: Double = 25.0330,
-    val lastKnownLon: Double = 121.5654
+    val lastKnownLon: Double = 121.5654,
+    val lastKnownBearingDeg: Float = 0f,
+    val lastKnownZoom: Double = 15.6
 ) {
     companion object {
         val DEFAULT_PINNED_PACKAGES = listOf(

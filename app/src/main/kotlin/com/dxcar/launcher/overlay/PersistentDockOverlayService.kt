@@ -27,6 +27,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -857,6 +858,7 @@ class PersistentDockOverlayService :
                     } else {
                         12.dp
                     }
+                    val useCarBoxAudio by app.notificationCenter.useCarBoxAudio.collectAsState()
                     Column(
                         horizontalAlignment = Alignment.Start,
                         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -865,6 +867,8 @@ class PersistentDockOverlayService :
                         IncomingCallBanner(
                             callState = callState,
                             scale = config.notificationBannerScale,
+                            useCarBoxAudio = useCarBoxAudio,
+                            onToggleAudioRoute = { app.notificationCenter.toggleCallAudioRoute(this@PersistentDockOverlayService) },
                             onAnswer = { app.notificationCenter.performCallAction(CallActionCommand.ANSWER) },
                             onDecline = { app.notificationCenter.performCallAction(CallActionCommand.DECLINE) }
                         )
@@ -1045,37 +1049,64 @@ class PersistentDockOverlayService :
     }
 
     private fun setupYoutubeHandoffWindow(app: DxCarApp) {
+        val density = resources.displayMetrics.density
+        val initCfg = app.preferences.config.value
+        val params = createOverlayParams(
+            width = WindowManager.LayoutParams.WRAP_CONTENT,
+            height = WindowManager.LayoutParams.WRAP_CONTENT,
+            gravity = Gravity.TOP or Gravity.START
+        ).apply {
+            x = (initCfg.ytHandoffPosX * density).toInt()
+            y = (initCfg.ytHandoffPosY * density).toInt()
+        }
         val view = ComposeView(this).apply {
             setViewTreeLifecycleOwner(this@PersistentDockOverlayService)
             setViewTreeSavedStateRegistryOwner(this@PersistentDockOverlayService)
             setViewTreeViewModelStoreOwner(this@PersistentDockOverlayService)
             setContent {
+                val haptic = LocalHapticFeedback.current
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(34.dp)
-                        .clip(RoundedCornerShape(9.dp))
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
                         .background(androidx.compose.ui.graphics.Color(0xE6FF0000))
-                        .border(1.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.55f), RoundedCornerShape(9.dp))
+                        .border(1.2.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.65f), RoundedCornerShape(10.dp))
+                        .pointerInput(Unit) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    val dm = resources.displayMetrics
+                                    val maxX = (dm.widthPixels - (44f * density)).toInt().coerceAtLeast(0)
+                                    val maxY = (dm.heightPixels - (44f * density)).toInt().coerceAtLeast(0)
+                                    params.x = (params.x + dragAmount.x.toInt()).coerceIn(0, maxX)
+                                    params.y = (params.y + dragAmount.y.toInt()).coerceIn(0, maxY)
+                                    ytHandoffView?.let { v ->
+                                        runCatching { windowManager.updateViewLayout(v, params) }
+                                    }
+                                },
+                                onDragEnd = {
+                                    val savedX = (params.x / density).toInt().coerceAtLeast(0)
+                                    val savedY = (params.y / density).toInt().coerceAtLeast(0)
+                                    app.preferences.update { cur ->
+                                        cur.copy(ytHandoffPosX = savedX, ytHandoffPosY = savedY)
+                                    }
+                                }
+                            )
+                        }
                         .bouncyClickable { handoffFromYoutubeAppToPage2() }
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.PlayArrow,
                         contentDescription = "Hand off to Page 2 YouTube",
                         tint = androidx.compose.ui.graphics.Color.White,
-                        modifier = Modifier.size(21.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
             }
-        }
-        val density = resources.displayMetrics.density
-        val params = createOverlayParams(
-            width = WindowManager.LayoutParams.WRAP_CONTENT,
-            height = WindowManager.LayoutParams.WRAP_CONTENT,
-            gravity = Gravity.TOP or Gravity.START
-        ).apply {
-            x = (18f * density).toInt()
-            y = (36f * density).toInt()
         }
         ytHandoffView = view
         ytHandoffParams = params
@@ -1129,13 +1160,19 @@ class PersistentDockOverlayService :
                 base + ((SystemClock.elapsedRealtime() - pb.lastPositionUpdateTime) * pb.playbackSpeed).toLong().coerceAtLeast(0L)
             } else base
         } else 0L
-        val posSec = (posMs / 1000L).toInt().coerceAtLeast(0)
+        var posSec = (posMs / 1000L).toInt().coerceAtLeast(0)
 
         val meta = controller?.metadata
         val mediaUri = meta?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI).orEmpty()
         val mediaId = meta?.getString(MediaMetadata.METADATA_KEY_MEDIA_ID).orEmpty()
-        val title = meta?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty()
-        val artist = meta?.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty()
+        var title = meta?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty()
+        var artist = meta?.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty()
+
+        val (accTitle, accChannel, accSec) = DxCarAccessibilityService.instance?.extractYoutubePlayingInfo()
+            ?: Triple(null, null, 0)
+        if (title.isBlank() && !accTitle.isNullOrBlank()) title = accTitle
+        if (artist.isBlank() && !accChannel.isNullOrBlank()) artist = accChannel
+        if (posSec <= 0 && accSec > 0) posSec = accSec
 
         val rawCandidate = mediaUri.ifBlank { mediaId }
         val videoId = when {
@@ -1145,6 +1182,7 @@ class PersistentDockOverlayService :
             else -> null
         }
 
+        val isSearchFallback = videoId.isNullOrBlank() && title.isNotBlank()
         val targetUrl = when {
             !videoId.isNullOrBlank() ->
                 if (posSec > 0) "https://m.youtube.com/watch?v=$videoId&t=${posSec}s"
@@ -1160,7 +1198,8 @@ class PersistentDockOverlayService :
         com.dxcar.launcher.ui.YoutubeHandoffBridge.requestHandoff(
             url = targetUrl,
             positionSec = posSec,
-            enterFullscreen = true
+            enterFullscreen = true,
+            autoClickFirstResult = isSearchFallback
         )
         bringDxCarToFront(MainActivity.EXTRA_OPEN_YOUTUBE_HANDOFF)
     }
@@ -1304,7 +1343,7 @@ class PersistentDockOverlayService :
                 val isHomeFg = app.isLauncherForeground.value
                 val showYtHandoff = !isHomeFg &&
                     cfg.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
-                    isYoutubeAppInForeground()
+                    (cfg.ytHandoffAlwaysVisible || isYoutubeAppInForeground())
                 val view = ytHandoffView
                 if (view != null) {
                     val targetVis = if (showYtHandoff) View.VISIBLE else View.GONE

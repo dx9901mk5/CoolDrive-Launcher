@@ -39,12 +39,15 @@ class LocationTracker(
     private val _location = MutableStateFlow(
         VehicleLocationState(
             latitude = preferences.config.value.lastKnownLat,
-            longitude = preferences.config.value.lastKnownLon
+            longitude = preferences.config.value.lastKnownLon,
+            bearingDeg = preferences.config.value.lastKnownBearingDeg
         )
     )
     val location: StateFlow<VehicleLocationState> = _location.asStateFlow()
 
     private var started = false
+    private var lastPersistMs = 0L
+    private var hasPersistedSessionFix = false
 
     private val listener = object : LocationListener {
         override fun onLocationChanged(loc: Location) {
@@ -116,13 +119,21 @@ class LocationTracker(
             hasRealFix = true,
             providerName = loc.provider ?: "GPS"
         )
-        // Persist coarse location for offline sunrise/sunset accuracy
+        // Persist street-level GPS state (15m / heading change, throttled 5s) so offline map boots immediately at last position
         val cur = preferences.config.value
-        if (kotlin.math.abs(cur.lastKnownLat - loc.latitude) > 0.05 ||
-            kotlin.math.abs(cur.lastKnownLon - loc.longitude) > 0.05
-        ) {
+        val nowMs = android.os.SystemClock.elapsedRealtime()
+        val movedEnough = kotlin.math.abs(cur.lastKnownLat - loc.latitude) > 0.00015 ||
+            kotlin.math.abs(cur.lastKnownLon - loc.longitude) > 0.00015 ||
+            kotlin.math.abs(cur.lastKnownBearingDeg - bearing) > 8f
+        if (!hasPersistedSessionFix || (movedEnough && nowMs - lastPersistMs >= 5000L)) {
+            hasPersistedSessionFix = true
+            lastPersistMs = nowMs
             preferences.update {
-                it.copy(lastKnownLat = loc.latitude, lastKnownLon = loc.longitude)
+                it.copy(
+                    lastKnownLat = loc.latitude,
+                    lastKnownLon = loc.longitude,
+                    lastKnownBearingDeg = bearing
+                )
             }
         }
     }

@@ -66,6 +66,91 @@ class DxCarAccessibilityService : AccessibilityService() {
         }
     }
 
+    /**
+     * Extracts visible YouTube title, channel, and elapsed playback seconds from YouTube player nodes
+     * when MediaSession metadata omits videoId or position.
+     */
+    fun extractYoutubePlayingInfo(): Triple<String?, String?, Int> {
+        var foundTitle: String? = null
+        var foundChannel: String? = null
+        var foundSec = 0
+        val winList = runCatching { windows }.getOrNull().orEmpty()
+        val ytRoot = winList.firstOrNull {
+            runCatching { it.root?.packageName?.toString()?.startsWith("com.google.android.youtube") == true }
+                .getOrDefault(false)
+        }?.root ?: runCatching { rootInActiveWindow }.getOrNull() ?: return Triple(null, null, 0)
+
+        fun parseDurationSec(raw: String): Int? {
+            val m = Regex("""^(\d{1,2}:)?(\d{1,2}):(\d{2})$""").find(raw.trim()) ?: return null
+            val hrs = m.groupValues[1].removeSuffix(":").toIntOrNull() ?: 0
+            val mins = m.groupValues[2].toIntOrNull() ?: 0
+            val secs = m.groupValues[3].toIntOrNull() ?: 0
+            return hrs * 3600 + mins * 60 + secs
+        }
+
+        fun scan(node: AccessibilityNodeInfo?, depth: Int) {
+            if (node == null || depth > 14) return
+            val vid = runCatching { node.viewIdResourceName.orEmpty() }.getOrDefault("")
+            val txt = runCatching { node.text?.toString()?.trim().orEmpty() }.getOrDefault("")
+            val desc = runCatching { node.contentDescription?.toString()?.trim().orEmpty() }.getOrDefault("")
+            val candidate = txt.ifBlank { desc }
+            if (candidate.isNotBlank()) {
+                if ((vid.contains("time_bar_current_time") || vid.contains("current_time")) && foundSec == 0) {
+                    parseDurationSec(candidate)?.let { foundSec = it }
+                } else if (foundSec == 0 && candidate.contains("/")) {
+                    val leftPart = candidate.substringBefore("/").trim()
+                    parseDurationSec(leftPart)?.let { foundSec = it }
+                }
+                if (vid.contains("title") && foundTitle == null && candidate.length >= 2) {
+                    foundTitle = candidate
+                } else if ((vid.contains("channel") || vid.contains("owner")) && foundChannel == null && candidate.length >= 2) {
+                    foundChannel = candidate
+                }
+            }
+            for (i in 0 until node.childCount) {
+                scan(node.getChild(i), depth + 1)
+            }
+        }
+        runCatching { scan(ytRoot, 0) }
+        return Triple(foundTitle, foundChannel, foundSec)
+    }
+
+    /**
+     * Dismisses any floating YouTube PiP window and stops background YouTube processes
+     * once Page 2 embedded YouTube has resumed playback.
+     */
+    fun closeYoutubePipOrApp(context: android.content.Context) {
+        val winList = runCatching { windows }.getOrNull().orEmpty()
+        for (win in winList) {
+            val root = runCatching { win.root }.getOrNull() ?: continue
+            val pkg = runCatching { root.packageName?.toString().orEmpty() }.getOrDefault("")
+            if (!pkg.startsWith("com.google.android.youtube")) continue
+            val r = Rect()
+            win.getBoundsInScreen(r)
+            val dm = resources.displayMetrics
+            val isPipOrSmall = r.width() < (dm.widthPixels * 0.7f) || r.height() < (dm.heightPixels * 0.7f)
+            if (isPipOrSmall) {
+                fun clickClose(n: AccessibilityNodeInfo?, depth: Int): Boolean {
+                    if (n == null || depth > 8) return false
+                    val desc = runCatching { n.contentDescription?.toString()?.lowercase().orEmpty() }.getOrDefault("")
+                    val vid = runCatching { n.viewIdResourceName.orEmpty().lowercase() }.getOrDefault("")
+                    if (n.isClickable && (desc.contains("close") || desc.contains("關閉") || desc.contains("关闭") || desc.contains("dismiss") || vid.contains("close") || vid.contains("dismiss"))) {
+                        return n.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    }
+                    for (i in 0 until n.childCount) {
+                        if (clickClose(n.getChild(i), depth + 1)) return true
+                    }
+                    return false
+                }
+                runCatching { clickClose(root, 0) }
+            }
+        }
+        runCatching {
+            val am = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            am?.killBackgroundProcesses("com.google.android.youtube")
+        }
+    }
+
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {

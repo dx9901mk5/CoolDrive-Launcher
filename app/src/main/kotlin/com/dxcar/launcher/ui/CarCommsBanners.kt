@@ -41,10 +41,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.automirrored.rounded.Reply
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.BluetoothAudio
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.CallEnd
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Mic
@@ -146,6 +148,8 @@ fun SwipeHorizontalToDismissBox(
 fun IncomingCallBanner(
     callState: CarCallState,
     scale: NotificationBannerScale = NotificationBannerScale.SCALE_1_0X,
+    useCarBoxAudio: Boolean = true,
+    onToggleAudioRoute: (() -> Unit)? = null,
     onAnswer: () -> Unit,
     onDecline: () -> Unit,
     modifier: Modifier = Modifier
@@ -259,6 +263,30 @@ fun IncomingCallBanner(
                     Spacer(Modifier.width((10f * s).coerceIn(6f, 14f).dp))
 
                     Row(horizontalArrangement = Arrangement.spacedBy((10f * s).coerceIn(7f, 14f).dp)) {
+                        if (onToggleAudioRoute != null) {
+                            Surface(
+                                color = if (useCarBoxAudio) colors.accent else colors.cardSurfaceElevated,
+                                shape = CircleShape,
+                                modifier = Modifier
+                                    .size(callBtnDp)
+                                    .border(1.2.dp, colors.accent, CircleShape)
+                                    .bouncyClickable(pressedScale = 0.86f, onClick = onToggleAudioRoute)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = if (useCarBoxAudio) Icons.Rounded.BluetoothAudio else Icons.Rounded.PhoneAndroid,
+                                        contentDescription = str(
+                                            if (useCarBoxAudio) "音源：車機盒（點此切換）" else "音源：手機（點此切換）",
+                                            if (useCarBoxAudio) "音源：车机盒（点此切换）" else "音源：手机（点此切换）",
+                                            if (useCarBoxAudio) "Audio: Car Box (Tap to switch)" else "Audio: Phone (Tap to switch)",
+                                            if (useCarBoxAudio) "音声：車載機（タップで切替）" else "音声：スマホ（タップで切替）"
+                                        ),
+                                        tint = if (useCarBoxAudio) colors.onAccent else colors.primaryText,
+                                        modifier = Modifier.size(callBtnIconDp)
+                                    )
+                                }
+                            }
+                        }
                         if (callState.status == CallStatus.RINGING) {
                             Surface(
                                 color = colors.callAcceptGreen,

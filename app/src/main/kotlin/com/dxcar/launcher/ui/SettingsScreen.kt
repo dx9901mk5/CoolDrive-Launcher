@@ -1403,6 +1403,40 @@ fun SettingsScreen(
                         )
 
                         SettingsToggleRow(
+                            title = str(
+                                "YouTube App 內常駐「回第二介面」浮動按鈕（長壓可拖曳定位）",
+                                "YouTube App 内常驻「回第二界面」浮动按钮（长按可拖动定位）",
+                                "Always Show 'Back to Page 2 YT' Button in YouTube App (Long-Press Drag)",
+                                "YouTube アプリ内に「ページ 2 へ戻る」ボタンを常時表示（長押し移動可）"
+                            ),
+                            subtitle = str(
+                                "解決 YouTube 全螢幕時按鈕時有時無問題；長壓按鈕即可自由拖曳位置，切回第二介面開始播放後自動關閉原 App／小視窗",
+                                "解决 YouTube 全屏时按钮时有时无问题；长按按钮即可自由拖动位置，切回第二界面开始播放后自动关闭原 App／小窗口",
+                                "Keeps the handoff button visible over fullscreen YouTube; long-press to drag, auto-closes YouTube App/PiP after handoff",
+                                "全画面時もボタンを安定表示し、長押しで位置調整可能。引き継ぎ再生後に元の YouTube／PiP を自動で閉じます"
+                            ),
+                            checked = config.ytHandoffAlwaysVisible,
+                            onCheckedChange = { checked -> onUpdateConfig { it.copy(ytHandoffAlwaysVisible = checked) } }
+                        )
+
+                        SettingsToggleRow(
+                            title = str(
+                                "電話通知擷取（預設關閉 · 關閉時走原車藍牙電話）",
+                                "电话通知捕获（默认关闭 · 关闭时走原车蓝牙电话）",
+                                "Phone Call Capture (Default Off · Uses Stock Car BT Dialer)",
+                                "電話着信キャプチャ（既定オフ・純正 Bluetooth 電話を使用）"
+                            ),
+                            subtitle = str(
+                                "開啟後將由本啟動器接管來電橫幅（附切換音源鈕）並攔截原車前台通知；關閉則維持原車電話介面",
+                                "开启后将由本启动器接管来电横幅（附切换音源按钮）并拦截原车前台通知；关闭则维持原车电话界面",
+                                "When ON, intercepts stock foreground notifications/calls and shows DX-Car Call Banner with Audio Route switch",
+                                "ON にすると純正の着信・通知をブロックし、音声切替付きバナーで表示します"
+                            ),
+                            checked = config.phoneCallCaptureEnabled,
+                            onCheckedChange = { checked -> onUpdateConfig { it.copy(phoneCallCaptureEnabled = checked) } }
+                        )
+
+                        SettingsToggleRow(
                             title = str("24 小時制時鐘", "24 小时制时钟", "24-Hour Clock", "24時間表示"),
                             subtitle = str(
                                 "關閉時顯示單行 12 小時制（如 8:20 PM）；點擊左上 Wi-Fi 圖示可展開下拉快捷鍵",

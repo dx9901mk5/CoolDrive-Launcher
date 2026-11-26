@@ -78,8 +78,13 @@ class BoxNotificationListenerService : NotificationListenerService() {
             }
         }
 
-        // Ignore silent group summary shells
+        // Ignore silent group summary shells & noisy progress/Join upload notifications
         if ((notif.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return
+        val hasProgress = extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0) > 0 ||
+            extras.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE, false)
+        val isNoisyUtility = pkg == "com.joaomgcd.join" ||
+            (hasProgress && (notif.flags and Notification.FLAG_ONGOING_EVENT) != 0)
+        if (isNoisyUtility) return
 
         val rawTitle = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
@@ -184,16 +189,24 @@ class BoxNotificationListenerService : NotificationListenerService() {
         val statusBarNotif = sbn ?: return
         actionHandles.remove(statusBarNotif.key)
         val app = DxCarApp.instance ?: return
-        if (statusBarNotif.packageName == GOOGLE_MAPS_PACKAGE) {
+        val pkg = statusBarNotif.packageName.orEmpty()
+        if (pkg == GOOGLE_MAPS_PACKAGE) {
             app.notificationCenter.updateActiveNavigation(null)
         }
-        val config = app.preferences.config.value
-        if (config.deviceRole == DeviceRole.PHONE_COMPANION &&
-            statusBarNotif.notification?.category == Notification.CATEGORY_CALL
-        ) {
-            BluetoothCompanionService.sendPacketFromPhone(
-                BridgePacket(type = PacketType.CALL_STATE, callStatus = CallStatus.IDLE)
-            )
+        val notif = statusBarNotif.notification
+        val wasCall = statusBarNotif.key == lastActiveCallKey ||
+            notif?.category == Notification.CATEGORY_CALL ||
+            isDialerOrVoipCall(pkg, "", "")
+        if (wasCall) {
+            lastActiveCallKey = null
+            val config = app.preferences.config.value
+            if (config.deviceRole == DeviceRole.PHONE_COMPANION) {
+                BluetoothCompanionService.sendPacketFromPhone(
+                    BridgePacket(type = PacketType.CALL_STATE, callStatus = CallStatus.IDLE)
+                )
+            } else {
+                app.notificationCenter.updateCallState(CarCallState(status = CallStatus.IDLE))
+            }
         }
     }
 
@@ -210,6 +223,8 @@ class BoxNotificationListenerService : NotificationListenerService() {
     ) {
         val cfg = app.preferences.config.value
         if (isCall) {
+            if (!cfg.phoneCallCaptureEnabled) return
+            lastActiveCallKey = sbnKey
             var extractedNum = explicitPhoneNumber
                 .ifBlank { ContactNameResolver.extractPlausiblePhoneNumber(title) }
                 .ifBlank { ContactNameResolver.extractPlausiblePhoneNumber(text) }
@@ -292,7 +307,10 @@ class BoxNotificationListenerService : NotificationListenerService() {
         isCall: Boolean,
         canReply: Boolean
     ) {
+        val cfg = app.preferences.config.value
         if (isCall) {
+            if (!cfg.phoneCallCaptureEnabled) return
+            lastActiveCallKey = sbnKey
             val extractedNum = explicitPhoneNumber
                 .ifBlank { ContactNameResolver.extractPlausiblePhoneNumber(title) }
                 .ifBlank { ContactNameResolver.extractPlausiblePhoneNumber(text) }
@@ -311,11 +329,16 @@ class BoxNotificationListenerService : NotificationListenerService() {
                     fromPhoneBridge = false
                 )
             )
+            runCatching { cancelNotification(sbnKey) }
             return
         }
 
-        val allowed = app.preferences.config.value.companionAllowedPackages
-        if (!allowed.contains(pkg)) return
+        if (cfg.phoneCallCaptureEnabled && pkg != packageName && pkg != GOOGLE_MAPS_PACKAGE) {
+            runCatching { cancelNotification(sbnKey) }
+        }
+
+        val allowed = cfg.companionAllowedPackages
+        if (!cfg.companionSyncAllApps && !allowed.contains(pkg)) return
 
         app.notificationCenter.postIncomingMessage(
             CarMessageItem(
@@ -498,6 +521,9 @@ class BoxNotificationListenerService : NotificationListenerService() {
 
     companion object {
         const val GOOGLE_MAPS_PACKAGE = "com.google.android.apps.maps"
+
+        @Volatile
+        var lastActiveCallKey: String? = null
 
         @Volatile
         var instance: BoxNotificationListenerService? = null

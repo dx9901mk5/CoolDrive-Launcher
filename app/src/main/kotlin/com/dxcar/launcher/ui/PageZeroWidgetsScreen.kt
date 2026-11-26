@@ -13,8 +13,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -25,13 +28,11 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,6 +45,7 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Navigation
+import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.material.icons.rounded.Widgets
@@ -58,6 +60,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,7 +69,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -100,6 +107,7 @@ fun PageZeroWidgetBoard(
     isNight: Boolean,
     onAddWidget: (PageZeroWidgetItem) -> Unit,
     onRemoveWidget: (PageZeroWidgetItem) -> Unit,
+    onUpdateWidget: (PageZeroWidgetItem) -> Unit = {},
     onQuickNavigateQuery: (String) -> Unit,
     onWeatherClick: () -> Unit,
     onGoPageOne: () -> Unit,
@@ -285,21 +293,56 @@ fun PageZeroWidgetBoard(
                     }
                 }
             } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 260.dp),
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(bottom = 12.dp)
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
                 ) {
-                    items(config.pageZeroWidgets, key = { it.id }) { widget ->
+                    val density = LocalDensity.current
+                    val haptic = LocalHapticFeedback.current
+                    val canvasW = maxWidth.value.coerceAtLeast(320f)
+                    val canvasH = maxHeight.value.coerceAtLeast(220f)
+
+                    config.pageZeroWidgets.forEachIndexed { idx, widget ->
+                        val defaultCol = idx % 3
+                        val defaultRow = idx / 3
+                        val initX = if (widget.xDp >= 0f) widget.xDp else (defaultCol * 292f).coerceIn(0f, (canvasW - 180f).coerceAtLeast(0f))
+                        val initY = if (widget.yDp >= 0f) widget.yDp else (defaultRow * 202f).coerceIn(0f, (canvasH - 130f).coerceAtLeast(0f))
+
+                        var posX by remember(widget.id, widget.xDp) { mutableFloatStateOf(initX) }
+                        var posY by remember(widget.id, widget.yDp) { mutableFloatStateOf(initY) }
+                        var cardW by remember(widget.id, widget.widthDp) { mutableFloatStateOf(widget.widthDp.coerceIn(180f, 620f)) }
+                        var cardH by remember(widget.id, widget.heightDp) { mutableFloatStateOf(widget.heightDp.coerceIn(130f, 440f)) }
+
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .height(190.dp)
+                                .offset(x = posX.dp, y = posY.dp)
+                                .width(cardW.dp)
+                                .height(cardH.dp)
                                 .clip(RoundedCornerShape(22.dp))
                                 .background(colors.cardSurface)
-                                .border(1.dp, colors.cardBorder, RoundedCornerShape(22.dp))
+                                .border(
+                                    width = if (isEditMode) 1.6.dp else 1.dp,
+                                    color = if (isEditMode) colors.accent else colors.cardBorder,
+                                    shape = RoundedCornerShape(22.dp)
+                                )
+                                .pointerInput(widget.id, canvasW, canvasH) {
+                                    detectDragGesturesAfterLongPress(
+                                        onDragStart = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        },
+                                        onDrag = { change, dragAmount ->
+                                            change.consume()
+                                            val dxDp = dragAmount.x / density.density
+                                            val dyDp = dragAmount.y / density.density
+                                            posX = (posX + dxDp).coerceIn(0f, (canvasW - cardW).coerceAtLeast(0f))
+                                            posY = (posY + dyDp).coerceIn(0f, (canvasH - cardH).coerceAtLeast(0f))
+                                        },
+                                        onDragEnd = {
+                                            onUpdateWidget(widget.copy(xDp = posX, yDp = posY))
+                                        }
+                                    )
+                                }
                         ) {
                             when (widget.type) {
                                 "CLOCK" -> BuiltInClockWidget(sysStatus, isNight)
@@ -345,6 +388,39 @@ fun PageZeroWidgetBoard(
                                         }
                                     }
                                 }
+                            }
+
+                            // Bottom-right Resize Handle (always accessible in edit mode or subtle corner)
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(6.dp)
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(colors.cardSurfaceElevated.copy(alpha = 0.88f))
+                                    .border(1.dp, colors.accent.copy(alpha = 0.55f), CircleShape)
+                                    .pointerInput(widget.id, canvasW, canvasH) {
+                                        detectDragGestures(
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                val dwDp = dragAmount.x / density.density
+                                                val dhDp = dragAmount.y / density.density
+                                                cardW = (cardW + dwDp).coerceIn(180f, (canvasW - posX).coerceAtLeast(180f))
+                                                cardH = (cardH + dhDp).coerceIn(130f, (canvasH - posY).coerceAtLeast(130f))
+                                            },
+                                            onDragEnd = {
+                                                onUpdateWidget(widget.copy(widthDp = cardW, heightDp = cardH))
+                                            }
+                                        )
+                                    }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.OpenInFull,
+                                    contentDescription = str("縮放大小", "缩放大小", "Resize", "サイズ変更"),
+                                    tint = colors.accent,
+                                    modifier = Modifier.size(14.dp)
+                                )
                             }
 
                             if (isEditMode) {

@@ -219,6 +219,7 @@ fun PhoneCompanionScreen(
     onToggleAllowedPackage: (String) -> Unit,
     onSetAllowedPackages: (List<String>) -> Unit = {},
     onToggleSyncAllApps: (Boolean) -> Unit,
+    onTogglePhoneCallCapture: (Boolean) -> Unit = {},
     onChangeTouchpadSensitivity: (Float) -> Unit = {},
     onSelectLanguage: (AppLanguage) -> Unit = {},
     isNight: Boolean = false,
@@ -888,6 +889,44 @@ fun PhoneCompanionScreen(
                                 }
                             }
                         }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(colors.cardSurfaceElevated)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text(
+                                text = str(
+                                    "電話通知擷取（預設關閉 · 走原車藍牙電話）",
+                                    "电话通知捕获（默认关闭 · 走原车蓝牙电话）",
+                                    "Phone Call Capture (Default Off)",
+                                    "電話着信キャプチャ（既定オフ）"
+                                ),
+                                color = colors.primaryText,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = str(
+                                    "開啟後才會轉傳來電至車機並攔截原車通知；未勾選的系統 App 一律不轉傳",
+                                    "开启后才会转发来电至车机并拦截原车通知；未勾选的系统 App 一律不转发",
+                                    "Enable only if you want DX-Car to forward calls & intercept stock alerts",
+                                    "ON 時のみ着信転送・純正通知ブロックを行います"
+                                ),
+                                color = colors.secondaryText,
+                                fontSize = 11.sp
+                            )
+                        }
+                        Switch(
+                            checked = config.phoneCallCaptureEnabled,
+                            onCheckedChange = onTogglePhoneCallCapture
+                        )
                     }
 
                     Column(

@@ -1666,6 +1666,7 @@ data class YoutubeHandoffRequest(
     val url: String,
     val positionSec: Int = 0,
     val enterFullscreen: Boolean = true,
+    val autoClickFirstResult: Boolean = false,
     val seq: Long = System.currentTimeMillis()
 )
 
@@ -1673,11 +1674,17 @@ object YoutubeHandoffBridge {
     private val _pendingHandoff = kotlinx.coroutines.flow.MutableStateFlow<YoutubeHandoffRequest?>(null)
     val pendingHandoff: kotlinx.coroutines.flow.StateFlow<YoutubeHandoffRequest?> = _pendingHandoff
 
-    fun requestHandoff(url: String, positionSec: Int = 0, enterFullscreen: Boolean = true) {
+    fun requestHandoff(
+        url: String,
+        positionSec: Int = 0,
+        enterFullscreen: Boolean = true,
+        autoClickFirstResult: Boolean = false
+    ) {
         _pendingHandoff.value = YoutubeHandoffRequest(
             url = url,
             positionSec = positionSec,
             enterFullscreen = enterFullscreen,
+            autoClickFirstResult = autoClickFirstResult,
             seq = System.currentTimeMillis()
         )
     }
@@ -1704,6 +1711,14 @@ object EmbeddedYoutubeBridge {
     var onNext: (() -> Unit)? = null
     @Volatile
     var onPrevious: (() -> Unit)? = null
+    @Volatile
+    var canGoBack: (() -> Boolean)? = null
+    @Volatile
+    var goBack: (() -> Unit)? = null
+    @Volatile
+    var isFullscreen: (() -> Boolean)? = null
+    @Volatile
+    var exitFullscreen: (() -> Unit)? = null
 
     fun handleMediaKeyEvent(event: KeyEvent): Boolean {
         if (!isActive || event.action != KeyEvent.ACTION_DOWN) return false
@@ -1801,6 +1816,9 @@ fun EmbeddedYoutubePlayerCard(
     val videoTimeHolder = remember { FloatArray(2) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val pendingHandoff by YoutubeHandoffBridge.pendingHandoff.collectAsState()
+    var pendingSeekSec by remember { mutableIntStateOf(0) }
+    var pendingAutoClickFirstResult by remember { mutableStateOf(false) }
+    var pendingCloseSourceYt by remember { mutableStateOf(false) }
 
     fun evalYoutubeJs(js: String) {
         mainHandler.post {
@@ -1881,6 +1899,9 @@ fun EmbeddedYoutubePlayerCard(
         val req = pendingHandoff ?: return@LaunchedEffect
         val wv = webViewRef ?: return@LaunchedEffect
         YoutubeHandoffBridge.consume()
+        pendingSeekSec = req.positionSec.coerceAtLeast(0)
+        pendingAutoClickFirstResult = req.autoClickFirstResult
+        pendingCloseSourceYt = true
         wv.loadUrl(req.url)
         if (req.enterFullscreen) {
             enterRightPaneFullscreen()
@@ -1891,6 +1912,19 @@ fun EmbeddedYoutubePlayerCard(
         exitCustomViewTrigger?.invoke()
         evalYoutubeJs(removeRightPaneFsCssJs)
         isRightPaneFullscreen = false
+    }
+
+    DisposableEffect(Unit) {
+        EmbeddedYoutubeBridge.canGoBack = { webViewRef?.canGoBack() == true }
+        EmbeddedYoutubeBridge.goBack = { webViewRef?.goBack() }
+        EmbeddedYoutubeBridge.isFullscreen = { isRightPaneFullscreen }
+        EmbeddedYoutubeBridge.exitFullscreen = { exitRightPaneFullscreen() }
+        onDispose {
+            EmbeddedYoutubeBridge.canGoBack = null
+            EmbeddedYoutubeBridge.goBack = null
+            EmbeddedYoutubeBridge.isFullscreen = null
+            EmbeddedYoutubeBridge.exitFullscreen = null
+        }
     }
 
     fun launchYoutubeAppWithState(rawUrl: String, sec: Int) {
@@ -2131,8 +2165,8 @@ fun EmbeddedYoutubePlayerCard(
             .background(Color.Black)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Compact Inline YouTube Control Bar (auto-hides in right-pane fullscreen!)
-            AnimatedVisibility(visible = !isRightPaneFullscreen) {
+            // Compact Inline YouTube Control Bar (hidden per user spec for clean full-height Page 2 YouTube)
+            AnimatedVisibility(visible = false) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -2578,6 +2612,13 @@ fun EmbeddedYoutubePlayerCard(
                                 fun onVideoProgress(cur: Float, dur: Float) {
                                     videoTimeHolder[0] = cur
                                     videoTimeHolder[1] = dur
+                                    if (pendingCloseSourceYt && cur > 0.2f) {
+                                        pendingCloseSourceYt = false
+                                        mainHandler.post {
+                                            com.dxcar.launcher.accessibility.DxCarAccessibilityService.instance
+                                                ?.closeYoutubePipOrApp(context)
+                                        }
+                                    }
                                 }
                             },
                             "DxCarYtBridge"
@@ -2588,6 +2629,53 @@ fun EmbeddedYoutubePlayerCard(
                                 view?.evaluateJavascript(bootstrapYoutubeEnhancementsJs, null)
                                 if (isRightPaneFullscreen) {
                                     view?.evaluateJavascript(applyRightPaneFsCssJs, null)
+                                }
+                                val currentUrl = url.orEmpty()
+                                if (pendingAutoClickFirstResult && currentUrl.contains("/results")) {
+                                    pendingAutoClickFirstResult = false
+                                    view?.evaluateJavascript(
+                                        """
+                                        (function() {
+                                          var tries = 0;
+                                          var timer = setInterval(function() {
+                                            tries++;
+                                            var a = document.querySelector('ytm-video-with-context-renderer a[href*="/watch"], a[href*="/watch?v="]');
+                                            if (a) {
+                                              clearInterval(timer);
+                                              a.click();
+                                            } else if (tries > 20) {
+                                              clearInterval(timer);
+                                            }
+                                          }, 350);
+                                        })();
+                                        """.trimIndent(),
+                                        null
+                                    )
+                                } else if (currentUrl.contains("/watch") && (pendingSeekSec > 0 || pendingCloseSourceYt)) {
+                                    val seekTarget = pendingSeekSec
+                                    pendingSeekSec = 0
+                                    view?.evaluateJavascript(
+                                        """
+                                        (function() {
+                                          var target = $seekTarget;
+                                          var tries = 0;
+                                          var timer = setInterval(function() {
+                                            tries++;
+                                            var v = document.querySelector('video');
+                                            if (v && v.readyState >= 1) {
+                                              if (target > 0 && Math.abs((v.currentTime || 0) - target) > 2) {
+                                                try { v.currentTime = target; } catch(e) {}
+                                              }
+                                              try { v.play(); } catch(e) {}
+                                              clearInterval(timer);
+                                            } else if (tries > 25) {
+                                              clearInterval(timer);
+                                            }
+                                          }, 350);
+                                        })();
+                                        """.trimIndent(),
+                                        null
+                                    )
                                 }
                             }
                         }
@@ -2663,7 +2751,7 @@ fun EmbeddedYoutubePlayerCard(
             contentAlignment = Alignment.Center,
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(start = 10.dp, top = if (isRightPaneFullscreen) 10.dp else 44.dp)
+                .padding(start = 10.dp, top = 10.dp)
                 .size(30.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(Color(0xE6FF0000))

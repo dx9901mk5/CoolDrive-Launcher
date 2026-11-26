@@ -165,9 +165,13 @@ fun LiveMapCard(
 
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
     var followVehicle by remember { mutableStateOf(true) }
-    var currentZoom by remember { mutableDoubleStateOf(15.6) }
     val livePrefConfigState = remember { com.dxcar.launcher.DxCarApp.instance?.preferences?.config }?.collectAsState()
     val livePrefConfig = livePrefConfigState?.value
+    var currentZoom by remember {
+        mutableDoubleStateOf(
+            com.dxcar.launcher.DxCarApp.instance?.preferences?.config?.value?.lastKnownZoom ?: 15.6
+        )
+    }
     var showNavShortcutEditor by remember { mutableStateOf(false) }
     var gmapsImportNote by remember { mutableStateOf<String?>(null) }
 
@@ -356,11 +360,17 @@ fun LiveMapCard(
                         }
                     }
                     map.addOnCameraIdleListener {
-                        currentZoom = map.cameraPosition.zoom
+                        val idleZoom = map.cameraPosition.zoom
+                        currentZoom = idleZoom
+                        val prefs = com.dxcar.launcher.DxCarApp.instance?.preferences
+                        if (prefs != null && kotlin.math.abs(prefs.config.value.lastKnownZoom - idleZoom) >= 0.15) {
+                            prefs.update { it.copy(lastKnownZoom = idleZoom) }
+                        }
                     }
                     val initCam = CameraPosition.Builder()
                         .target(LatLng(location.latitude, location.longitude))
                         .zoom(currentZoom)
+                        .bearing(location.bearingDeg.toDouble())
                         .tilt(30.0)
                         .build()
                     map.cameraPosition = initCam

@@ -127,6 +127,8 @@ class BluetoothCallReceiver : BroadcastReceiver() {
                 }
 
                 if (role == DeviceRole.PHONE_COMPANION) {
+                    val callCaptureOn = app.preferences.config.value.phoneCallCaptureEnabled
+                    if (status != CallStatus.IDLE && !callCaptureOn) return
                     dispatchPhoneCallSnapshot(rawExtraNum)
                     // If Android's first broadcast arrived before EXTRA_INCOMING_NUMBER / CallLog write, re-probe after 650ms!
                     if (status == CallStatus.RINGING && rawExtraNum.isBlank()) {
@@ -148,6 +150,8 @@ class BluetoothCallReceiver : BroadcastReceiver() {
                         }, 650L)
                     }
                 } else {
+                    val callCaptureOn = app?.preferences?.config?.value?.phoneCallCaptureEnabled == true
+                    if (status != CallStatus.IDLE && !callCaptureOn) return
                     val resolvedContact = if (status != CallStatus.IDLE && rawExtraNum.isNotBlank()) {
                         ContactNameResolver.resolveDisplayName(context, rawExtraNum)
                     } else {
@@ -186,6 +190,9 @@ class BluetoothCallReceiver : BroadcastReceiver() {
                         4, 5 -> CallStatus.RINGING
                         0, 1, 2, 3 -> CallStatus.ACTIVE
                         else -> CallStatus.IDLE
+                    }
+                    if (mapped != CallStatus.IDLE && app.preferences.config.value.phoneCallCaptureEnabled != true) {
+                        return
                     }
                     val resolvedContact = if (mapped != CallStatus.IDLE) {
                         hfpCallerName.takeIf { !ContactNameResolver.isGenericOrNumberOnly(it) }
