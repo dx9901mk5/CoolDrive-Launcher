@@ -2,13 +2,13 @@
 
 <img src="play_store_assets/feature_graphic_1024x500.png" alt="DX-Car Launcher Feature Graphic" width="100%" />
 
-# DX-Car Launcher (`v1.8.1`)
+# DX-Car Launcher (`v1.8.3`)
 
 **專為橫向平板與 Android AI Box 車機盒打造的 Android Auto (Coolwalk) 風格車載啟動器 ＋ 手機遠端觸控／來電訊息同步橋接**
 
 **An Android Auto (Coolwalk) Inspired Car Launcher for Landscape Tablets & Android AI Box Head Units — with Smartphone Remote Touchpad & Live Call/Message Sync**
 
-[![Google Play Closed Testing](https://img.shields.io/badge/Google%20Play-Closed%20Testing%20v1.8.1-34A853?style=for-the-badge&logo=google-play&logoColor=white)](https://play.google.com/store/apps/details?id=com.dxcar.launcher)
+[![Google Play Closed Testing](https://img.shields.io/badge/Google%20Play-Closed%20Testing%20v1.8.3-34A853?style=for-the-badge&logo=google-play&logoColor=white)](https://play.google.com/store/apps/details?id=com.dxcar.launcher)
 [![Languages](https://img.shields.io/badge/Languages-%E7%B9%81%E9%AB%94%E4%B8%AD%E6%96%87%20%7C%20%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87%20%7C%20English%20%7C%20%E6%97%A5%E6%9C%AC%E8%AA%9E-1A73E8?style=for-the-badge)](#)
 
 [繁體中文說明](#-繁體中文說明) • [English Documentation](#-english-documentation) • [Google Play 下載三步驟](#-google-play-下載與封閉測試三步驟--google-play-3-step-install) • [畫面預覽 Screenshots](#-畫面預覽--screenshots)
@@ -31,6 +31,17 @@ Follow these **3 steps** to join the closed test and install directly from Googl
 | **1** | **加入 DX Google 測試群組**（點擊「加入群組」） | **Join the DX Google Testing Group** | 👉 [groups.google.com/g/dx-file-manager-testers](https://groups.google.com/g/dx-file-manager-testers) |
 | **2** | **申請成為 Google Play 測試人員**（點「成為測試人員」） | **Opt-in as a Google Play Tester** | 👉 [play.google.com/apps/testing/com.dxcar.launcher](https://play.google.com/apps/testing/com.dxcar.launcher) |
 | **3** | **前往 Google Play 商店下載安裝** | **Download & Install on Google Play** | 👉 [play.google.com/store/apps/details?id=com.dxcar.launcher](https://play.google.com/store/apps/details?id=com.dxcar.launcher) |
+
+---
+
+## 🔧 方案 B：DX-Car Root 輔助 App（僅於 GitHub 單獨提供） / Plan B: DX-Car Root Helper APK
+
+> 📌 **發布原則說明 / Distribution Notice**  
+> - **主啟動器（`DX-Car Launcher`）** 請一律透過上方的 **Google Play 商店** 下載更新；GitHub **已移除所有主程式 APK**，僅單獨提供 **Root 輔助 App APK**。  
+> - **繁體中文**：主啟動器 Play 版完全不含 Root (`su`) 邏輯。若您的車機已取得 Root（例如 Magisk），可單獨安裝本 **DX-Car Root 輔助 App**（`com.dxcar.roothelper`），啟動器偵測到輔助 App 後即解鎖「方案 B」選項。輔助 App 內建 **GitHub 自動檢查與下載更新**、一鍵產生車機診斷 Log 寄送 `dx9901mk5@gmail.com`、60Hz 能力檢測與設定、方案 B 介面客製化（UI 0/1/2 與 Dock 常駐右移不重疊）及原廠 OTA App 攔截。  
+> - **English**: The Play Store version of `DX-Car Launcher` contains zero root (`su`) code. On rooted head units (e.g., Magisk), install the standalone **DX-Car Root Helper APK** from GitHub Releases to unlock Plan B features, automatic GitHub self-updates, 60Hz feasibility checks, diagnostic log export to `dx9901mk5@gmail.com`, and OEM OTA interception.
+
+- 👉 **GitHub 輔助 APK 下載 / Download Root Helper APK**：[github.com/dx9901mk5/DX-Car-Launcher/releases](https://github.com/dx9901mk5/DX-Car-Launcher/releases)（請下載 `DX-Car-Root-Helper-v*.apk`）
 
 ---
 

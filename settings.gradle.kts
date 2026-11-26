@@ -26,4 +26,4 @@ plugins {
 
 rootProject.name = "DX-Car-Launcher"
 
-include(":app")
+include(":app", ":roothelper")
