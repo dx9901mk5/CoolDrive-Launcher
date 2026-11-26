@@ -145,6 +145,13 @@ data class AppFolderItem(
 )
 
 @Serializable
+data class NavAddressShortcut(
+    val id: String = UUID.randomUUID().toString().take(8),
+    val label: String,
+    val address: String
+)
+
+@Serializable
 enum class NotificationBannerScale(val factor: Float, val label: String) {
     SCALE_0_5X(0.5f, "0.5X"),
     SCALE_0_75X(0.75f, "0.75X"),
@@ -261,6 +268,11 @@ data class LauncherConfig(
     val phoneTouchpadSensitivity: Float = 1.5f,
     val homeAddress: String = "",
     val workAddress: String = "",
+    val showHomeNavShortcut: Boolean = true,
+    val showWorkNavShortcut: Boolean = true,
+    val homeShortcutLabel: String = "",
+    val workShortcutLabel: String = "",
+    val customNavShortcuts: List<NavAddressShortcut> = emptyList(),
     val companionTargetDeviceAddress: String = "",
     val companionTargetDeviceName: String = "",
     val companionAutoConnect: Boolean = true,

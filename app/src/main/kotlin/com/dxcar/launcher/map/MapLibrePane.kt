@@ -1,8 +1,12 @@
 package com.dxcar.launcher.map
 
+import android.content.Context
+import android.content.pm.LauncherApps
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
+import android.net.Uri
+import android.os.Process
 import android.view.View
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -34,14 +38,17 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MyLocation
 import androidx.compose.material.icons.rounded.Navigation
 import androidx.compose.material.icons.rounded.OpenInFull
+import androidx.compose.material.icons.rounded.Place
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Splitscreen
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Traffic
@@ -63,6 +70,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -158,6 +166,48 @@ fun LiveMapCard(
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
     var followVehicle by remember { mutableStateOf(true) }
     var currentZoom by remember { mutableDoubleStateOf(15.6) }
+    val livePrefConfigState = remember { com.dxcar.launcher.DxCarApp.instance?.preferences?.config }?.collectAsState()
+    val livePrefConfig = livePrefConfigState?.value
+    var showNavShortcutEditor by remember { mutableStateOf(false) }
+    var gmapsImportNote by remember { mutableStateOf<String?>(null) }
+
+    fun syncHomeWorkFromGoogleMaps(forceFeedback: Boolean = false) {
+        val (detectedHome, detectedWork, hasPerm) = readGoogleMapsHomeWorkShortcuts(context)
+        val prefs = com.dxcar.launcher.DxCarApp.instance?.preferences
+        if (prefs != null && (!detectedHome.isNullOrBlank() || !detectedWork.isNullOrBlank())) {
+            prefs.update { cur ->
+                cur.copy(
+                    homeAddress = if (cur.homeAddress.isBlank() && !detectedHome.isNullOrBlank()) detectedHome else cur.homeAddress,
+                    workAddress = if (cur.workAddress.isBlank() && !detectedWork.isNullOrBlank()) detectedWork else cur.workAddress
+                )
+            }
+        }
+        if (forceFeedback) {
+            gmapsImportNote = when {
+                !detectedHome.isNullOrBlank() || !detectedWork.isNullOrBlank() ->
+                    DxCarI18n.tr(
+                        "✓ 已從 Google 地圖捷徑偵測並帶入已設定地址",
+                        "✓ 已从 Google 地图快捷方式检测并填入已设置地址",
+                        "✓ Imported configured Home/Work address from Google Maps shortcuts",
+                        "✓ Google マップのショートカットから自宅／職場の住所を取り込みました"
+                    )
+                !hasPerm ->
+                    DxCarI18n.tr(
+                        "ℹ️ Google 地圖未開放跨 App 讀取地址（僅預設桌面時可讀取捷徑），請直接在下方輸入回家與公司地址",
+                        "ℹ️ Google 地图未开放跨 App 读取地址（仅默认桌面时可读取快捷方式），请直接在下方输入回家与公司地址",
+                        "ℹ️ Google Maps doesn't expose raw Home/Work addresses to other apps; please enter them below",
+                        "ℹ️ Google マップの自宅／職場住所は他アプリから直接取得できないため、下欄に直接ご入力ください"
+                    )
+                else ->
+                    DxCarI18n.tr(
+                        "ℹ️ 未在 Google 地圖捷徑中偵測到住家／公司地址，請直接在下方輸入",
+                        "ℹ️ 未在 Google 地图快捷方式中检测到住家／公司地址，请直接在下方输入",
+                        "ℹ️ No Home/Work address found in Google Maps shortcuts; please enter below",
+                        "ℹ️ Google マップのショートカットに自宅／職場の住所が見つかりませんでした"
+                    )
+            }
+        }
+    }
     var manualTiltOverride by remember { mutableStateOf<Double?>(null) }
     var showLayerPicker by remember { mutableStateOf(false) }
     var showOfflineSheet by remember { mutableStateOf(false) }
@@ -598,6 +648,322 @@ fun LiveMapCard(
                                     }
                                     IconButton(onClick = { showBuiltInSearchBox = false }) {
                                         Icon(Icons.Rounded.Close, contentDescription = str("關閉", "关闭", "Close", "閉じる"), tint = colors.secondaryText)
+                                    }
+                                }
+
+                                // QUICK NAVIGATION SHORTCUTS BAR (Home, Work, Custom/+, Settings Gear)
+                                LaunchedEffect(showBuiltInSearchBox) {
+                                    if (showBuiltInSearchBox && (homeAddress.isBlank() || workAddress.isBlank())) {
+                                        syncHomeWorkFromGoogleMaps(forceFeedback = false)
+                                    }
+                                }
+                                val showHomeChip = livePrefConfig?.showHomeNavShortcut ?: true
+                                val showWorkChip = livePrefConfig?.showWorkNavShortcut ?: true
+                                val homeChipLabel = livePrefConfig?.homeShortcutLabel?.takeIf { it.isNotBlank() }
+                                    ?: str("回家", "回家", "Home", "自宅")
+                                val workChipLabel = livePrefConfig?.workShortcutLabel?.takeIf { it.isNotBlank() }
+                                    ?: str("公司", "公司", "Work", "職場")
+                                val customShortcuts = livePrefConfig?.customNavShortcuts ?: emptyList()
+
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    if (showHomeChip) {
+                                        MapChipButton(
+                                            icon = Icons.Rounded.Home,
+                                            label = if (homeAddress.isNotBlank()) homeChipLabel else "$homeChipLabel (＋)",
+                                            highlight = homeAddress.isNotBlank(),
+                                            onClick = {
+                                                if (homeAddress.isNotBlank()) {
+                                                    showBuiltInSearchBox = false
+                                                    onQuickBuiltInNavigateQuery(homeAddress)
+                                                } else {
+                                                    showNavShortcutEditor = true
+                                                }
+                                            }
+                                        )
+                                    }
+                                    if (showWorkChip) {
+                                        MapChipButton(
+                                            icon = Icons.Rounded.Work,
+                                            label = if (workAddress.isNotBlank()) workChipLabel else "$workChipLabel (＋)",
+                                            highlight = workAddress.isNotBlank(),
+                                            onClick = {
+                                                if (workAddress.isNotBlank()) {
+                                                    showBuiltInSearchBox = false
+                                                    onQuickBuiltInNavigateQuery(workAddress)
+                                                } else {
+                                                    showNavShortcutEditor = true
+                                                }
+                                            }
+                                        )
+                                    }
+                                    customShortcuts.forEach { sc ->
+                                        MapChipButton(
+                                            icon = Icons.Rounded.Place,
+                                            label = sc.label,
+                                            highlight = true,
+                                            onClick = {
+                                                showBuiltInSearchBox = false
+                                                onQuickBuiltInNavigateQuery(sc.address)
+                                            }
+                                        )
+                                    }
+                                    // Blank (+) quick-add slot
+                                    MapChipButton(
+                                        icon = Icons.Rounded.Add,
+                                        label = if (customShortcuts.isEmpty()) str("新增", "新增", "Add", "追加") else "",
+                                        highlight = false,
+                                        onClick = { showNavShortcutEditor = true }
+                                    )
+                                    // Settings Gear button
+                                    MapChipButton(
+                                        icon = Icons.Rounded.Settings,
+                                        label = str("設定", "设置", "Edit", "設定"),
+                                        highlight = showNavShortcutEditor,
+                                        onClick = { showNavShortcutEditor = !showNavShortcutEditor }
+                                    )
+                                }
+
+                                // GEAR MODAL / INLINE EDITOR FOR NAV SHORTCUTS (Home, Work, Custom, Google Maps Import)
+                                if (showNavShortcutEditor) {
+                                    var editHomeLabel by remember(livePrefConfig?.homeShortcutLabel) {
+                                        mutableStateOf(livePrefConfig?.homeShortcutLabel.orEmpty())
+                                    }
+                                    var editHomeAddr by remember(homeAddress) { mutableStateOf(homeAddress) }
+                                    var editWorkLabel by remember(livePrefConfig?.workShortcutLabel) {
+                                        mutableStateOf(livePrefConfig?.workShortcutLabel.orEmpty())
+                                    }
+                                    var editWorkAddr by remember(workAddress) { mutableStateOf(workAddress) }
+                                    var newCustomLabel by remember { mutableStateOf("") }
+                                    var newCustomAddr by remember { mutableStateOf("") }
+
+                                    Surface(
+                                        color = colors.cardSurfaceElevated,
+                                        shape = RoundedCornerShape(14.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .border(1.dp, colors.accent.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .padding(12.dp)
+                                                .heightIn(max = 260.dp)
+                                                .verticalScroll(rememberScrollState()),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text(
+                                                    text = str(
+                                                        "快速導航快捷鍵設定",
+                                                        "快速导航快捷键设置",
+                                                        "Quick Nav Shortcuts Setup",
+                                                        "クイックナビ設定"
+                                                    ),
+                                                    color = colors.primaryText,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    OutlinedButton(
+                                                        onClick = { syncHomeWorkFromGoogleMaps(forceFeedback = true) },
+                                                        shape = RoundedCornerShape(10.dp)
+                                                    ) {
+                                                        Text(
+                                                            str("讀取 G地圖設定", "读取 G地图设置", "Read G Maps", "Gマップ取込"),
+                                                            fontSize = 11.sp
+                                                        )
+                                                    }
+                                                    IconButton(
+                                                        onClick = { showNavShortcutEditor = false },
+                                                        modifier = Modifier.size(28.dp)
+                                                    ) {
+                                                        Icon(Icons.Rounded.Close, contentDescription = null, tint = colors.secondaryText, modifier = Modifier.size(16.dp))
+                                                    }
+                                                }
+                                            }
+                                            if (!gmapsImportNote.isNullOrBlank()) {
+                                                Text(gmapsImportNote.orEmpty(), color = colors.accent, fontSize = 11.sp)
+                                            }
+
+                                            // Default Shortcut 1: Home (editable + removable)
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                OutlinedTextField(
+                                                    value = editHomeLabel,
+                                                    onValueChange = { editHomeLabel = it },
+                                                    singleLine = true,
+                                                    placeholder = { Text(str("回家", "回家", "Home", "自宅"), fontSize = 11.sp) },
+                                                    modifier = Modifier.width(86.dp)
+                                                )
+                                                OutlinedTextField(
+                                                    value = editHomeAddr,
+                                                    onValueChange = { editHomeAddr = it },
+                                                    singleLine = true,
+                                                    placeholder = { Text(str("輸入回家地址…", "输入回家地址…", "Home address…", "自宅の住所…"), fontSize = 11.sp) },
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                IconButton(
+                                                    onClick = {
+                                                        com.dxcar.launcher.DxCarApp.instance?.preferences?.update { cur ->
+                                                            cur.copy(showHomeNavShortcut = !cur.showHomeNavShortcut)
+                                                        }
+                                                    },
+                                                    modifier = Modifier.size(30.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = if (showHomeChip) Icons.Rounded.DeleteOutline else Icons.Rounded.Add,
+                                                        contentDescription = null,
+                                                        tint = if (showHomeChip) Color(0xFFEF4444) else colors.accent,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            // Default Shortcut 2: Work (editable + removable)
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                OutlinedTextField(
+                                                    value = editWorkLabel,
+                                                    onValueChange = { editWorkLabel = it },
+                                                    singleLine = true,
+                                                    placeholder = { Text(str("公司", "公司", "Work", "職場"), fontSize = 11.sp) },
+                                                    modifier = Modifier.width(86.dp)
+                                                )
+                                                OutlinedTextField(
+                                                    value = editWorkAddr,
+                                                    onValueChange = { editWorkAddr = it },
+                                                    singleLine = true,
+                                                    placeholder = { Text(str("輸入公司地址…", "输入公司地址…", "Work address…", "職場の住所…"), fontSize = 11.sp) },
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                IconButton(
+                                                    onClick = {
+                                                        com.dxcar.launcher.DxCarApp.instance?.preferences?.update { cur ->
+                                                            cur.copy(showWorkNavShortcut = !cur.showWorkNavShortcut)
+                                                        }
+                                                    },
+                                                    modifier = Modifier.size(30.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = if (showWorkChip) Icons.Rounded.DeleteOutline else Icons.Rounded.Add,
+                                                        contentDescription = null,
+                                                        tint = if (showWorkChip) Color(0xFFEF4444) else colors.accent,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            // Existing custom shortcuts
+                                            customShortcuts.forEach { sc ->
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                        .background(colors.cardSurface)
+                                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Text(
+                                                        text = "${sc.label} · ${sc.address}",
+                                                        color = colors.primaryText,
+                                                        fontSize = 12.sp,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                    IconButton(
+                                                        onClick = {
+                                                            com.dxcar.launcher.DxCarApp.instance?.preferences?.update { cur ->
+                                                                cur.copy(customNavShortcuts = cur.customNavShortcuts.filterNot { it.id == sc.id })
+                                                            }
+                                                        },
+                                                        modifier = Modifier.size(26.dp)
+                                                    ) {
+                                                        Icon(Icons.Rounded.DeleteOutline, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
+                                                    }
+                                                }
+                                            }
+
+                                            // Add new custom shortcut row
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                OutlinedTextField(
+                                                    value = newCustomLabel,
+                                                    onValueChange = { newCustomLabel = it },
+                                                    singleLine = true,
+                                                    placeholder = { Text(str("名稱", "名称", "Name", "名称"), fontSize = 11.sp) },
+                                                    modifier = Modifier.width(86.dp)
+                                                )
+                                                OutlinedTextField(
+                                                    value = newCustomAddr,
+                                                    onValueChange = { newCustomAddr = it },
+                                                    singleLine = true,
+                                                    placeholder = { Text(str("新增自訂導航地址…", "新增自定义导航地址…", "New shortcut address…", "新しい住所…"), fontSize = 11.sp) },
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Button(
+                                                    onClick = {
+                                                        val addr = newCustomAddr.trim()
+                                                        if (addr.isNotBlank()) {
+                                                            val lbl = newCustomLabel.trim().ifBlank { addr.take(6) }
+                                                            com.dxcar.launcher.DxCarApp.instance?.preferences?.update { cur ->
+                                                                cur.copy(
+                                                                    customNavShortcuts = cur.customNavShortcuts + com.dxcar.launcher.data.NavAddressShortcut(
+                                                                        label = lbl,
+                                                                        address = addr
+                                                                    )
+                                                                )
+                                                            }
+                                                            newCustomLabel = ""
+                                                            newCustomAddr = ""
+                                                        }
+                                                    },
+                                                    shape = RoundedCornerShape(10.dp)
+                                                ) {
+                                                    Text("＋", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.End
+                                            ) {
+                                                Button(
+                                                    onClick = {
+                                                        com.dxcar.launcher.DxCarApp.instance?.preferences?.update { cur ->
+                                                            cur.copy(
+                                                                homeShortcutLabel = editHomeLabel.trim(),
+                                                                homeAddress = editHomeAddr.trim(),
+                                                                workShortcutLabel = editWorkLabel.trim(),
+                                                                workAddress = editWorkAddr.trim()
+                                                            )
+                                                        }
+                                                        showNavShortcutEditor = false
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                                    shape = RoundedCornerShape(10.dp)
+                                                ) {
+                                                    Text(str("儲存快捷鍵設定", "保存快捷键设置", "Save Shortcuts", "設定を保存"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                                 if (builtInNavState.errorMessage.isNotBlank()) {
@@ -1341,4 +1707,70 @@ private fun applyRouteOverlayToStyle(style: Style, navState: BuiltInNavState) {
             )
         }
     }
+}
+
+/**
+ * Attempts to read Home & Work destinations from Google Maps Launcher Shortcuts
+ * when DX-Car Launcher holds LauncherApps shortcut host permission (default Home).
+ * Returns Triple(detectedHomeAddress, detectedWorkAddress, hasShortcutHostPermission).
+ */
+private fun readGoogleMapsHomeWorkShortcuts(context: Context): Triple<String?, String?, Boolean> {
+    val launcherApps = context.getSystemService(LauncherApps::class.java)
+        ?: return Triple(null, null, false)
+    val hasPerm = runCatching { launcherApps.hasShortcutHostPermission() }.getOrDefault(false)
+    if (!hasPerm) return Triple(null, null, false)
+
+    var detectedHome: String? = null
+    var detectedWork: String? = null
+
+    runCatching {
+        val query = LauncherApps.ShortcutQuery()
+            .setPackage("com.google.android.apps.maps")
+            .setQueryFlags(
+                LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or
+                    LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED or
+                    LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST
+            )
+        val shortcuts = launcherApps.getShortcuts(query, Process.myUserHandle()).orEmpty()
+        for (sc in shortcuts) {
+            val labelText = "${sc.shortLabel ?: ""} ${sc.longLabel ?: ""} ${sc.id}".lowercase()
+            val uriStr = sc.intent?.dataString.orEmpty()
+            val extracted = extractMapsShortcutDestination(uriStr)
+                ?: sc.intent?.getStringExtra("q")?.trim()?.takeIf { it.isNotBlank() }
+                ?: sc.intent?.getStringExtra("daddr")?.trim()?.takeIf { it.isNotBlank() }
+            if (extracted.isNullOrBlank()) continue
+
+            val isHome = labelText.contains("home") || labelText.contains("住家") ||
+                labelText.contains("回家") || labelText.contains("自宅")
+            val isWork = labelText.contains("work") || labelText.contains("公司") ||
+                labelText.contains("上班") || labelText.contains("職場") || labelText.contains("勤務")
+
+            if (isHome && detectedHome.isNullOrBlank() && !isGenericHomeWorkWord(extracted)) {
+                detectedHome = extracted
+            } else if (isWork && detectedWork.isNullOrBlank() && !isGenericHomeWorkWord(extracted)) {
+                detectedWork = extracted
+            }
+        }
+    }
+
+    return Triple(detectedHome, detectedWork, true)
+}
+
+private fun extractMapsShortcutDestination(rawUri: String): String? {
+    if (rawUri.isBlank()) return null
+    return runCatching {
+        val uri = Uri.parse(rawUri)
+        val q = uri.getQueryParameter("q") ?: uri.getQueryParameter("daddr")
+        if (!q.isNullOrBlank()) return@runCatching q.trim()
+        if (rawUri.startsWith("google.navigation:", ignoreCase = true)) {
+            val part = rawUri.substringAfter("q=", "").substringBefore("&")
+            if (part.isNotBlank()) return@runCatching Uri.decode(part).trim()
+        }
+        null
+    }.getOrNull()
+}
+
+private fun isGenericHomeWorkWord(value: String): Boolean {
+    val low = value.trim().lowercase()
+    return low in setOf("home", "work", "回家", "住家", "公司", "自宅", "職場")
 }
