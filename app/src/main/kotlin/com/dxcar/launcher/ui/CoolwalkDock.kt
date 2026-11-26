@@ -780,106 +780,123 @@ private fun BackRecentsComboButton(
 
     Box(
         contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .size(btnSize)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(CircleShape)
-            .background(
-                if (holdProgress > 0.05f) colors.accent.copy(alpha = 0.22f)
-                else colors.dockIconContainer
-            )
-            .border(
-                width = 1.2.dp,
-                color = if (holdProgress > 0.05f) colors.accent else colors.cardBorder,
-                shape = CircleShape
-            )
-            .pointerInput(Unit) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    isHolding = true
-                    var recentsTriggered = false
-                    var cancelled = false
-
-                    val timerJob = scope.launch {
-                        val startMs = System.currentTimeMillis()
-                        val targetMs = 2500L
-                        while (true) {
-                            val elapsed = System.currentTimeMillis() - startMs
-                            val progress = (elapsed.toFloat() / targetMs.toFloat()).coerceIn(0f, 1f)
-                            holdProgress = progress
-                            if (elapsed >= targetMs) {
-                                recentsTriggered = true
-                                isHolding = false
-                                holdProgress = 0f
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                currentOnRecentsClick()
-                                break
-                            }
-                            delay(24L)
-                        }
-                    }
-
-                    val startPos = down.position
-                    val maxMoveSq = (size.width * 1.35f) * (size.width * 1.35f)
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Main)
-                        val change = event.changes.firstOrNull { it.id == down.id } ?: event.changes.firstOrNull()
-                        if (change == null) {
-                            cancelled = true
-                            break
-                        }
-                        val dx = change.position.x - startPos.x
-                        val dy = change.position.y - startPos.y
-                        if (dx * dx + dy * dy > maxMoveSq) {
-                            cancelled = true
-                            break
-                        }
-                        if (change.changedToUpIgnoreConsumed() || event.changes.all { !it.pressed }) {
-                            change.consume()
-                            break
-                        }
-                    }
-
-                    timerJob.cancel()
-                    isHolding = false
-                    holdProgress = 0f
-                    if (!cancelled && !recentsTriggered) {
-                        currentOnBackClick()
-                    }
-                }
-            }
+        modifier = Modifier.size(btnSize)
     ) {
         if (holdProgress > 0f) {
-            Canvas(modifier = Modifier.fillMaxSize().padding(2.dp)) {
-                drawArc(
-                    color = colors.accent,
-                    startAngle = -90f,
-                    sweepAngle = 360f * holdProgress,
-                    useCenter = false,
-                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+            Canvas(
+                modifier = Modifier
+                    .size(btnSize * 2.1f)
+                    .graphicsLayer { clip = false }
+            ) {
+                val maxRadius = size.minDimension * (0.42f + 0.56f * holdProgress)
+                val coreAlpha = (0.32f + 0.52f * holdProgress).coerceIn(0f, 0.85f)
+                drawCircle(
+                    brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                        colors = listOf(
+                            colors.accent.copy(alpha = coreAlpha),
+                            colors.accent.copy(alpha = coreAlpha * 0.45f),
+                            Color.Transparent
+                        ),
+                        center = center,
+                        radius = maxRadius
+                    ),
+                    radius = maxRadius,
+                    center = center
                 )
             }
         }
 
-        val showRecentsMorph = holdProgress >= 0.35f
-        Box(contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = if (showRecentsMorph) Icons.Rounded.Layers else Icons.AutoMirrored.Rounded.ArrowBack,
-                contentDescription = str("點一下返回 · 長按 2.5 秒進入多工", "点一下返回 · 长按 2.5 秒进入多任务", "Tap for Back · Hold 2.5s for Recents", "タップで戻る・2.5秒長押しで履歴"),
-                tint = if (showRecentsMorph) colors.accent else colors.primaryText,
-                modifier = Modifier.size(if (compact) 18.dp else 20.dp)
-            )
-            if (!showRecentsMorph) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .size(7.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(colors.accent.copy(alpha = 0.85f))
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(btnSize)
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                }
+                .clip(CircleShape)
+                .background(
+                    if (holdProgress > 0.05f) colors.accent.copy(alpha = 0.20f + 0.32f * holdProgress)
+                    else colors.dockIconContainer
                 )
+                .border(
+                    width = if (holdProgress > 0.05f) 1.8.dp else 1.2.dp,
+                    color = if (holdProgress > 0.05f) colors.accent else colors.cardBorder,
+                    shape = CircleShape
+                )
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        isHolding = true
+                        var recentsTriggered = false
+                        var cancelled = false
+
+                        val timerJob = scope.launch {
+                            val startMs = System.currentTimeMillis()
+                            val targetMs = 2000L
+                            while (true) {
+                                val elapsed = System.currentTimeMillis() - startMs
+                                val progress = (elapsed.toFloat() / targetMs.toFloat()).coerceIn(0f, 1f)
+                                holdProgress = progress
+                                if (elapsed >= targetMs) {
+                                    recentsTriggered = true
+                                    isHolding = false
+                                    holdProgress = 0f
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    currentOnRecentsClick()
+                                    break
+                                }
+                                delay(24L)
+                            }
+                        }
+
+                        val startPos = down.position
+                        val maxMoveSq = (size.width * 1.35f) * (size.width * 1.35f)
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Main)
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: event.changes.firstOrNull()
+                            if (change == null) {
+                                cancelled = true
+                                break
+                            }
+                            val dx = change.position.x - startPos.x
+                            val dy = change.position.y - startPos.y
+                            if (dx * dx + dy * dy > maxMoveSq) {
+                                cancelled = true
+                                break
+                            }
+                            if (change.changedToUpIgnoreConsumed() || event.changes.all { !it.pressed }) {
+                                change.consume()
+                                break
+                            }
+                        }
+
+                        timerJob.cancel()
+                        isHolding = false
+                        holdProgress = 0f
+                        if (!cancelled && !recentsTriggered) {
+                            currentOnBackClick()
+                        }
+                    }
+                }
+        ) {
+            val showRecentsMorph = holdProgress >= 0.35f
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = if (showRecentsMorph) Icons.Rounded.Layers else Icons.AutoMirrored.Rounded.ArrowBack,
+                    contentDescription = str("點一下返回 · 長按 2 秒進入多工", "点一下返回 · 长按 2 秒进入多任务", "Tap for Back · Hold 2s for Recents", "タップで戻る・2秒長押しで履歴"),
+                    tint = if (showRecentsMorph) colors.accent else colors.primaryText,
+                    modifier = Modifier.size(if (compact) 18.dp else 20.dp)
+                )
+                if (!showRecentsMorph) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(7.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(colors.accent.copy(alpha = 0.85f))
+                    )
+                }
             }
         }
     }
