@@ -75,7 +75,7 @@ private fun RootHelperScreen() {
             config = config.copy(otaInterceptedPackage = otaCandidates.first())
             RootHelperConfigStore.save(context, config)
         }
-        val upd = HelperAutoUpdater.checkForUpdate("1.0.0")
+        val upd = HelperAutoUpdater.checkForUpdate("1.0.1")
         updateInfo = upd
         if (upd != null && upd.hasUpdate) {
             busyMessage = "偵測到新版本 v${upd.latestVersion}，自動下載中..."
@@ -97,7 +97,7 @@ private fun RootHelperScreen() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text(
-            text = "DX-Car Root 輔助工具 v1.0.0",
+            text = "DX-Car Root 輔助工具 v1.0.1",
             color = Color.White,
             fontSize = 22.sp,
             fontWeight = FontWeight.Bold
@@ -134,7 +134,7 @@ private fun RootHelperScreen() {
                 OutlinedButton(onClick = {
                     scope.launch {
                         busyMessage = "檢查 GitHub 更新中..."
-                        val upd = HelperAutoUpdater.checkForUpdate("1.0.0")
+                        val upd = HelperAutoUpdater.checkForUpdate("1.0.1")
                         updateInfo = upd
                         busyMessage = when {
                             upd == null -> "無法連線 GitHub 檢查更新"
@@ -142,7 +142,7 @@ private fun RootHelperScreen() {
                                 busyMessage = "發現新版本 v${upd.latestVersion}，自動下載中..."
                                 HelperAutoUpdater.downloadAndInstall(context, upd)
                             }
-                            else -> "目前已是最新版 v1.0.0（GitHub：dx9901mk5/DX-Car-Launcher）"
+                            else -> "目前已是最新版 v1.0.1（GitHub：dx9901mk5/DX-Car-Launcher）"
                         }
                     }
                 }) {

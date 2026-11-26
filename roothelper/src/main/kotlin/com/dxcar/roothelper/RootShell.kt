@@ -35,9 +35,27 @@ data class Display60HzReport(
 )
 
 object RootShell {
+    private val SU_CANDIDATES = listOf(
+        "/product/bin/su",
+        "/system/bin/su",
+        "/system/xbin/su",
+        "/sbin/su",
+        "/debug_ramdisk/su",
+        "su"
+    )
+
+    private fun resolveSuBinary(): String {
+        for (path in SU_CANDIDATES) {
+            if (path == "su") return path
+            if (File(path).exists()) return path
+        }
+        return "su"
+    }
+
     suspend fun execSu(command: String, timeoutSec: Long = 5L): ShellResult = withContext(Dispatchers.IO) {
+        val suBin = resolveSuBinary()
         runCatching {
-            val process = ProcessBuilder("su", "-c", command)
+            val process = ProcessBuilder(suBin, "-c", command)
                 .redirectErrorStream(false)
                 .start()
             val finished = process.waitFor(timeoutSec, TimeUnit.SECONDS)
