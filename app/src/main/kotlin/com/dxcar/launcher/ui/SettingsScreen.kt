@@ -550,8 +550,8 @@ fun SettingsScreen(
                                                                 Spacer(Modifier.width(3.dp))
                                                             }
                                                             Text(
-                                                                text = if (hasRootHelper) str("已偵測輔助 App", "已检测辅助 App", "Helper Ready", "補助検出済")
-                                                                else str("需安裝輔助 APK", "需安装辅助 APK", "Needs Helper APK", "補助APK必要"),
+                                                                text = if (hasRootHelper) str("已偵測擴充 App", "已检测扩展 App", "Helper Ready", "拡張検出済")
+                                                                else str("需安裝擴充 APK", "需安装扩展 APK", "Needs Helper APK", "拡張APK必要"),
                                                                 color = if (hasRootHelper) colors.accent else colors.secondaryText,
                                                                 fontSize = 10.sp,
                                                                 fontWeight = FontWeight.SemiBold
@@ -572,13 +572,13 @@ fun SettingsScreen(
                                                         text = if (hasRootHelper) {
                                                             val ratioPct = ((planBConfig?.ui2SplitRatio ?: 0.50f) * 100).roundToInt()
                                                             str(
-                                                                "開啟 Root 輔助 App 客製化方案 B (UI2 $ratioPct:${100 - ratioPct})",
-                                                                "打开 Root 辅助 App 定制方案 B (UI2 $ratioPct:${100 - ratioPct})",
-                                                                "Open Root Helper for Plan B (UI2 $ratioPct:${100 - ratioPct})",
-                                                                "Root補助アプリでプランB設定"
+                                                                "開啟擴充輔助 App 客製化方案 B (UI2 $ratioPct:${100 - ratioPct})",
+                                                                "打开扩展辅助 App 定制方案 B (UI2 $ratioPct:${100 - ratioPct})",
+                                                                "Open Helper App for Plan B (UI2 $ratioPct:${100 - ratioPct})",
+                                                                "拡張アプリでプランB設定"
                                                             )
                                                         } else {
-                                                            str("前往 GitHub 下載輔助 APK", "前往 GitHub 下载辅助 APK", "Download Helper APK on GitHub", "GitHubで補助APK取得")
+                                                            str("前往 GitHub 下載擴充輔助 APK", "前往 GitHub 下载扩展辅助 APK", "Download Helper APK on GitHub", "GitHubで拡張APK取得")
                                                         },
                                                         fontSize = 11.sp
                                                     )

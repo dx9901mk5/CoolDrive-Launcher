@@ -183,10 +183,10 @@ object DxCarI18n {
             "プラン C：指定ナビアプリ＋大型アルバムアート音楽"
         )
         HomeExperimentMode.PLAN_D_ROOT_RESERVED -> str(
-            "方案 B：Root 特權進階模式（預留給已 Root 車機）",
-            "方案 B：Root 特权进阶模式（预留给已 Root 车机）",
-            "Plan B: Root Privilege Mode (Reserved for Rooted Devices)",
-            "プラン B：Root 特権モード（Root 済み車載機向け予約）"
+            "方案 B：進階雙窗擴充模式",
+            "方案 B：进阶双窗扩展模式",
+            "Plan B: Advanced Split Companion Mode",
+            "プラン B：拡張分割モード"
         )
     }
 
@@ -212,10 +212,10 @@ object DxCarI18n {
             "左側 70% に任意のナビアプリ、右側 30% に大型ジャケット・天気・6ショートカットを配置"
         )
         HomeExperimentMode.PLAN_D_ROOT_RESERVED -> str(
-            "預留給已取得 Root (su) 權限的車機開發中；一般未 Root 車機可完整使用方案 A",
-            "预留给已获取 Root (su) 权限的车机开发中；一般未 Root 车机可完整使用方案 A",
-            "Reserved for already-rooted AI Box devices (su); non-rooted devices use Plan A normally",
-            "Root (su) 権限取得済みの車載機向けに予約中（通常端末はプラン A を利用可能）"
+            "偵測到獨立「DX-Car 擴充輔助 App」即自動解鎖，支援客製 UI 1/2 比例與進階顯示（設定於擴充輔助 App 編輯）",
+            "检测到独立「DX-Car 扩展辅助 App」即自动解锁，支持定制 UI 1/2 比例与进阶显示（设置于扩展辅助 App 编辑）",
+            "Unlocks automatically when the standalone DX-Car Companion Helper app is installed (customized in the helper app)",
+            "独立した「DX-Car 拡張補助アプリ」を検出すると自動解放されます（設定は拡張アプリ側で編集）"
         )
     }
 

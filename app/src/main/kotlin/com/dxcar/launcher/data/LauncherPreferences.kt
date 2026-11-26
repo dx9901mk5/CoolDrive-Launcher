@@ -83,9 +83,9 @@ enum class HomeExperimentMode(
         showInSettings = false
     ),
     PLAN_D_ROOT_RESERVED(
-        shortTitleZh = "方案 B（Root）",
-        titleZh = "方案 B：Root 輔助進階模式",
-        descZh = "偵測到獨立「DX-Car Root 輔助 App」即自動解鎖，支援客製 UI 1/2 分屏、60Hz 與 OTA 攔截（設定於輔助 App 編輯）",
+        shortTitleZh = "方案 B（擴充）",
+        titleZh = "方案 B：進階雙窗擴充模式",
+        descZh = "偵測到獨立「DX-Car 擴充輔助 App」即自動解鎖，支援客製 UI 1/2 比例與進階顯示（設定於輔助 App 編輯）",
         isAvailable = false,
         showInSettings = true
     );
