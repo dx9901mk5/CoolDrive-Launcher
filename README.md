@@ -98,6 +98,14 @@ Follow these **3 steps** to join the closed test and install directly from Googl
 6. **授權方案**
    - 提供 **7 天全功能免費試用**；試用期滿後可於 Google Play 一次買斷（`NT$500`）永久解鎖全部功能，無任何月費訂閱。
 
+7. **DX-Car Root 輔助 App（`com.dxcar.roothelper`，GitHub 獨立下載）**
+   - **Play 合規分拆**：主啟動器不含任何 `su` 程式碼；已 Root 車機安裝輔助 App 後，主啟動器即自動解鎖「方案 B」。
+   - **GitHub 自動更新**：輔助 App 內建檢查 GitHub Releases 新版並自動下載／透過 Root 自動更新安裝。
+   - **一鍵診斷 Log 寄送**：蒐集車機 `display`、`SurfaceFlinger`、`containers`、`sudingConfig.ini`、`OTA` 套件與 `logcat`，一鍵寄送 Gmail 至 `dx9901mk5@gmail.com`。
+   - **60Hz / 60fps 可行性判讀**：自動檢測車機顯示與投屏參數並提示是否可行，可行才開放套用 60Hz 更新率。
+   - **方案 B 介面客製化**：維持 `0 / 1 / 2` 三介面（UI 0 小工具、UI 1 70% 原生 Google 地圖/導航王 + 30% 媒體、UI 2 50:50 可長壓調整比例／點兩下左右互換），並支援 Dock 常駐釘選時 UI 0/1/2 整體右移不重疊。
+   - **原廠 OTA App 攔截**：自動判讀（可手動改選）並隱藏停用原廠 OTA App，協助保留 Root 進行車機升級。
+
 ---
 
 ## 🇺🇸 English Documentation
@@ -126,6 +134,14 @@ Follow these **3 steps** to join the closed test and install directly from Googl
 
 6. **Licensing**
    - Includes a **7-day full-feature free trial**, followed by a single one-time lifetime unlock via Google Play Billing (no recurring subscription).
+
+7. **DX-Car Root Helper App (`com.dxcar.roothelper`, Standalone GitHub APK)**
+   - **Play-Compliant Split Architecture**: The Play Store launcher contains zero `su` code. Installing the standalone Root Helper APK on a rooted head unit unlocks Plan B in the launcher.
+   - **Automatic GitHub Self-Update**: Automatically checks GitHub Releases for newer helper versions and downloads/installs them (via `su` or package installer).
+   - **One-Tap Diagnostic Log to Gmail**: Collects `display`, `SurfaceFlinger`, `containers`, `sudingConfig.ini`, OEM OTA packages, and `logcat` into a report and sends it via Gmail to `dx9901mk5@gmail.com`.
+   - **60Hz / 60fps Feasibility Check**: Probes head-unit display/SurfaceFlinger modes and advises whether 60Hz forcing is feasible before enabling it.
+   - **Plan B UI Customization**: Preserves Pages `0 / 1 / 2` (Page 0 widgets, Page 1 70% native Google Maps/NaviKing + 30% media, Page 2 50:50 split with long-press divider resize & double-tap swap) with non-overlapping right-shifted pinned Dock support.
+   - **OEM OTA Interception**: Auto-detects (or lets you pick) the OEM OTA app, disables/hides it upon confirmation, and prepares root-preserving upgrades.
 
 ---
 
