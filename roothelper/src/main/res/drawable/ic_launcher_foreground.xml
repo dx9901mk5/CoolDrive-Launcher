@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer modern shield silhouette -->
+    <path
+        android:fillColor="#1E293B"
+        android:pathData="M54,22 L78,31 V53 C78,68 67.5,80.5 54,86 C40.5,80.5 30,68 30,53 V31 Z"
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="3.2" />
+    <!-- Split-screen dual-window emblem inside shield -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M38,40 C38,38.3 39.3,37 41,37 H55 C56.7,37 58,38.3 58,40 V63 C58,64.7 56.7,66 55,66 H41 C39.3,66 38,64.7 38,63 Z" />
+    <path
+        android:fillColor="#34D399"
+        android:pathData="M61,40 C61,38.3 62.3,37 64,37 H67 C68.7,37 70,38.3 70,40 V50 C70,51.7 68.7,53 67,53 H64 C62.3,53 61,51.7 61,50 Z" />
+    <path
+        android:fillColor="#60A5FA"
+        android:pathData="M61,57 C61,55.3 62.3,54 64,54 H67 C68.7,54 70,55.3 70,57 V63 C70,64.7 68.7,66 67,66 H64 C62.3,66 61,64.7 61,63 Z" />
+    <!-- Subtle navigation chevron inside left primary pane -->
+    <path
+        android:fillColor="#0F172A"
+        android:pathData="M48,44 L54,58 L48,55 L42,58 Z" />
+</vector>

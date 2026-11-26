@@ -7,7 +7,8 @@
 
     <application
         android:allowBackup="true"
-        android:icon="@android:drawable/ic_menu_manage"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="DX-Car Root 輔助"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
