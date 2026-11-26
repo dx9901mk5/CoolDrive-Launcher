@@ -28,6 +28,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -134,6 +136,7 @@ class PersistentDockOverlayService :
     private var cursor3DView: View? = null
     private var remoteMouseView: ComposeView? = null
     private var ytHandoffView: ComposeView? = null
+    private var planBSeamView: ComposeView? = null
 
     private var dockParams: WindowManager.LayoutParams? = null
     private var bannerParams: WindowManager.LayoutParams? = null
@@ -141,6 +144,7 @@ class PersistentDockOverlayService :
     private var cursor3DParams: WindowManager.LayoutParams? = null
     private var remoteMouseParams: WindowManager.LayoutParams? = null
     private var ytHandoffParams: WindowManager.LayoutParams? = null
+    private var planBSeamParams: WindowManager.LayoutParams? = null
 
     private val isCollapsed = MutableStateFlow(true)
     private val isPinnedOpen = MutableStateFlow(false)
@@ -197,6 +201,7 @@ class PersistentDockOverlayService :
         setupCursor3DWindow(app)
         setupRemoteMouseWindow(app)
         setupYoutubeHandoffWindow(app)
+        setupPlanBSeamWindow(app)
         observeVisibilityAndLayout(app)
     }
 
@@ -237,12 +242,14 @@ class PersistentDockOverlayService :
         removeOverlaySafe(cursor3DView)
         removeOverlaySafe(remoteMouseView)
         removeOverlaySafe(ytHandoffView)
+        removeOverlaySafe(planBSeamView)
         dockView = null
         bannerView = null
         planCPanelView = null
         cursor3DView = null
         remoteMouseView = null
         ytHandoffView = null
+        planBSeamView = null
         _is3DWindowAttached.value = false
         viewModelStore.clear()
     }
@@ -1114,6 +1121,171 @@ class PersistentDockOverlayService :
         runCatching { windowManager.addView(view, params) }
     }
 
+    private fun dispatchPlanBPageFromOverlay(app: DxCarApp, targetPage: Int) {
+        val coerced = targetPage.coerceIn(0, 2)
+        planBActivePage.value = coerced
+        onPlanBPageSyncToActivity?.invoke(coerced)
+        val cfg = app.preferences.config.value
+        val metrics = metricsFlow.value
+        val spec = CoolwalkLayoutEngine.compute(
+            metrics = metrics,
+            dockMode = cfg.dockPositionMode,
+            rightHandDrive = cfg.rightHandDrive,
+            customPrimaryRatio = cfg.primarySplitRatio
+        )
+        val dockPx = (spec.dockThicknessDp * metrics.density).toInt().coerceAtLeast(0)
+        val helperCfg = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(this)
+        val ui2Ratio = if (helperCfg.planBEnabled) helperCfg.ui2SplitRatio else cfg.page2SplitRatio
+        if (coerced == 0) {
+            bringDxCarToFront(null)
+        }
+        com.dxcar.launcher.system.RootHelperBridge.applyPlanBPage(
+            context = this,
+            page = coerced,
+            screenWidth = metrics.widthPx,
+            screenHeight = metrics.heightPx,
+            dockOffsetLeft = if (spec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0,
+            dockOffsetRight = if (spec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
+            dockOffsetTop = if (spec.dockPlacement == ResolvedDockPlacement.TOP) dockPx else 0,
+            dockOffsetBottom = if (spec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0,
+            ui1Ratio = spec.primaryWeight,
+            ui2Ratio = ui2Ratio,
+            ui2Swapped = cfg.page2Swapped
+        )
+    }
+
+    private fun setupPlanBSeamWindow(app: DxCarApp) {
+        val params = createOverlayParams(
+            width = WindowManager.LayoutParams.WRAP_CONTENT,
+            height = WindowManager.LayoutParams.WRAP_CONTENT,
+            gravity = Gravity.TOP or Gravity.START
+        )
+        val view = ComposeView(this).apply {
+            setViewTreeLifecycleOwner(this@PersistentDockOverlayService)
+            setViewTreeSavedStateRegistryOwner(this@PersistentDockOverlayService)
+            setViewTreeViewModelStoreOwner(this@PersistentDockOverlayService)
+            setContent {
+                val config by app.preferences.config.collectAsState()
+                val activePage by planBActivePage.collectAsState()
+                val metrics by metricsFlow.collectAsState()
+                val haptic = LocalHapticFeedback.current
+                var isRatioDragging by remember { mutableStateOf(false) }
+                var liveRatio by remember(config.page2SplitRatio) { mutableStateOf(config.page2SplitRatio) }
+
+                val labelText = when {
+                    isRatioDragging -> {
+                        val l = (liveRatio * 100).toInt()
+                        "$l:${100 - l}"
+                    }
+                    activePage == 1 -> "1/3"
+                    else -> "2/3"
+                }
+
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .width(34.dp)
+                        .height(110.dp)
+                        .pointerInput(activePage, config.page2Swapped) {
+                            detectTapGestures(
+                                onDoubleTap = {
+                                    if (activePage == 2) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        app.preferences.update { it.copy(page2Swapped = !it.page2Swapped) }
+                                        dispatchPlanBPageFromOverlay(app, 2)
+                                    }
+                                }
+                            )
+                        }
+                        .pointerInput(activePage, metrics.widthPx) {
+                            if (activePage == 2) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        val helperCfg = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(this@PersistentDockOverlayService)
+                                        liveRatio = if (helperCfg.planBEnabled) helperCfg.ui2SplitRatio else config.page2SplitRatio
+                                        isRatioDragging = true
+                                    },
+                                    onDrag = { change, dragAmount ->
+                                        change.consume()
+                                        val availW = (metrics.widthPx * 0.90f).coerceAtLeast(480f)
+                                        liveRatio = (liveRatio + (dragAmount.x / availW)).coerceIn(0.25f, 0.75f)
+                                    },
+                                    onDragEnd = {
+                                        isRatioDragging = false
+                                        val finalR = liveRatio
+                                        app.preferences.update { it.copy(page2SplitRatio = finalR) }
+                                        com.dxcar.launcher.system.RootHelperBridge.updateUi2Ratio(this@PersistentDockOverlayService, finalR)
+                                        dispatchPlanBPageFromOverlay(app, 2)
+                                    },
+                                    onDragCancel = {
+                                        isRatioDragging = false
+                                    }
+                                )
+                            }
+                        }
+                        .pointerInput(activePage) {
+                            var accumDx = 0f
+                            detectHorizontalDragGestures(
+                                onDragStart = { accumDx = 0f },
+                                onHorizontalDrag = { change, dragAmount ->
+                                    if (!isRatioDragging) {
+                                        change.consume()
+                                        accumDx += dragAmount
+                                    }
+                                },
+                                onDragEnd = {
+                                    if (!isRatioDragging) {
+                                        val thresholdPx = 42f * density
+                                        when {
+                                            accumDx > thresholdPx -> {
+                                                val prev = if (activePage == 2) 1 else 0
+                                                dispatchPlanBPageFromOverlay(app, prev)
+                                            }
+                                            accumDx < -thresholdPx -> {
+                                                val next = if (activePage == 1) 2 else 0
+                                                dispatchPlanBPageFromOverlay(app, next)
+                                            }
+                                        }
+                                    }
+                                    accumDx = 0f
+                                }
+                            )
+                        }
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(androidx.compose.ui.graphics.Color(0xCC101828))
+                            .border(1.2.dp, androidx.compose.ui.graphics.Color(0x9964B5F6), RoundedCornerShape(14.dp))
+                            .padding(horizontal = 5.dp, vertical = 10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(4.dp)
+                                .height(26.dp)
+                                .clip(CircleShape)
+                                .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.85f))
+                        )
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            text = labelText,
+                            color = androidx.compose.ui.graphics.Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+        planBSeamView = view
+        planBSeamParams = params
+        view.visibility = View.GONE
+        runCatching { windowManager.addView(view, params) }
+    }
+
     private fun isYoutubeAppInForeground(): Boolean {
         val acc = DxCarAccessibilityService.instance
         if (acc?.isPackageInForegroundWindow("com.google.android.youtube") == true) {
@@ -1215,7 +1387,11 @@ class PersistentDockOverlayService :
             ) { config, isHomeFg, collapsed, metrics, fgPkg ->
                 FiveState(config, isHomeFg, collapsed, metrics, fgPkg)
             }.collect { (config, isHomeFg, collapsed, metrics, fgPkg) ->
-                if (lastHomeForeground && !isHomeFg) {
+                val isPlanBMode = config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED
+                if (isPlanBMode) {
+                    isPinnedOpen.value = true
+                    isCollapsed.value = false
+                } else if (lastHomeForeground && !isHomeFg) {
                     if (config.overlayAutoCollapseEnabled && !isPinnedOpen.value) {
                         isCollapsed.value = true
                     } else if (!config.overlayAutoCollapseEnabled) {
@@ -1223,6 +1399,10 @@ class PersistentDockOverlayService :
                     }
                 }
                 lastHomeForeground = isHomeFg
+
+                val isSensitiveDialogFg = fgPkg == "com.topjohnwu.magisk" ||
+                    fgPkg.contains("packageinstaller", ignoreCase = true) ||
+                    fgPkg.contains("permissioncontroller", ignoreCase = true)
 
                 val isPhoneScreen = DeviceFormFactor.isCompactPhoneScreen(resources.configuration)
                 val otherLauncherPkgs = app.installedAppsRepository.homeLaunchers.value
@@ -1233,6 +1413,7 @@ class PersistentDockOverlayService :
 
                 val showDock = config.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
                     !isPhoneScreen &&
+                    !isSensitiveDialogFg &&
                     config.persistentOverlayDockEnabled &&
                     !isHomeFg &&
                     (config.overlayDockOnOtherLaunchers || !onAnotherLauncher)
@@ -1341,8 +1522,14 @@ class PersistentDockOverlayService :
             while (true) {
                 val cfg = app.preferences.config.value
                 val isHomeFg = app.isLauncherForeground.value
+                val curFg = DxCarAccessibilityService.foregroundPackage.value
+                val sensitiveFg = curFg == "com.topjohnwu.magisk" ||
+                    curFg.contains("packageinstaller", ignoreCase = true) ||
+                    curFg.contains("permissioncontroller", ignoreCase = true)
                 val showYtHandoff = !isHomeFg &&
+                    !sensitiveFg &&
                     cfg.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
+                    cfg.homeExperimentMode != HomeExperimentMode.PLAN_D_ROOT_RESERVED &&
                     (cfg.ytHandoffAlwaysVisible || isYoutubeAppInForeground())
                 val view = ytHandoffView
                 if (view != null) {
@@ -1383,40 +1570,47 @@ class PersistentDockOverlayService :
                 app.isLauncherForeground,
                 planCPanelRequested,
                 planCPanelMinimized,
-                metricsFlow
-            ) { config, isHomeFg, requested, minimized, metrics ->
-                Triple(config, isHomeFg, Triple(requested, minimized, metrics))
-            }.collect { (config, isHomeFg, state) ->
-                val (requested, minimized, metrics) = state
-                val showPlanCPanel = requested &&
-                    !isHomeFg &&
+                combine(metricsFlow, planBActivePage, DxCarAccessibilityService.foregroundPackage) { m, p, f -> Triple(m, p, f) }
+            ) { config, isHomeFg, requested, minimized, mpf ->
+                FiveState(config, isHomeFg, requested, minimized, mpf)
+            }.collect { (config, isHomeFg, requested, minimized, mpf) ->
+                val (metrics, activePlanBPage, fgPkg) = mpf
+                val sensitiveFg = fgPkg == "com.topjohnwu.magisk" ||
+                    fgPkg.contains("packageinstaller", ignoreCase = true) ||
+                    fgPkg.contains("permissioncontroller", ignoreCase = true)
+                val isPlanB = config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED
+                val showPlanCPanel = !isHomeFg &&
+                    !sensitiveFg &&
                     config.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
-                    config.homeExperimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA &&
-                    config.planCOverlayMusicPanelEnabled
+                    (
+                        (requested && config.homeExperimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA && config.planCOverlayMusicPanelEnabled) ||
+                            (isPlanB && activePlanBPage == 1)
+                        )
+
+                val spec = CoolwalkLayoutEngine.compute(
+                    metrics = metrics,
+                    dockMode = config.dockPositionMode,
+                    rightHandDrive = config.rightHandDrive,
+                    customPrimaryRatio = config.primarySplitRatio
+                )
+                val dockPx = if (!spec.dockPlacement.isHorizontalBar) {
+                    (spec.dockThicknessDp * metrics.density).toInt()
+                } else 0
+                val availW = (metrics.widthPx - dockPx).coerceAtLeast(480)
 
                 val view = planCPanelView
                 val params = planCPanelParams
                 if (view != null && params != null) {
                     view.visibility = if (showPlanCPanel) View.VISIBLE else View.GONE
                     if (showPlanCPanel) {
-                        val spec = CoolwalkLayoutEngine.compute(
-                            metrics = metrics,
-                            dockMode = config.dockPositionMode,
-                            rightHandDrive = config.rightHandDrive,
-                            customPrimaryRatio = config.primarySplitRatio
-                        )
-                        val dockPx = if (!spec.dockPlacement.isHorizontalBar) {
-                            (spec.dockThicknessDp * metrics.density).roundToInt()
-                        } else 0
-                        val availW = (metrics.widthPx - dockPx).coerceAtLeast(480)
-                        val panelW = (availW * (1f - spec.primaryWeight)).roundToInt().coerceIn(260, (availW * 0.45f).roundToInt())
+                        val panelW = (availW * (1f - spec.primaryWeight)).toInt().coerceIn(260, (availW * 0.45f).toInt())
 
                         params.gravity = if (config.rightHandDrive) {
                             Gravity.START or Gravity.CENTER_VERTICAL
                         } else {
                             Gravity.END or Gravity.CENTER_VERTICAL
                         }
-                        if (minimized) {
+                        if (minimized && !isPlanB) {
                             params.width = WindowManager.LayoutParams.WRAP_CONTENT
                             params.height = WindowManager.LayoutParams.WRAP_CONTENT
                         } else {
@@ -1424,6 +1618,28 @@ class PersistentDockOverlayService :
                             params.height = WindowManager.LayoutParams.MATCH_PARENT
                         }
                         runCatching { windowManager.updateViewLayout(view, params) }
+                    }
+                }
+
+                // Position Plan B Seam Handle on UI 1 and UI 2
+                val seamV = planBSeamView
+                val seamP = planBSeamParams
+                val showSeam = isPlanB && !isHomeFg && !sensitiveFg && (activePlanBPage == 1 || activePlanBPage == 2)
+                if (seamV != null && seamP != null) {
+                    seamV.visibility = if (showSeam) View.VISIBLE else View.GONE
+                    if (showSeam) {
+                        val helperCfg = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(this@PersistentDockOverlayService)
+                        val ratio = if (activePlanBPage == 1) {
+                            spec.primaryWeight
+                        } else {
+                            if (helperCfg.planBEnabled) helperCfg.ui2SplitRatio else config.page2SplitRatio
+                        }
+                        val leftOffset = if (spec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0
+                        val splitX = leftOffset + (availW * ratio).toInt()
+                        seamP.gravity = Gravity.TOP or Gravity.START
+                        seamP.x = (splitX - (17f * metrics.density).toInt()).coerceAtLeast(0)
+                        seamP.y = ((metrics.heightPx - (110f * metrics.density).toInt()) / 2).coerceAtLeast(0)
+                        runCatching { windowManager.updateViewLayout(seamV, seamP) }
                     }
                 }
             }
@@ -1514,6 +1730,8 @@ class PersistentDockOverlayService :
         private val planCPanelRequested = MutableStateFlow(false)
         private val _is3DWindowAttached = MutableStateFlow(false)
         val is3DWindowAttached: kotlinx.coroutines.flow.StateFlow<Boolean> = _is3DWindowAttached
+        val planBActivePage = MutableStateFlow(1)
+        var onPlanBPageSyncToActivity: ((Int) -> Unit)? = null
 
         fun start(context: Context) {
             if (!Settings.canDrawOverlays(context)) return

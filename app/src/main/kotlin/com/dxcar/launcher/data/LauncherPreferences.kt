@@ -414,7 +414,9 @@ class LauncherPreferences(context: Context) {
         var decoded = runCatching { json.decodeFromString<LauncherConfig>(raw) }
             .getOrElse { LauncherConfig() }
 
-        if (decoded.homeExperimentMode != HomeExperimentMode.PLAN_A_MULTI_LAYER) {
+        if (decoded.homeExperimentMode != HomeExperimentMode.PLAN_A_MULTI_LAYER &&
+            decoded.homeExperimentMode != HomeExperimentMode.PLAN_D_ROOT_RESERVED
+        ) {
             decoded = decoded.copy(homeExperimentMode = HomeExperimentMode.PLAN_A_MULTI_LAYER)
         }
 

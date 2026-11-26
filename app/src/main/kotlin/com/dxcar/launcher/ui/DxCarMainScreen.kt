@@ -22,6 +22,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -404,6 +405,57 @@ fun DxCarRootScreen(
             rightHandDrive = config.rightHandDrive,
             customPrimaryRatio = config.primarySplitRatio
         )
+    }
+
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        PersistentDockOverlayService.onPlanBPageSyncToActivity = { p ->
+            currentDashboardPage = p.coerceIn(0, 2)
+        }
+        onDispose {
+            PersistentDockOverlayService.onPlanBPageSyncToActivity = null
+        }
+    }
+
+    fun dispatchPlanBWindowLayout(targetPage: Int) {
+        if (!com.dxcar.launcher.system.RootHelperBridge.isRootHelperInstalled(context)) return
+        val coerced = targetPage.coerceIn(0, 2)
+        PersistentDockOverlayService.planBActivePage.value = coerced
+        PersistentDockOverlayService.start(context)
+        val dockPx = (layoutSpec.dockThicknessDp * screenMetrics.density).toInt().coerceAtLeast(0)
+        val helperCfg = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(context)
+        val effUi2Ratio = if (helperCfg.planBEnabled) helperCfg.ui2SplitRatio else config.page2SplitRatio
+        com.dxcar.launcher.system.RootHelperBridge.applyPlanBPage(
+            context = context,
+            page = coerced,
+            screenWidth = screenMetrics.widthPx,
+            screenHeight = screenMetrics.heightPx,
+            dockOffsetLeft = if (layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0,
+            dockOffsetRight = if (layoutSpec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
+            dockOffsetTop = if (layoutSpec.dockPlacement == ResolvedDockPlacement.TOP) dockPx else 0,
+            dockOffsetBottom = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0,
+            ui1Ratio = layoutSpec.primaryWeight,
+            ui2Ratio = effUi2Ratio,
+            ui2Swapped = config.page2Swapped
+        )
+    }
+
+    LaunchedEffect(isLauncherFg, destination, currentDashboardPage, config.homeExperimentMode) {
+        if (config.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
+            config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED &&
+            isLauncherFg &&
+            destination == LauncherDestination.DASHBOARD_SPLIT &&
+            com.dxcar.launcher.system.RootHelperBridge.isRootHelperInstalled(context)
+        ) {
+            PersistentDockOverlayService.planBActivePage.value = currentDashboardPage
+            if (currentDashboardPage == 1 || currentDashboardPage == 2) {
+                delay(280L)
+                if (destination == LauncherDestination.DASHBOARD_SPLIT &&
+                    config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED
+                ) {
+                    dispatchPlanBWindowLayout(currentDashboardPage)
+                }
+            }
+        }
     }
 
     val systemIsDark = isSystemInDarkTheme()
@@ -874,7 +926,13 @@ fun DxCarRootScreen(
                                         mapEngineStyle = config.mapEngineStyle,
                                         trafficEnabled = config.mapTrafficEnabled,
                                         homeMapDisplayMode = config.homeMapDisplayMode,
-                                        planCNavPackage = config.planCNavPackage,
+                                        planCNavPackage = if (config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED &&
+                                            com.dxcar.launcher.system.RootHelperBridge.isRootHelperInstalled(context)
+                                        ) {
+                                            com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(context).ui1NavPackage
+                                        } else {
+                                            config.planCNavPackage
+                                        },
                                         showSixShortcutsInMediaPanel = config.showSixShortcutsInMediaPanel,
                                         homeAddress = config.homeAddress,
                                         workAddress = config.workAddress,
@@ -954,17 +1012,21 @@ fun DxCarRootScreen(
                                             )
                                         },
                                         onLaunchPlanCFreeform = { pkg ->
-                                            launchFreeformPrimaryBox(pkg)
-                                            if (config.planCOverlayMusicPanelEnabled) {
-                                                if (Settings.canDrawOverlays(context)) {
-                                                    PersistentDockOverlayService.showPlanCMusicPanel(context)
-                                                } else {
-                                                    gestureHudText = DxCarI18n.tr(
-                                                        "請點設定最上方「權限需求」授予懸浮權限以顯示右側音樂控盤",
-                                                        "请点设置最上方「权限需求」授予悬浮权限以显示右侧音乐控盘",
-                                                        "Grant Overlay Permission in Settings > Permissions to show floating media panel",
-                                                        "右側の音楽パネルを表示するには設定上部の「必要な権限」でオーバーレイ権限を許可してください"
-                                                    )
+                                            if (config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED) {
+                                                dispatchPlanBWindowLayout(1)
+                                            } else {
+                                                launchFreeformPrimaryBox(pkg)
+                                                if (config.planCOverlayMusicPanelEnabled) {
+                                                    if (Settings.canDrawOverlays(context)) {
+                                                        PersistentDockOverlayService.showPlanCMusicPanel(context)
+                                                    } else {
+                                                        gestureHudText = DxCarI18n.tr(
+                                                            "請點設定最上方「權限需求」授予懸浮權限以顯示右側音樂控盤",
+                                                            "请点设置最上方「权限需求」授予悬浮权限以显示右侧音乐控盘",
+                                                            "Grant Overlay Permission in Settings > Permissions to show floating media panel",
+                                                            "右側の音楽パネルを表示するには設定上部の「必要な権限」でオーバーレイ権限を許可してください"
+                                                        )
+                                                    }
                                                 }
                                             }
                                         },
@@ -1048,6 +1110,17 @@ fun DxCarRootScreen(
                                         page2SplitRatio = if (planBConfig.planBEnabled) planBConfig.ui2SplitRatio else config.page2SplitRatio,
                                         onSwapPage2 = {
                                             app.preferences.update { it.copy(page2Swapped = !it.page2Swapped) }
+                                            if (config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED) {
+                                                dispatchPlanBWindowLayout(2)
+                                            }
+                                        },
+                                        onUpdatePage2Ratio = { nextRatio ->
+                                            val r = nextRatio.coerceIn(0.25f, 0.75f)
+                                            app.preferences.update { it.copy(page2SplitRatio = r) }
+                                            com.dxcar.launcher.system.RootHelperBridge.updateUi2Ratio(context, r)
+                                            if (config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED) {
+                                                dispatchPlanBWindowLayout(2)
+                                            }
                                         },
                                         location = location,
                                         activeNav = activeNav,
@@ -1963,14 +2036,17 @@ private fun DashboardSeamSwipeHandle(
     onDragEnd: () -> Unit,
     onLongPress: (() -> Unit)? = null,
     onDoubleTap: (() -> Unit)? = null,
+    onLongPressDragPx: ((Float) -> Unit)? = null,
+    onLongPressDragEnd: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalDxCarColors.current
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    var inRatioDrag by remember { mutableStateOf(false) }
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
-            .pointerInput(pageIndicator, onLongPress, onDoubleTap) {
+            .pointerInput(pageIndicator, onLongPress, onDoubleTap, onLongPressDragPx) {
                 if (onLongPress != null || onDoubleTap != null) {
                     detectTapGestures(
                         onDoubleTap = onDoubleTap?.let { cb ->
@@ -1979,11 +2055,32 @@ private fun DashboardSeamSwipeHandle(
                                 cb()
                             }
                         },
-                        onLongPress = onLongPress?.let { cb ->
+                        onLongPress = if (onLongPressDragPx == null) onLongPress?.let { cb ->
                             {
                                 haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                                 cb()
                             }
+                        } else null
+                    )
+                }
+            }
+            .pointerInput(pageIndicator, onLongPressDragPx) {
+                if (onLongPressDragPx != null) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = {
+                            inRatioDrag = true
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            onLongPressDragPx(dragAmount.x)
+                        },
+                        onDragEnd = {
+                            inRatioDrag = false
+                            onLongPressDragEnd?.invoke()
+                        },
+                        onDragCancel = {
+                            inRatioDrag = false
                         }
                     )
                 }
@@ -1991,11 +2088,17 @@ private fun DashboardSeamSwipeHandle(
             .pointerInput(pageIndicator) {
                 detectHorizontalDragGestures(
                     onHorizontalDrag = { change, dragAmount ->
-                        change.consume()
-                        onDragDelta(dragAmount)
+                        if (!inRatioDrag) {
+                            change.consume()
+                            onDragDelta(dragAmount)
+                        }
                     },
-                    onDragEnd = onDragEnd,
-                    onDragCancel = onDragEnd
+                    onDragEnd = {
+                        if (!inRatioDrag) onDragEnd()
+                    },
+                    onDragCancel = {
+                        if (!inRatioDrag) onDragEnd()
+                    }
                 )
             }
     ) {
@@ -2051,6 +2154,7 @@ private fun SecondEqualMapYoutubeDashboard(
     page2Swapped: Boolean,
     page2SplitRatio: Float,
     onSwapPage2: () -> Unit,
+    onUpdatePage2Ratio: (Float) -> Unit,
     location: com.dxcar.launcher.map.VehicleLocationState,
     activeNav: com.dxcar.launcher.comms.ActiveNavBanner?,
     builtInNavState: BuiltInNavState,
@@ -2098,7 +2202,9 @@ private fun SecondEqualMapYoutubeDashboard(
     ) {
         val gap = 16.dp
         if (isHorizontalSplit) {
-            val ratio = page2SplitRatio.coerceIn(0.25f, 0.75f)
+            var liveRatio by remember(page2SplitRatio) { mutableStateOf(page2SplitRatio.coerceIn(0.25f, 0.75f)) }
+            val ratio = liveRatio.coerceIn(0.25f, 0.75f)
+            val totalAvailPx = with(androidx.compose.ui.platform.LocalDensity.current) { (maxWidth - gap).toPx().coerceAtLeast(300f) }
             val leftPaneW = ((maxWidth - gap) * ratio).coerceAtLeast(140.dp)
             val rightPaneW = ((maxWidth - gap) - leftPaneW).coerceAtLeast(140.dp)
             val fullH = maxHeight
@@ -2166,13 +2272,19 @@ private fun SecondEqualMapYoutubeDashboard(
                 EmbeddedYoutubePlayerCard()
             }
 
-            // Center Seam Divider Line (Double-tap or Long-press to swap Left <-> Right; Drag to return to Page 1)
+            // Center Seam Divider Line (Double-tap to swap Left <-> Right; Long-press drag to resize ratio; Swipe to Page 1)
+            val pctL = (ratio * 100).toInt()
             DashboardSeamSwipeHandle(
-                pageIndicator = "2/3",
+                pageIndicator = if (kotlin.math.abs(ratio - page2SplitRatio) > 0.005f) "$pctL:${100 - pctL}" else "2/3",
                 onDragDelta = onSeamDragDelta,
                 onDragEnd = onSeamDragEnd,
-                onLongPress = onSwapPage2,
                 onDoubleTap = onSwapPage2,
+                onLongPressDragPx = { dx ->
+                    liveRatio = (liveRatio + (dx / totalAvailPx)).coerceIn(0.25f, 0.75f)
+                },
+                onLongPressDragEnd = {
+                    onUpdatePage2Ratio(liveRatio)
+                },
                 modifier = Modifier
                     .zIndex(5f)
                     .offset(x = leftPaneW + (gap / 2f) - 16.dp, y = 0.dp)
@@ -2329,7 +2441,8 @@ private fun CoolwalkSplitDashboard(
         label = "primaryWeight"
     )
     val secondaryWeight = (1f - primaryWeight).coerceAtLeast(0.24f)
-    val isPlanC = experimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA
+    val isPlanC = experimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA ||
+        experimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED
 
     val mapCardComposable: @Composable (Boolean, Modifier) -> Unit = { primary, mod ->
         Box(

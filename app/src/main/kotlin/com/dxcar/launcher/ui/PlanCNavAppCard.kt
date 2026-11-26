@@ -141,7 +141,7 @@ fun PlanCNavAppCard(
                         shape = RoundedCornerShape(14.dp)
                     ) {
                         Text(
-                            text = "方案 C · 左側真實導航 App ($ratioPct%)",
+                            text = "方案 B · 左側原生導航視窗 ($ratioPct%)",
                             color = colors.accent,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,

@@ -66,4 +66,46 @@ object RootHelperBridge {
         }
         runCatching { context.startActivity(webIntent) }
     }
+
+    fun applyPlanBPage(
+        context: Context,
+        page: Int,
+        screenWidth: Int,
+        screenHeight: Int,
+        dockOffsetLeft: Int,
+        dockOffsetRight: Int,
+        dockOffsetTop: Int,
+        dockOffsetBottom: Int,
+        ui1Ratio: Float,
+        ui2Ratio: Float,
+        ui2Swapped: Boolean
+    ): Boolean {
+        if (!isRootHelperInstalled(context)) return false
+        return runCatching {
+            val extras = android.os.Bundle().apply {
+                putInt("page", page)
+                putInt("screenWidth", screenWidth)
+                putInt("screenHeight", screenHeight)
+                putInt("dockOffsetLeft", dockOffsetLeft)
+                putInt("dockOffsetRight", dockOffsetRight)
+                putInt("dockOffsetTop", dockOffsetTop)
+                putInt("dockOffsetBottom", dockOffsetBottom)
+                putFloat("ui1Ratio", ui1Ratio)
+                putFloat("ui2Ratio", ui2Ratio)
+                putBoolean("ui2Swapped", ui2Swapped)
+            }
+            val res = context.contentResolver.call(PROVIDER_URI, "apply_plan_b_page", null, extras)
+            res?.getBoolean("ok", false) == true
+        }.getOrDefault(false)
+    }
+
+    fun updateUi2Ratio(context: Context, ratio: Float) {
+        if (!isRootHelperInstalled(context)) return
+        runCatching {
+            val extras = android.os.Bundle().apply {
+                putFloat("ratio", ratio.coerceIn(0.25f, 0.75f))
+            }
+            context.contentResolver.call(PROVIDER_URI, "update_ui2_ratio", null, extras)
+        }
+    }
 }

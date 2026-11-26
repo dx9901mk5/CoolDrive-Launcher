@@ -67,4 +67,9 @@ class RootHelperConfigProvider : ContentProvider() {
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
+
+    override fun call(method: String, arg: String?, extras: android.os.Bundle?): android.os.Bundle? {
+        val ctx = context ?: return null
+        return PlanBWindowEngine.dispatchFromProvider(ctx, method, extras)
+    }
 }
