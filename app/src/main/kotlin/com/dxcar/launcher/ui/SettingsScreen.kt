@@ -492,12 +492,17 @@ fun SettingsScreen(
                             }
                         }
 
+                        val hasRootHelper = remember { com.dxcar.launcher.system.RootHelperBridge.isRootHelperInstalled(context) }
+                        val planBConfig = remember(hasRootHelper) {
+                            if (hasRootHelper) com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(context) else null
+                        }
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             HomeExperimentMode.visibleEntries.forEach { mode ->
                                 val selected = config.homeExperimentMode == mode
+                                val effectiveAvailable = if (mode == HomeExperimentMode.PLAN_D_ROOT_RESERVED) hasRootHelper else mode.isAvailable
                                 Surface(
                                     color = when {
-                                        !mode.isAvailable -> colors.cardSurfaceElevated.copy(alpha = 0.5f)
+                                        !effectiveAvailable -> colors.cardSurfaceElevated.copy(alpha = 0.5f)
                                         selected -> colors.accent.copy(alpha = 0.18f)
                                         else -> colors.cardSurfaceElevated
                                     },
@@ -505,11 +510,11 @@ fun SettingsScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .border(
-                                            width = if (selected) 1.5.dp else 1.dp,
-                                            color = if (selected) colors.accent else colors.cardBorder,
+                                            width = if (selected && effectiveAvailable) 1.5.dp else 1.dp,
+                                            color = if (selected && effectiveAvailable) colors.accent else colors.cardBorder,
                                             shape = RoundedCornerShape(16.dp)
                                         )
-                                        .clickable(enabled = mode.isAvailable) {
+                                        .clickable(enabled = effectiveAvailable) {
                                             onUpdateConfig { it.copy(homeExperimentMode = mode) }
                                         }
                                 ) {
@@ -527,29 +532,60 @@ fun SettingsScreen(
                                             ) {
                                                 Text(
                                                     text = DxCarI18n.experimentTitle(mode),
-                                                    color = if (mode.isAvailable) colors.primaryText else colors.secondaryText,
+                                                    color = if (effectiveAvailable) colors.primaryText else colors.secondaryText,
                                                     fontSize = 14.sp,
                                                     fontWeight = FontWeight.Bold
                                                 )
-                                                if (!mode.isAvailable) {
+                                                if (mode == HomeExperimentMode.PLAN_D_ROOT_RESERVED) {
                                                     Surface(
-                                                        color = colors.cardBorder.copy(alpha = 0.6f),
+                                                        color = if (hasRootHelper) colors.accent.copy(alpha = 0.22f) else colors.cardBorder.copy(alpha = 0.6f),
                                                         shape = RoundedCornerShape(8.dp)
                                                     ) {
                                                         Row(
                                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                                             verticalAlignment = Alignment.CenterVertically
                                                         ) {
-                                                            Icon(Icons.Rounded.Lock, contentDescription = null, tint = colors.secondaryText, modifier = Modifier.size(11.dp))
-                                                            Spacer(Modifier.width(3.dp))
-                                                            Text(str("待 Root", "待 Root", "Needs Root", "Root 待ち"), color = colors.secondaryText, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                                            if (!hasRootHelper) {
+                                                                Icon(Icons.Rounded.Lock, contentDescription = null, tint = colors.secondaryText, modifier = Modifier.size(11.dp))
+                                                                Spacer(Modifier.width(3.dp))
+                                                            }
+                                                            Text(
+                                                                text = if (hasRootHelper) str("已偵測輔助 App", "已检测辅助 App", "Helper Ready", "補助検出済")
+                                                                else str("需安裝輔助 APK", "需安装辅助 APK", "Needs Helper APK", "補助APK必要"),
+                                                                color = if (hasRootHelper) colors.accent else colors.secondaryText,
+                                                                fontSize = 10.sp,
+                                                                fontWeight = FontWeight.SemiBold
+                                                            )
                                                         }
                                                     }
                                                 }
                                             }
                                             Text(DxCarI18n.experimentDesc(mode), color = colors.secondaryText, fontSize = 11.sp)
+                                            if (mode == HomeExperimentMode.PLAN_D_ROOT_RESERVED) {
+                                                Spacer(Modifier.height(6.dp))
+                                                OutlinedButton(
+                                                    onClick = { com.dxcar.launcher.system.RootHelperBridge.openHelperOrGithub(context) },
+                                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                    modifier = Modifier.height(30.dp)
+                                                ) {
+                                                    Text(
+                                                        text = if (hasRootHelper) {
+                                                            val ratioPct = ((planBConfig?.ui2SplitRatio ?: 0.50f) * 100).roundToInt()
+                                                            str(
+                                                                "開啟 Root 輔助 App 客製化方案 B (UI2 $ratioPct:${100 - ratioPct})",
+                                                                "打开 Root 辅助 App 定制方案 B (UI2 $ratioPct:${100 - ratioPct})",
+                                                                "Open Root Helper for Plan B (UI2 $ratioPct:${100 - ratioPct})",
+                                                                "Root補助アプリでプランB設定"
+                                                            )
+                                                        } else {
+                                                            str("前往 GitHub 下載輔助 APK", "前往 GitHub 下载辅助 APK", "Download Helper APK on GitHub", "GitHubで補助APK取得")
+                                                        },
+                                                        fontSize = 11.sp
+                                                    )
+                                                }
+                                            }
                                         }
-                                        if (mode.isAvailable) {
+                                        if (effectiveAvailable) {
                                             Spacer(Modifier.width(8.dp))
                                             Switch(
                                                 checked = selected,

@@ -1032,8 +1032,23 @@ fun DxCarRootScreen(
                                     )
                                 },
                                 pageTwoContent = { onSeamDragDelta, onSeamDragEnd ->
+                                    val hasRootHelper = remember(isLauncherFg) {
+                                        com.dxcar.launcher.system.RootHelperBridge.isRootHelperInstalled(context)
+                                    }
+                                    val planBConfig = remember(isLauncherFg, config.homeExperimentMode) {
+                                        if (hasRootHelper && config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED) {
+                                            com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(context)
+                                        } else {
+                                            com.dxcar.launcher.system.PlanBHelperConfig(planBEnabled = false)
+                                        }
+                                    }
                                     SecondEqualMapYoutubeDashboard(
                                         isHorizontalSplit = layoutSpec.isHorizontalSplit,
+                                        page2Swapped = config.page2Swapped,
+                                        page2SplitRatio = if (planBConfig.planBEnabled) planBConfig.ui2SplitRatio else config.page2SplitRatio,
+                                        onSwapPage2 = {
+                                            app.preferences.update { it.copy(page2Swapped = !it.page2Swapped) }
+                                        },
                                         location = location,
                                         activeNav = activeNav,
                                         builtInNavState = builtInNavState,
@@ -1947,6 +1962,7 @@ private fun DashboardSeamSwipeHandle(
     onDragDelta: (Float) -> Unit,
     onDragEnd: () -> Unit,
     onLongPress: (() -> Unit)? = null,
+    onDoubleTap: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalDxCarColors.current
@@ -1954,12 +1970,20 @@ private fun DashboardSeamSwipeHandle(
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
-            .pointerInput(pageIndicator, onLongPress) {
-                if (onLongPress != null) {
+            .pointerInput(pageIndicator, onLongPress, onDoubleTap) {
+                if (onLongPress != null || onDoubleTap != null) {
                     detectTapGestures(
-                        onLongPress = {
-                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                            onLongPress()
+                        onDoubleTap = onDoubleTap?.let { cb ->
+                            {
+                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                cb()
+                            }
+                        },
+                        onLongPress = onLongPress?.let { cb ->
+                            {
+                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                cb()
+                            }
                         }
                     )
                 }
@@ -2024,6 +2048,9 @@ private fun DashboardSeamSwipeHandle(
 @Composable
 private fun SecondEqualMapYoutubeDashboard(
     isHorizontalSplit: Boolean,
+    page2Swapped: Boolean,
+    page2SplitRatio: Float,
+    onSwapPage2: () -> Unit,
     location: com.dxcar.launcher.map.VehicleLocationState,
     activeNav: com.dxcar.launcher.comms.ActiveNavBanner?,
     builtInNavState: BuiltInNavState,
@@ -2057,7 +2084,7 @@ private fun SecondEqualMapYoutubeDashboard(
 ) {
     val colors = LocalDxCarColors.current
     val cardShape = RoundedCornerShape(colors.cardCornerDp.dp)
-    var isMapFirst by remember { mutableStateOf(true) }
+    val isMapFirst = !page2Swapped
     val swapAnim by animateFloatAsState(
         targetValue = if (isMapFirst) 0f else 1f,
         animationSpec = tween(durationMillis = 650, easing = CubicBezierEasing(0.32f, 0f, 0.18f, 1f)),
@@ -2071,17 +2098,21 @@ private fun SecondEqualMapYoutubeDashboard(
     ) {
         val gap = 16.dp
         if (isHorizontalSplit) {
-            val halfPaneW = ((maxWidth - gap) / 2f).coerceAtLeast(140.dp)
+            val ratio = page2SplitRatio.coerceIn(0.25f, 0.75f)
+            val leftPaneW = ((maxWidth - gap) * ratio).coerceAtLeast(140.dp)
+            val rightPaneW = ((maxWidth - gap) - leftPaneW).coerceAtLeast(140.dp)
             val fullH = maxHeight
-            val mapX = lerp(0.dp, halfPaneW + gap, swapAnim)
-            val ytX = lerp(halfPaneW + gap, 0.dp, swapAnim)
+            val mapW = if (isMapFirst) leftPaneW else rightPaneW
+            val ytW = if (isMapFirst) rightPaneW else leftPaneW
+            val mapX = lerp(0.dp, leftPaneW + gap, swapAnim)
+            val ytX = lerp(leftPaneW + gap, 0.dp, swapAnim)
 
             // 1:1 Plan A Built-in Map (stays continuously mounted while swapping Left <-> Right)
             Box(
                 modifier = Modifier
                     .zIndex(if (isMapFirst) 2f else 1f)
                     .offset(x = mapX, y = 0.dp)
-                    .width(halfPaneW)
+                    .width(mapW)
                     .height(fullH)
                     .clip(cardShape)
                     .border(colors.cardBorderWidthDp.dp, colors.cardBorder, cardShape)
@@ -2127,7 +2158,7 @@ private fun SecondEqualMapYoutubeDashboard(
                 modifier = Modifier
                     .zIndex(if (isMapFirst) 1f else 2f)
                     .offset(x = ytX, y = 0.dp)
-                    .width(halfPaneW)
+                    .width(ytW)
                     .height(fullH)
                     .clip(cardShape)
                     .border(colors.cardBorderWidthDp.dp, colors.cardBorder, cardShape)
@@ -2135,15 +2166,16 @@ private fun SecondEqualMapYoutubeDashboard(
                 EmbeddedYoutubePlayerCard()
             }
 
-            // Center 1:1 Seam Divider Line (Long-press to swap Left <-> Right; Drag to return to Page 1)
+            // Center Seam Divider Line (Double-tap or Long-press to swap Left <-> Right; Drag to return to Page 1)
             DashboardSeamSwipeHandle(
                 pageIndicator = "2/3",
                 onDragDelta = onSeamDragDelta,
                 onDragEnd = onSeamDragEnd,
-                onLongPress = { isMapFirst = !isMapFirst },
+                onLongPress = onSwapPage2,
+                onDoubleTap = onSwapPage2,
                 modifier = Modifier
                     .zIndex(5f)
-                    .offset(x = halfPaneW + (gap / 2f) - 16.dp, y = 0.dp)
+                    .offset(x = leftPaneW + (gap / 2f) - 16.dp, y = 0.dp)
                     .width(32.dp)
                     .height(fullH)
             )

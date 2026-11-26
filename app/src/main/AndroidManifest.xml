@@ -42,6 +42,10 @@
     <uses-permission android:name="com.carletter.launcher.permission.READ_SETTINGS" />
     <uses-permission android:name="com.autochips.launcher.permission.READ_SETTINGS" />
 
+    <queries>
+        <package android:name="com.dxcar.roothelper" />
+    </queries>
+
     <!-- Persistent AA Dock Overlay & Global Call/Message Banners -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 

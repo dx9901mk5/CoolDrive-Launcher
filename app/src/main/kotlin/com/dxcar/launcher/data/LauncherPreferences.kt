@@ -83,9 +83,9 @@ enum class HomeExperimentMode(
         showInSettings = false
     ),
     PLAN_D_ROOT_RESERVED(
-        shortTitleZh = "方案 B（預留）",
-        titleZh = "方案 B：Root 特權進階模式（預留給已 Root 車機）",
-        descZh = "預留給已取得 Root (su) 權限的車機開發中；一般未 Root 車機可正常使用方案 A",
+        shortTitleZh = "方案 B（Root）",
+        titleZh = "方案 B：Root 輔助進階模式",
+        descZh = "偵測到獨立「DX-Car Root 輔助 App」即自動解鎖，支援客製 UI 1/2 分屏、60Hz 與 OTA 攔截（設定於輔助 App 編輯）",
         isAvailable = false,
         showInSettings = true
     );
@@ -303,7 +303,9 @@ data class LauncherConfig(
     val lastKnownLat: Double = 25.0330,
     val lastKnownLon: Double = 121.5654,
     val lastKnownBearingDeg: Float = 0f,
-    val lastKnownZoom: Double = 15.6
+    val lastKnownZoom: Double = 15.6,
+    val page2Swapped: Boolean = false,
+    val page2SplitRatio: Float = 0.50f
 ) {
     companion object {
         val DEFAULT_PINNED_PACKAGES = listOf(
