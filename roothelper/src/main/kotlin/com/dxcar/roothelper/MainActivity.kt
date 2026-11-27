@@ -807,14 +807,34 @@ private fun OverviewTabContent(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    FilledTonalButton(
-                        onClick = onRefreshRoot,
-                        shape = RoundedCornerShape(14.dp),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
-                    ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("重測")
+                    val ctx = LocalContext.current
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (!rootStatus.isRooted) {
+                            OutlinedButton(
+                                onClick = {
+                                    val magiskIntent = ctx.packageManager.getLaunchIntentForPackage("com.topjohnwu.magisk")
+                                    if (magiskIntent != null) {
+                                        magiskIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        runCatching { ctx.startActivity(magiskIntent) }
+                                    } else {
+                                        Toast.makeText(ctx, "請開啟車機上的 Magisk App → 超級使用者，將 DX-Car Root 輔助 設為允許", Toast.LENGTH_LONG).show()
+                                    }
+                                },
+                                shape = RoundedCornerShape(14.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+                            ) {
+                                Text("開 Magisk 授權")
+                            }
+                        }
+                        FilledTonalButton(
+                            onClick = onRefreshRoot,
+                            shape = RoundedCornerShape(14.dp),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+                        ) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("重測")
+                        }
                     }
                 }
 

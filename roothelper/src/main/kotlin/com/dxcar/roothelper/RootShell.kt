@@ -65,15 +65,22 @@ object RootShell {
         }
     }
 
-    suspend fun execSu(command: String, timeoutSec: Long = 5L): ShellResult = withContext(Dispatchers.IO) {
+    suspend fun execSu(command: String, timeoutSec: Long = 15L): ShellResult = withContext(Dispatchers.IO) {
         val cached = workingSuPath
         if (cached != null) {
-            return@withContext runWithBinary(cached, command, timeoutSec)
+            val res = runWithBinary(cached, command, timeoutSec)
+            if (res.isSuccess) return@withContext res
+            workingSuPath = null
         }
         var lastFail = ShellResult(-1, "", "No working su binary")
         for (bin in SU_CANDIDATES) {
-            if (bin != "su" && !File(bin).exists()) continue
-            val res = runWithBinary(bin, command, timeoutSec)
+            // Do NOT gate on File(bin).exists() because Android 15 SELinux blocks stat() on /product/bin or /debug_ramdisk even when execve() is allowed!
+            val perBinTimeout = if (bin == "su" || bin == "/product/bin/su" || bin == "/system/bin/su") {
+                timeoutSec.coerceAtLeast(18L)
+            } else {
+                5L
+            }
+            val res = runWithBinary(bin, command, perBinTimeout)
             if (res.isSuccess) {
                 workingSuPath = bin
                 return@withContext res
@@ -84,7 +91,7 @@ object RootShell {
     }
 
     suspend fun probeRootStatus(): RootStatusInfo {
-        val idRes = execSu("id", 4L)
+        val idRes = execSu("id", 20L)
         val isRoot = idRes.isSuccess && idRes.stdout.contains("uid=0")
         val magiskRes = if (isRoot) execSu("magisk -v", 3L) else ShellResult(-1, "", "")
         val propRes = if (isRoot) {
