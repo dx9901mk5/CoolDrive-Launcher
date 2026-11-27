@@ -192,6 +192,11 @@ object RootShell {
         val commands = listOf(
             "BASIC" to "id; magisk -v; uname -a",
             "BUILD" to "getprop ro.product.model; getprop ro.build.version.release; getprop ro.board.platform; getprop ro.boot.slot_suffix; getprop persist.splitscreen.percent",
+            "BT_PACKAGES" to "pm list packages | grep -iE 'blue|bt|goc|nfore|suding|carlink|zlink|speedplay|phone|dialer|call'",
+            "BT_PROCESSES_AND_SERVICES" to "ps -A | grep -iE 'blue|bt|goc|nfore|suding|carlink|zlink|speedplay'; echo '---SERVICES---'; dumpsys activity services | grep -iE 'ServiceRecord.*(blue|bt|goc|nfore|suding|carlink|zlink|speedplay)' | head -n 60",
+            "BT_PROPS" to "getprop | grep -iE 'bt|blue|goc|nfore|suding' | head -n 80",
+            "BT_MANAGER_DUMPSYS" to "dumpsys bluetooth_manager | head -n 160",
+            "BT_OEM_INTENTS" to "for p in \$(pm list packages | cut -d: -f2 | grep -iE 'goc|nfore|suding.*bt|suding.*blue|btphone|bluetooth' | grep -v '^com.android.bluetooth\$' | head -n 6); do echo \"=== PKG: \$p ===\"; dumpsys package \$p | grep -iE 'Action:|Service|Receiver|Activity' | head -n 40; done",
             "DISPLAY" to "dumpsys display | grep -iE 'mBaseDisplayInfo|supportedModes|renderFrameRate|refreshRate|DisplayMode' | head -n 40",
             "SURFACEFLINGER" to "dumpsys SurfaceFlinger | grep -iE 'refresh|fps|mode|vsync|Display' | head -n 50",
             "CONTAINERS" to "dumpsys activity containers | grep -E 'Task=|ActivityRecord|mode=|bounds=' | head -n 50",
@@ -201,14 +206,44 @@ object RootShell {
         )
 
         val sb = StringBuilder()
-        sb.appendLine("=== DX-Car Root Helper Diagnostic Report ===")
+        sb.appendLine("=== DX-Car Root Helper Diagnostic Report (v${BuildConfig.VERSION_NAME}) ===")
         sb.appendLine("Time: $ts")
         sb.appendLine("Model: ${Build.MANUFACTURER} ${Build.MODEL} (Android ${Build.VERSION.RELEASE}, SDK ${Build.VERSION.SDK_INT})")
         sb.appendLine()
 
+        val results = LinkedHashMap<String, ShellResult>()
         for ((title, cmd) in commands) {
+            results[title] = execSu(cmd, 8L)
+        }
+
+        // Quick Auto-Verdict: Native Android Bluetooth vs. Vendor Standalone BT Service (gocsdk / nfore / suding)
+        val btPkgs = results["BT_PACKAGES"]?.stdout.orEmpty().lowercase(Locale.ROOT)
+        val btProcs = results["BT_PROCESSES_AND_SERVICES"]?.stdout.orEmpty().lowercase(Locale.ROOT)
+        val btDump = results["BT_MANAGER_DUMPSYS"]?.stdout.orEmpty().lowercase(Locale.ROOT)
+        val hasGoc = btPkgs.contains("goc") || btProcs.contains("goc")
+        val hasNfore = btPkgs.contains("nfore") || btProcs.contains("nfore")
+        val hasSudingBt = btPkgs.contains("suding") || btProcs.contains("suding")
+        val hasNativeBt = btDump.contains("enabled: true") || btDump.contains("bonded devices") || btProcs.contains("com.android.bluetooth")
+        val btVerdict = buildString {
+            append("BT_ARCHITECTURE_VERDICT: ")
+            val vendors = buildList {
+                if (hasGoc) add("gocsdk")
+                if (hasNfore) add("nfore")
+                if (hasSudingBt) add("suding")
+            }
+            when {
+                vendors.isNotEmpty() && hasNativeBt -> append("HYBRID (Native Android BT + Vendor Service: ${vendors.joinToString(", ")})")
+                vendors.isNotEmpty() -> append("VENDOR_STANDALONE (${vendors.joinToString(", ")})")
+                hasNativeBt -> append("NATIVE_ANDROID_BLUETOOTH")
+                else -> append("UNKNOWN (check BT_PACKAGES / BT_MANAGER_DUMPSYS below)")
+            }
+        }
+        sb.appendLine("================ BT_AUTO_VERDICT ================")
+        sb.appendLine(btVerdict)
+        sb.appendLine()
+
+        for ((title, r) in results) {
             sb.appendLine("================ $title ================")
-            val r = execSu(cmd, 8L)
             sb.appendLine("exitCode=${r.exitCode}")
             if (r.stdout.isNotBlank()) sb.appendLine(r.stdout)
             if (r.stderr.isNotBlank()) sb.appendLine("[stderr] ${r.stderr}")

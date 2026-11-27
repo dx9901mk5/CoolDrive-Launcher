@@ -284,8 +284,11 @@ private fun RootHelperApp(
 
     fun collectAndSendDiagnosticLog() {
         scope.launch {
-            busyLabel = "正在蒐集系統與顯示診斷 Log…"
+            busyLabel = "正在蒐集藍牙架構與系統診斷 Log…"
             val file = RootShell.collectDiagnosticReport(context)
+            val verdictLine = runCatching {
+                file.readLines().firstOrNull { it.startsWith("BT_ARCHITECTURE_VERDICT:") }.orEmpty()
+            }.getOrDefault("")
             busyLabel = null
             showToastMessage("已產出診斷報告：${file.name}")
             val uri = FileProvider.getUriForFile(
@@ -298,9 +301,18 @@ private fun RootHelperApp(
                 putExtra(Intent.EXTRA_EMAIL, arrayOf("dx9901mk5@gmail.com"))
                 putExtra(
                     Intent.EXTRA_SUBJECT,
-                    "DX-Car Root 診斷 Log (${Build.MODEL} / Android ${Build.VERSION.RELEASE})"
+                    "DX-Car 藍牙架構與系統診斷 Log (${Build.MODEL} / Android ${Build.VERSION.RELEASE})"
                 )
-                putExtra(Intent.EXTRA_TEXT, "請協助判讀車機硬體、60Hz 與 OTA 資訊（附件如附）。")
+                putExtra(
+                    Intent.EXTRA_TEXT,
+                    buildString {
+                        appendLine("請協助判讀車機藍牙架構（原生 Android 藍牙 vs. 廠商獨立藍牙服務 gocsdk/nfore/suding）及系統資訊，完整 Log 如附件。")
+                        if (verdictLine.isNotBlank()) {
+                            appendLine()
+                            appendLine(verdictLine)
+                        }
+                    }
+                )
                 putExtra(Intent.EXTRA_STREAM, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
@@ -820,8 +832,8 @@ private fun OverviewTabContent(
             BentoActionCard(
                 icon = Icons.Rounded.BugReport,
                 iconTint = cs.tertiary,
-                title = "診斷 Log 寄送",
-                subtitle = "一鍵蒐集顯示／分屏／OTA 並開啟 Gmail 寄送",
+                title = "藍牙與系統診斷 Log",
+                subtitle = "一鍵偵測原生/廠商藍牙架構、顯示與 OTA 並寄送 Gmail",
                 badgeText = "Gmail",
                 badgePositive = true,
                 onClick = onSendDiagnosticLog,
