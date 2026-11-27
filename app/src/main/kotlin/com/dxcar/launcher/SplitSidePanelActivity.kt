@@ -343,6 +343,7 @@ class SplitSidePanelActivity : ComponentActivity() {
                         IncomingCallBanner(
                             callState = activeCall,
                             scale = config.notificationBannerScale,
+                            scaleFactorOverride = config.notificationBannerScaleFloat,
                             onAnswer = { app.notificationCenter.performCallAction(CallActionCommand.ANSWER) },
                             onDecline = { app.notificationCenter.performCallAction(CallActionCommand.DECLINE) }
                         )
@@ -350,6 +351,7 @@ class SplitSidePanelActivity : ComponentActivity() {
                             message = popupMessage,
                             quickReplies = config.quickReplies,
                             scale = config.notificationBannerScale,
+                            scaleFactorOverride = config.notificationBannerScaleFloat,
                             onExpandQuickReplies = { app.notificationCenter.pausePopupDismiss() },
                             onReadAloud = { app.notificationCenter.readMessageAloud(it) },
                             onQuickReply = { item, reply -> app.notificationCenter.sendQuickReply(item, reply) },

@@ -260,6 +260,7 @@ data class LauncherConfig(
     val launchAppsAvoidDockFreeform: Boolean = false,
     val globalCallMessageBannerEnabled: Boolean = true,
     val notificationBannerScale: NotificationBannerScale = NotificationBannerScale.SCALE_1_0X,
+    val notificationBannerScaleFloat: Float = 1.0f,
     val autoReadMessagesTts: Boolean = false,
     val geminiVoiceMode: GeminiVoiceMode = GeminiVoiceMode.SMART_AUTO,
     val geminiApiKey: String = "",

@@ -1092,9 +1092,9 @@ private fun PlanBTabContent(
 
                     // Right Window Pane
                     PreviewPaneBox(
-                        title = if (previewUiIndex == 0) (ui1RightApp?.label ?: shortPkgLabel(config.ui1RightPackage)) else (ui2RightApp?.label ?: shortPkgLabel(config.ui2RightPackage)),
+                        title = if (previewUiIndex == 0) "啟動器媒體卡片 (封面/天氣/6捷徑)" else (ui2RightApp?.label ?: shortPkgLabel(config.ui2RightPackage)),
                         ratioText = "${(rightWeight * 100).roundToInt()}%",
-                        iconBitmap = if (previewUiIndex == 0) ui1RightApp?.icon else ui2RightApp?.icon,
+                        iconBitmap = if (previewUiIndex == 0) null else ui2RightApp?.icon,
                         fallbackIcon = Icons.Rounded.MusicNote,
                         tint = cs.secondary,
                         modifier = Modifier.weight(rightWeight).fillMaxHeight()
@@ -1166,26 +1166,18 @@ private fun PlanBTabContent(
             }
         }
 
-        // 3. APP ASSIGNMENT CARD (UI 1 & UI 2 BOTH SUPPORT CUSTOM LEFT/RIGHT APPS)
+        // 3. APP ASSIGNMENT CARD (UI 1 NAV + UI 2 DUAL NATIVE APPS)
         ModernSectionCard(
             icon = Icons.Rounded.Apps,
             title = "UI 1 與 UI 2 指定應用程式",
-            subtitle = "點擊任一列即可改選已安裝的地圖、影音或播放器 App（附真實圖示與搜尋）"
+            subtitle = "UI 1 左側為原生地圖、右側為啟動器媒體卡片（可點封面交換）；UI 2 為雙原生視窗"
         ) {
             AppSlotSelectorRow(
-                slotBadge = "UI 1 · 左側",
-                slotTitle = "UI 1 左側 App（預設 Google 地圖 70%）",
+                slotBadge = "UI 1 · 原生地圖",
+                slotTitle = "UI 1 原生地圖 App（預設 Google 地圖 70%，右側為媒體卡片）",
                 packageName = config.ui1NavPackage,
                 appInfo = ui1NavApp,
                 onClick = { onRequestPickApp(AppPickTarget.UI1_NAV) }
-            )
-            HorizontalDivider(color = cs.outlineVariant.copy(alpha = 0.5f))
-            AppSlotSelectorRow(
-                slotBadge = "UI 1 · 右側",
-                slotTitle = "UI 1 右側 App（預設 YouTube 30%）",
-                packageName = config.ui1RightPackage,
-                appInfo = ui1RightApp,
-                onClick = { onRequestPickApp(AppPickTarget.UI1_RIGHT) }
             )
             HorizontalDivider(color = cs.outlineVariant.copy(alpha = 0.5f))
             AppSlotSelectorRow(
@@ -1209,15 +1201,14 @@ private fun PlanBTabContent(
         ModernSectionCard(
             icon = Icons.Rounded.Info,
             title = "方案 B 操作手勢教學",
-            subtitle = "三介面循環切換，UI 1 與 UI 2 操作邏輯完全一致"
+            subtitle = "三介面循環切換，點擊 Dock 或 App 清單自動全螢幕不遮擋"
         ) {
             Text(
                 text = "• 第 0 介面（0/3）：維持原有自訂小工具看板。\n" +
-                    "• 第 1 介面（1/3）：預設左 Google 地圖 70% ＋ 右 YouTube 30%，可於上方改選任意 App。\n" +
-                    "• 第 2 介面（2/3）：獨立第二組雙原生視窗，同樣可自由指定地圖與影音播放器。\n" +
-                    "• 長壓中線不放開：懸浮中線會出現「發光脈動 ＋ ◀ 比例 ▶」動畫提示，手指左右拖曳放開即套用新比例。\n" +
-                    "• 點兩下懸浮中線：立即將左右兩個視窗互換位置。\n" +
-                    "• 左右滑動懸浮中線：於 0 / 1 / 2 三個工作介面間快速循環切換。",
+                    "• 第 1 介面（1/3）：同方案 A 佈局！左側 70% 調用原生地圖 App（如 Google 地圖），右側 30% 為啟動器媒體卡片（自動擷取封面、左上天氣、下方 6 格捷徑）；點擊專輯封面（或點兩下中線）即可左右交換卡片！\n" +
+                    "• 第 2 介面（2/3）：獨立雙原生 App 分割視窗（可自由指定地圖與影音播放器）。\n" +
+                    "• 全螢幕與圖層自動切換：從左側 Dock 或 App 清單點擊任何 App（包含再次點擊 Google 地圖），皆會直接展開為 100% 全螢幕（導航不中斷、地圖不殘留遮擋），Dock 自動收合為最上層邊緣拉條；點擊 Dock「回首頁」即自動恢復分割畫面。\n" +
+                    "• 懸浮中線手勢：長壓不放開出現「發光脈動 ＋ ◀ 比例 ▶」動畫拖曳調比例、點兩下左右交換、左右滑動切換 0 / 1 / 2 介面。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = cs.onSurfaceVariant,
                 lineHeight = 22.sp

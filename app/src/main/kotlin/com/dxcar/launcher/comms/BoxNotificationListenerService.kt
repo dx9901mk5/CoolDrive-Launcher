@@ -117,6 +117,40 @@ class BoxNotificationListenerService : NotificationListenerService() {
         // Feed Google App / System Weather notifications to the Media-Top Weather Widget!
         app.weatherRepository.tryIngestNotification(pkg, rawTitle, rawText, subText)
 
+        // Cache MediaStyle notification metadata & artwork as fallback for MediaControlBridge
+        if (notif.category == Notification.CATEGORY_TRANSPORT ||
+            extras.containsKey(Notification.EXTRA_MEDIA_SESSION)
+        ) {
+            val largeBmp = runCatching {
+                val icon = notif.getLargeIcon()
+                if (icon != null) {
+                    val d = icon.loadDrawable(this)
+                    if (d is android.graphics.drawable.BitmapDrawable && d.bitmap != null) {
+                        d.bitmap
+                    } else if (d != null) {
+                        val w = d.intrinsicWidth.coerceAtLeast(128)
+                        val h = d.intrinsicHeight.coerceAtLeast(128)
+                        val b = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+                        val c = android.graphics.Canvas(b)
+                        d.setBounds(0, 0, w, h)
+                        d.draw(c)
+                        b
+                    } else null
+                } else {
+                    @Suppress("DEPRECATION")
+                    extras.getParcelable(Notification.EXTRA_LARGE_ICON) as? android.graphics.Bitmap
+                }
+            }.getOrNull()
+            if (rawTitle.isNotBlank() || largeBmp != null) {
+                cachedMediaNotifications[pkg] = CachedMediaNotification(
+                    title = rawTitle,
+                    artist = rawText.ifBlank { subText },
+                    largeIcon = largeBmp
+                )
+            }
+            app.mediaControlBridge.refreshSessions()
+        }
+
         val handle = extractActionHandle(statusBarNotif.key, notif)
         actionHandles[statusBarNotif.key] = handle
         cacheFavoriteMediaActionIfPresent(pkg, notif)
@@ -519,6 +553,12 @@ class BoxNotificationListenerService : NotificationListenerService() {
         }.getOrDefault(false)
     }
 
+    data class CachedMediaNotification(
+        val title: String,
+        val artist: String,
+        val largeIcon: android.graphics.Bitmap?
+    )
+
     companion object {
         const val GOOGLE_MAPS_PACKAGE = "com.google.android.apps.maps"
 
@@ -530,5 +570,9 @@ class BoxNotificationListenerService : NotificationListenerService() {
 
         private val actionHandles = ConcurrentHashMap<String, NotificationActionHandle>()
         private val favoriteMediaActions = ConcurrentHashMap<String, Pair<Notification.Action, Boolean>>()
+        private val cachedMediaNotifications = ConcurrentHashMap<String, CachedMediaNotification>()
+
+        fun getCachedMediaNotification(pkg: String): CachedMediaNotification? =
+            cachedMediaNotifications[pkg]
     }
 }

@@ -1753,33 +1753,69 @@ fun SettingsScreen(
                             onCheckedChange = { checked -> onUpdateConfig { it.copy(autoReadMessagesTts = checked) } }
                         )
 
-                        // Notification & Incoming Call Scale Selector (0.5X / 0.75X / 1X Default / 1.5X / 2X)
+                        // Notification & Incoming Call Scale Slider (0.6X .. 2.0X, triggers live demo banner while dragging!)
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = str(
-                                    "左上通知與來電橫幅大小（預設 1X 精簡紅框尺寸，字體連動縮放）",
-                                    "左上通知与来电横幅大小（默认 1X 精简尺寸，字体联动缩放）",
-                                    "Notification & Call Banner Scale (1X Compact Default)",
-                                    "左上通知・着信バナーサイズ（標準 1X コンパクト）"
-                                ),
-                                color = colors.primaryText,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                com.dxcar.launcher.data.NotificationBannerScale.entries.forEach { scaleOpt ->
-                                    val labelText = if (scaleOpt == com.dxcar.launcher.data.NotificationBannerScale.SCALE_1_0X) {
-                                        "${scaleOpt.label} (${str("預設", "默认", "Default", "標準")})"
-                                    } else {
-                                        scaleOpt.label
-                                    }
-                                    SelectablePill(
-                                        text = labelText,
-                                        selected = config.notificationBannerScale == scaleOpt,
-                                        onClick = { onUpdateConfig { it.copy(notificationBannerScale = scaleOpt) } }
-                                    )
+                            val liveScale = config.notificationBannerScaleFloat.coerceIn(0.6f, 2.0f)
+                            val scalePctText = "%.2fx".format(java.util.Locale.US, liveScale)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = str(
+                                        "左上通知與來電橫幅大小（訊息字體已放大 1.5X · 拖動即時跳出示範通知）：$scalePctText",
+                                        "左上通知与来电横幅大小（消息字体已放大 1.5X · 拖动实时跳出示范通知）：$scalePctText",
+                                        "Notification & Call Banner Size (1.5X Larger Font · Drag to Preview): $scalePctText",
+                                        "左上通知・着信バナーサイズ（文字1.5倍・ドラッグでプレビュー表示）：$scalePctText"
+                                    ),
+                                    color = colors.primaryText,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedButton(
+                                    onClick = {
+                                        onUpdateConfig {
+                                            it.copy(
+                                                notificationBannerScaleFloat = 1.0f,
+                                                notificationBannerScale = com.dxcar.launcher.data.NotificationBannerScale.SCALE_1_0X
+                                            )
+                                        }
+                                        com.dxcar.launcher.DxCarApp.instance?.notificationCenter?.showLiveDemoBannerForScalePreview()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(30.dp)
+                                ) {
+                                    Text(str("預設 1.0x", "默认 1.0x", "Reset 1.0x", "標準 1.0x"), fontSize = 11.sp)
                                 }
                             }
+                            Slider(
+                                value = liveScale,
+                                onValueChange = { nextVal ->
+                                    val snapped = ((nextVal * 20f).roundToInt() / 20f).coerceIn(0.6f, 2.0f)
+                                    val mappedEnum = when {
+                                        snapped <= 0.62f -> com.dxcar.launcher.data.NotificationBannerScale.SCALE_0_5X
+                                        snapped <= 0.87f -> com.dxcar.launcher.data.NotificationBannerScale.SCALE_0_75X
+                                        snapped <= 1.24f -> com.dxcar.launcher.data.NotificationBannerScale.SCALE_1_0X
+                                        snapped <= 1.74f -> com.dxcar.launcher.data.NotificationBannerScale.SCALE_1_5X
+                                        else -> com.dxcar.launcher.data.NotificationBannerScale.SCALE_2_0X
+                                    }
+                                    onUpdateConfig {
+                                        it.copy(
+                                            notificationBannerScaleFloat = snapped,
+                                            notificationBannerScale = mappedEnum
+                                        )
+                                    }
+                                    com.dxcar.launcher.DxCarApp.instance?.notificationCenter?.showLiveDemoBannerForScalePreview()
+                                },
+                                valueRange = 0.6f..2.0f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = colors.accent,
+                                    activeTrackColor = colors.accent
+                                )
+                            )
                         }
 
                         // Custom Quick Replies Editor

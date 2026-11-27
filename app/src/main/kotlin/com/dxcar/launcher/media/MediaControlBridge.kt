@@ -81,6 +81,14 @@ class MediaControlBridge(
     private var listenerRegistered = false
     private var languageObserverStarted = false
     private val appIconCache = ConcurrentHashMap<String, Bitmap>()
+    private val artUriCache = ConcurrentHashMap<String, Bitmap>()
+    private val artUriInFlight = ConcurrentHashMap.newKeySet<String>()
+    private val mediaHttpClient by lazy {
+        okhttp3.OkHttpClient.Builder()
+            .connectTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
 
     private val controllerCallback = object : MediaController.Callback() {
         override fun onPlaybackStateChanged(state: PlaybackState?) = publishSelectedState()
@@ -105,7 +113,13 @@ class MediaControlBridge(
             }
         }
         scope.launch {
+            var tickCount = 0
             while (isActive) {
+                tickCount++
+                // Periodically re-bind listener or poll sessions so newly opened/resumed music apps are never missed
+                if (!listenerRegistered || selectedController == null || tickCount % 4 == 0) {
+                    refreshSessions()
+                }
                 if (_mediaState.value.isPlaying && _mediaState.value.durationMs > 0) {
                     val controller = selectedController
                     val pb = controller?.playbackState
@@ -141,8 +155,7 @@ class MediaControlBridge(
         "com.google.android.googlequicksearchbox",
         "com.google.android.gms",
         "com.android.systemui",
-        "com.google.android.tts",
-        "com.google.android.youtube" // Page 1 media card focuses on music apps unless YouTube is actively playing
+        "com.google.android.tts"
     )
 
     private fun isEligibleMusicController(controller: MediaController): Boolean {
@@ -169,24 +182,23 @@ class MediaControlBridge(
             val st = it.playbackState?.state
             st == PlaybackState.STATE_PLAYING || st == PlaybackState.STATE_BUFFERING
         }
+            ?: eligible.firstOrNull { it.metadata != null && it.packageName != "com.google.android.youtube" }
             ?: rememberedPkg?.let { target -> eligible.firstOrNull { it.packageName == target } }
-            ?: pickBestController(eligible, rememberedPkg)
+            ?: pickBestController(eligible)
 
         selectedController = picked
         picked?.registerCallback(controllerCallback)
         publishSelectedState()
     }
 
-    private fun pickBestController(controllers: List<MediaController>, rememberedPkg: String?): MediaController? {
+    private fun pickBestController(controllers: List<MediaController>): MediaController? {
         if (controllers.isEmpty()) return null
         val activeOrPaused = controllers.firstOrNull {
             val st = it.playbackState?.state
-            (st == PlaybackState.STATE_PLAYING || st == PlaybackState.STATE_PAUSED) && it.metadata != null
+            (st == PlaybackState.STATE_PLAYING || st == PlaybackState.STATE_PAUSED || st == PlaybackState.STATE_BUFFERING) &&
+                it.metadata != null
         }
         if (activeOrPaused != null) return activeOrPaused
-        // If we have a remembered/default music app (like YT Music) installed and no other app is paused with metadata,
-        // return null so the Media Card cleanly displays YT Music ready to wake & play!
-        if (rememberedPkg != null) return null
         return controllers.firstOrNull { it.metadata != null } ?: controllers.first()
     }
 
@@ -255,18 +267,30 @@ class MediaControlBridge(
         val pkg = controller.packageName
         val appLabel = resolveAppLabel(pkg)
         val appIcon = resolveAppIcon(pkg)
+        val notifCache = BoxNotificationListenerService.getCachedMediaNotification(pkg)
 
-        val title = meta?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
-            ?: meta?.getString(MediaMetadata.METADATA_KEY_TITLE)
+        val title = meta?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)?.takeIf { it.isNotBlank() }
+            ?: meta?.getString(MediaMetadata.METADATA_KEY_TITLE)?.takeIf { it.isNotBlank() }
+            ?: notifCache?.title?.takeIf { it.isNotBlank() }
             ?: appLabel
-        val artist = meta?.getString(MediaMetadata.METADATA_KEY_ARTIST)
-            ?: meta?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
-            ?: meta?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+        val artist = meta?.getString(MediaMetadata.METADATA_KEY_ARTIST)?.takeIf { it.isNotBlank() }
+            ?: meta?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)?.takeIf { it.isNotBlank() }
+            ?: meta?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)?.takeIf { it.isNotBlank() }
+            ?: notifCache?.artist?.takeIf { it.isNotBlank() }
             ?: appLabel
         val album = meta?.getString(MediaMetadata.METADATA_KEY_ALBUM).orEmpty()
-        val art = meta?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+        val artUriStr = meta?.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI)?.takeIf { it.isNotBlank() }
+            ?: meta?.getString(MediaMetadata.METADATA_KEY_ART_URI)?.takeIf { it.isNotBlank() }
+            ?: meta?.getString(MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI)?.takeIf { it.isNotBlank() }
+        val directArt = meta?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: meta?.getBitmap(MediaMetadata.METADATA_KEY_ART)
             ?: meta?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+            ?: artUriStr?.let { artUriCache[it] }
+            ?: notifCache?.largeIcon
+        if (directArt == null && !artUriStr.isNullOrBlank()) {
+            loadAlbumArtFromUriAsync(artUriStr)
+        }
+        val art = directArt
         val duration = meta?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.coerceAtLeast(0L) ?: 0L
         val position = pb?.position?.coerceAtLeast(0L) ?: 0L
         val playing = pb?.state == PlaybackState.STATE_PLAYING ||
@@ -300,6 +324,40 @@ class MediaControlBridge(
             durationMs = duration,
             availableSessions = summaries
         )
+    }
+
+    private fun loadAlbumArtFromUriAsync(uriStr: String) {
+        if (artUriCache.containsKey(uriStr) || !artUriInFlight.add(uriStr)) return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val bmp: Bitmap? = when {
+                    uriStr.startsWith("http://", ignoreCase = true) ||
+                        uriStr.startsWith("https://", ignoreCase = true) -> {
+                        val req = okhttp3.Request.Builder().url(uriStr).build()
+                        mediaHttpClient.newCall(req).execute().use { resp ->
+                            if (resp.isSuccessful) {
+                                resp.body?.byteStream()?.use { android.graphics.BitmapFactory.decodeStream(it) }
+                            } else null
+                        }
+                    }
+                    else -> {
+                        val uri = android.net.Uri.parse(uriStr)
+                        context.contentResolver.openInputStream(uri)?.use {
+                            android.graphics.BitmapFactory.decodeStream(it)
+                        }
+                    }
+                }
+                if (bmp != null) {
+                    artUriCache[uriStr] = bmp
+                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                        publishSelectedState()
+                    }
+                }
+            } catch (_: Throwable) {
+            } finally {
+                artUriInFlight.remove(uriStr)
+            }
+        }
     }
 
     private fun findBestInstalledMusicApp(): String? {

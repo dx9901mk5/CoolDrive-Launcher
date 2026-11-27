@@ -122,4 +122,33 @@ object RootHelperBridge {
             context.contentResolver.call(PROVIDER_URI, "update_ui2_ratio", null, extras)
         }
     }
+
+    fun parkPlanBWindows(context: Context, screenWidth: Int, screenHeight: Int) {
+        if (!isRootHelperInstalled(context)) return
+        runCatching {
+            val extras = android.os.Bundle().apply {
+                putInt("screenWidth", screenWidth)
+                putInt("screenHeight", screenHeight)
+            }
+            context.contentResolver.call(PROVIDER_URI, "park_plan_b_windows", null, extras)
+        }
+    }
+
+    fun launchFullscreenApp(
+        context: Context,
+        packageName: String,
+        screenWidth: Int,
+        screenHeight: Int
+    ): Boolean {
+        if (!isRootHelperInstalled(context) || packageName.isBlank()) return false
+        return runCatching {
+            val extras = android.os.Bundle().apply {
+                putString("packageName", packageName)
+                putInt("screenWidth", screenWidth)
+                putInt("screenHeight", screenHeight)
+            }
+            val res = context.contentResolver.call(PROVIDER_URI, "launch_fullscreen_app", null, extras)
+            res?.getBoolean("ok", false) == true
+        }.getOrDefault(false)
+    }
 }

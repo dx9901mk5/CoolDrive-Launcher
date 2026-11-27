@@ -66,6 +66,27 @@ object PlanBWindowEngine {
                 RootHelperConfigStore.save(context, cfg.copy(ui2SplitRatio = ratio))
                 out.putBoolean("ok", true)
             }
+            "park_plan_b_windows" -> {
+                val screenW = extras?.getInt("screenWidth", 1920) ?: 1920
+                val screenH = extras?.getInt("screenHeight", 1080) ?: 1080
+                scope.launch {
+                    parkPlanBWindowsInternal(context.applicationContext, screenW, screenH)
+                }
+                out.putBoolean("ok", true)
+            }
+            "launch_fullscreen_app" -> {
+                val targetPkg = extras?.getString("packageName").orEmpty()
+                val screenW = extras?.getInt("screenWidth", 1920) ?: 1920
+                val screenH = extras?.getInt("screenHeight", 1080) ?: 1080
+                if (targetPkg.isBlank()) {
+                    out.putBoolean("ok", false)
+                } else {
+                    scope.launch {
+                        launchFullscreenAppInternal(context.applicationContext, targetPkg, screenW, screenH)
+                    }
+                    out.putBoolean("ok", true)
+                }
+            }
             else -> out.putBoolean("ok", false)
         }
         return out
@@ -110,31 +131,36 @@ object PlanBWindowEngine {
 
         when (page) {
             0 -> {
-                // Bring DX-Car Launcher MainActivity to front for Page 0 Widgets
-                RootShell.execSu(
-                    "am start --user 0 --windowingMode 1 -n com.dxcar.launcher/com.dxcar.launcher.MainActivity",
-                    4L
-                )
+                // Demote any Freeform tasks so Google Maps never floats on top of Page 0 Widgets!
+                parkPlanBWindowsInternal(context, screenW, screenH)
             }
             1 -> {
-                val rawLeft = cfg.ui1NavPackage.ifBlank { "com.google.android.apps.maps" }
-                val rawRight = cfg.ui1RightPackage.ifBlank { "com.google.android.youtube" }
-                val firstPkg = if (!ui1Swapped) rawLeft else rawRight
-                val secondPkg = if (!ui1Swapped) rawRight else rawLeft
-
-                val leftW = (availW * ui1Ratio).toInt().coerceIn(220, availW - 220)
-                val splitX = effLeft + leftW
-                val leftRect = Rect(effLeft, effTop, splitX, effTop + availH)
-                val rightRect = Rect(splitX, effTop, effLeft + availW, effTop + availH)
-
-                val okLeft = launchAndResizeFreeform(context, firstPkg, leftRect, screenW)
-                delay(220L)
-                val okRight = launchAndResizeFreeform(context, secondPkg, rightRect, screenW)
-                if (!okLeft || !okRight) {
+                // UI 1: Like Plan A! One side is 70% Native Map App (default Google Maps);
+                // the other side is 30% DX-Car Media Control Card (with cover art, weather, 6 shortcuts, tap cover to swap!).
+                val navPkg = cfg.ui1NavPackage.ifBlank { "com.google.android.apps.maps" }
+                // Demote any leftover UI 2 secondary freeform task first so the 30% Media Card side isn't covered
+                val otherPkgs = setOf(cfg.ui1RightPackage, cfg.ui2LeftPackage, cfg.ui2RightPackage)
+                    .filter { it.isNotBlank() && it != navPkg }
+                if (otherPkgs.isNotEmpty()) {
+                    demotePackagesFromFreeform(context, otherPkgs, screenW, screenH)
+                }
+                // Ensure DX-Car MainActivity is right behind as the base layer
+                RootShell.execSu(
+                    "am start --user 0 --windowingMode 1 --activity-single-top --activity-reorder-to-front -n com.dxcar.launcher/com.dxcar.launcher.MainActivity >/dev/null 2>&1",
+                    3L
+                )
+                val navW = (availW * ui1Ratio).toInt().coerceIn(240, availW - 220)
+                val navRect = if (!ui1Swapped) {
+                    Rect(effLeft, effTop, effLeft + navW, effTop + availH)
+                } else {
+                    Rect(effLeft + (availW - navW), effTop, effLeft + availW, effTop + availH)
+                }
+                val freeformOk = launchAndResizeFreeform(context, navPkg, navRect, screenW)
+                if (!freeformOk) {
                     triggerOemOrAospSplit(
-                        leftPkg = firstPkg,
-                        rightComponentOrPkg = secondPkg,
-                        ratio = ui1Ratio
+                        leftPkg = if (!ui1Swapped) navPkg else "com.dxcar.launcher/com.dxcar.launcher.SplitSidePanelActivity",
+                        rightComponentOrPkg = if (!ui1Swapped) "com.dxcar.launcher/com.dxcar.launcher.SplitSidePanelActivity" else navPkg,
+                        ratio = if (!ui1Swapped) ui1Ratio else (1f - ui1Ratio)
                     )
                 }
             }
@@ -143,6 +169,12 @@ object PlanBWindowEngine {
                 val rawRight = cfg.ui2RightPackage.ifBlank { "com.google.android.youtube" }
                 val firstPkg = if (!ui2Swapped) rawLeft else rawRight
                 val secondPkg = if (!ui2Swapped) rawRight else rawLeft
+
+                val strayPkgs = setOf(cfg.ui1NavPackage, cfg.ui1RightPackage)
+                    .filter { it.isNotBlank() && it != firstPkg && it != secondPkg }
+                if (strayPkgs.isNotEmpty()) {
+                    demotePackagesFromFreeform(context, strayPkgs, screenW, screenH)
+                }
 
                 val leftW = (availW * ui2Ratio).toInt().coerceIn(220, availW - 220)
                 val splitX = effLeft + leftW
@@ -161,6 +193,88 @@ object PlanBWindowEngine {
                 }
             }
         }
+    }
+
+    /**
+     * Switches any Freeform (windowingMode=5) tasks for the given packages back to Fullscreen (windowingMode=1)
+     * without killing or restarting their activities (so active Google Maps navigation never stops!).
+     */
+    private suspend fun demotePackagesFromFreeform(
+        context: Context,
+        packages: Collection<String>,
+        screenW: Int,
+        screenH: Int
+    ) {
+        val unique = packages.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        if (unique.isEmpty()) return
+        val script = buildString {
+            for (pkg in unique) {
+                val compStr = resolveLaunchComponent(context, pkg)?.flattenToShortString()
+                appendLine("for TID in \$(dumpsys activity activities | grep -B 3 -E \"ActivityRecord\\{[^}]* $pkg/\" | grep -oE \"t[0-9]+\" | tr -d 't' | uniq); do")
+                appendLine("  cmd activity task resize \$TID 0 0 $screenW $screenH >/dev/null 2>&1")
+                appendLine("  am task resize \$TID 0 0 $screenW $screenH >/dev/null 2>&1")
+                appendLine("done")
+                if (!compStr.isNullOrBlank()) {
+                    appendLine("am start --user 0 --windowingMode 1 --activity-single-top --activity-reorder-to-front -n '$compStr' >/dev/null 2>&1")
+                }
+            }
+        }
+        RootShell.execSu(script, 5L)
+    }
+
+    /**
+     * Demotes all Plan B Freeform windows back to standard Fullscreen stack and brings DX-Car MainActivity to front
+     * (used when opening App Drawer, Settings, Notification Center, or Page 0 so Freeform Maps never covers them!).
+     */
+    private suspend fun parkPlanBWindowsInternal(
+        context: Context,
+        screenW: Int,
+        screenH: Int
+    ) {
+        val cfg = RootHelperConfigStore.load(context)
+        val allPlanBPkgs = listOf(cfg.ui1NavPackage, cfg.ui1RightPackage, cfg.ui2LeftPackage, cfg.ui2RightPackage)
+        demotePackagesFromFreeform(context, allPlanBPkgs, screenW, screenH)
+        RootShell.execSu(
+            "am start --user 0 --windowingMode 1 --activity-single-top --activity-reorder-to-front -n com.dxcar.launcher/com.dxcar.launcher.MainActivity >/dev/null 2>&1",
+            4L
+        )
+    }
+
+    /**
+     * Demotes all Plan B Freeform windows and launches/expands [targetPkg] into 100% Fullscreen (windowingMode=1)
+     * without interrupting its running state (e.g. tapping Google Maps on Dock expands ongoing navigation to Fullscreen;
+     * tapping any other app covers Google Maps completely!).
+     */
+    private suspend fun launchFullscreenAppInternal(
+        context: Context,
+        targetPkg: String,
+        screenW: Int,
+        screenH: Int
+    ) {
+        val cfg = RootHelperConfigStore.load(context)
+        val otherPlanBPkgs = listOf(cfg.ui1NavPackage, cfg.ui1RightPackage, cfg.ui2LeftPackage, cfg.ui2RightPackage)
+            .filter { it.isNotBlank() && it != targetPkg }
+        demotePackagesFromFreeform(context, otherPlanBPkgs, screenW, screenH)
+
+        val comp = resolveLaunchComponent(context, targetPkg)
+        val compStr = comp?.flattenToShortString()
+        val launchCmd = if (!compStr.isNullOrBlank()) {
+            "am start --user 0 --windowingMode 1 --activity-single-top --activity-reorder-to-front -n '$compStr' >/dev/null 2>&1"
+        } else {
+            "monkey -p '$targetPkg' -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1"
+        }
+        val script = """
+            for TID in ${'$'}(dumpsys activity activities | grep -B 3 -E "ActivityRecord\{[^}]* $targetPkg/" | grep -oE "t[0-9]+" | tr -d 't' | uniq); do
+              cmd activity task resize ${'$'}TID 0 0 $screenW $screenH >/dev/null 2>&1
+              am task resize ${'$'}TID 0 0 $screenW $screenH >/dev/null 2>&1
+            done
+            $launchCmd
+            sleep 0.12
+            for TID in ${'$'}(dumpsys activity activities | grep -B 3 -E "ActivityRecord\{[^}]* $targetPkg/" | grep -oE "t[0-9]+" | tr -d 't' | uniq); do
+              cmd activity task resize ${'$'}TID 0 0 $screenW $screenH >/dev/null 2>&1
+            done
+        """.trimIndent()
+        RootShell.execSu(script, 5L)
     }
 
     private fun resolveLaunchComponent(context: Context, pkg: String): ComponentName? {

@@ -2,13 +2,13 @@
 
 <img src="play_store_assets/feature_graphic_1024x500.png" alt="DX-Car Launcher Feature Graphic" width="100%" />
 
-# DX-Car Launcher (`v1.8.7`)
+# DX-Car Launcher (`v1.8.8`)
 
 **專為橫向平板與 Android AI Box 車機盒打造的 Android Auto (Coolwalk) 風格車載啟動器 ＋ 手機遠端觸控／來電訊息同步橋接**
 
 **An Android Auto (Coolwalk) Inspired Car Launcher for Landscape Tablets & Android AI Box Head Units — with Smartphone Remote Touchpad & Live Call/Message Sync**
 
-[![Google Play Closed Testing](https://img.shields.io/badge/Google%20Play-Closed%20Testing%20v1.8.7-34A853?style=for-the-badge&logo=google-play&logoColor=white)](https://play.google.com/store/apps/details?id=com.dxcar.launcher)
+[![Google Play Closed Testing](https://img.shields.io/badge/Google%20Play-Closed%20Testing%20v1.8.8-34A853?style=for-the-badge&logo=google-play&logoColor=white)](https://play.google.com/store/apps/details?id=com.dxcar.launcher)
 [![Languages](https://img.shields.io/badge/Languages-%E7%B9%81%E9%AB%94%E4%B8%AD%E6%96%87%20%7C%20%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87%20%7C%20English%20%7C%20%E6%97%A5%E6%9C%AC%E8%AA%9E-1A73E8?style=for-the-badge)](#)
 
 [繁體中文說明](#-繁體中文說明) • [English Documentation](#-english-documentation) • [Google Play 下載三步驟](#-google-play-下載與封閉測試三步驟--google-play-3-step-install) • [畫面預覽 Screenshots](#-畫面預覽--screenshots)
@@ -98,16 +98,17 @@ Follow these **3 steps** to join the closed test and install directly from Googl
 6. **授權方案**
    - 提供 **7 天全功能免費試用**；試用期滿後可於 Google Play 一次買斷（`NT$500`）永久解鎖全部功能，無任何月費訂閱。
 
-7. **DX-Car Root 輔助 App（`com.dxcar.roothelper` v1.3.0，GitHub 獨立下載）**
+7. **DX-Car Root 輔助 App（`com.dxcar.roothelper` v1.3.3，GitHub 獨立下載）**
    - **Play 合規分拆**：主啟動器不含任何 `su` 程式碼；已 Root 車機安裝輔助 App 後，主啟動器即自動解鎖「方案 B」。
    - **GitHub 自動更新**：輔助 App 內建檢查 GitHub Releases 新版並自動下載／安裝。
-   - **一鍵診斷 Log 寄送**：蒐集車機 `display`、`SurfaceFlinger`、`containers`、`sudingConfig.ini`、`OTA` 套件與 `logcat`，一鍵寄送 Gmail 至 `dx9901mk5@gmail.com`。
+   - **問題診斷 Log（自願寄送、零定位隱私）**：遇到問題時可自願寄給開發者判讀（`dx9901mk5@gmail.com`），僅鎖定必要車機硬體、顯示、藍牙架構與 OTA 資訊，絕不紀錄或傳送 GPS 定位與個人資料。
    - **60Hz / 60fps 可行性判讀**：自動檢測車機顯示與投屏參數並提示是否可行，可行才開放套用 60Hz 更新率。
-   - **方案 B 介面客製化與操作教學（`v1.3.0` 全新雙工作區）**：
+   - **方案 B 介面客製化與操作教學（`v1.3.3`）**：
      - **第 0 介面（0/3）**：維持原有自訂小工具看板。
-     - **第 1 介面（1/3）**：獨立雙原生視窗，預設 **左 Google 地圖 70% ＋ 右 YouTube 30%**，可於輔助 App 自由改選任意 App 與預設比例。
-     - **第 2 介面（2/3）**：獨立第二組雙原生視窗（預設 50:50），同樣可自由改選地圖與影音播放 App。
-     - **懸浮中線手勢（UI 1 與 UI 2 皆支援）**：**長壓中線不放開**會出現發光脈動與 `◀ 比例 ▶` 動畫提示，左右拖曳放開即套用比例；**點兩下中線**立即左右交換視窗；**左右滑動中線**於 `0 / 1 / 2` 三介面循環切換；Dock 常駐釘選時整體右移不重疊。
+     - **第 1 介面（1/3）**：同方案 A 雙卡片佈局！預設 **左 70% 原生 Google 地圖 App ＋ 右 30% 啟動器媒體卡片**（自動擷取封面、左上天氣、下方 6 格捷徑），**點擊專輯封面（或點兩下中線）即可左右交換卡片位置**。
+     - **第 2 介面（2/3）**：獨立雙原生 App 分割視窗（預設 50:50），可自由改選地圖與影音播放 App。
+     - **全螢幕與視窗層級自動切換**：從左側 Dock 或 App 清單點擊任何 App（**包含再次點擊 Google 地圖本身**），皆會直接展開為 **100% 全螢幕**（導航狀態不中斷、地圖絕不殘留遮擋其他 App），Dock 自動收合為最上層邊緣拉條；點擊 Dock「回首頁」即自動切回分割畫面。
+     - **懸浮中線手勢（UI 1 與 UI 2 皆支援）**：**長壓中線不放開**出現發光脈動與 `◀ 比例 ▶` 動畫提示，左右拖曳放開即套用比例；**點兩下中線**立即左右交換視窗；**左右滑動中線**於 `0 / 1 / 2` 三介面循環切換。
    - **原廠 OTA App 攔截**：自動判讀（可手動改選）並隱藏停用原廠 OTA App，協助保留 Root 進行車機升級。
 
 ---

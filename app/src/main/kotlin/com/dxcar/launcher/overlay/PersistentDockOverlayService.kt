@@ -459,43 +459,78 @@ class PersistentDockOverlayService :
                                 isOverlayMode = true,
                                 isOverlayPinnedOpen = pinnedOpen,
                                 is3DCursorActive = cursor3DOn,
-                                onToggleAppDrawer = { bringDxCarToFront(MainActivity.EXTRA_OPEN_DRAWER) },
-                                onGoDashboard = {
-                                    if (config.overlayAutoCollapseEnabled && !pinnedOpen) {
-                                        isCollapsed.value = true
+                                onToggleAppDrawer = {
+                                    if (config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED) {
+                                        com.dxcar.launcher.system.RootHelperBridge.parkPlanBWindows(
+                                            this@PersistentDockOverlayService,
+                                            metrics.widthPx,
+                                            metrics.heightPx
+                                        )
                                     }
-                                    bringDxCarToFront(MainActivity.EXTRA_GO_DASHBOARD)
+                                    bringDxCarToFront(MainActivity.EXTRA_OPEN_DRAWER)
+                                },
+                                onGoDashboard = {
+                                    if (config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED) {
+                                        planBInFullscreenApp.value = false
+                                        isPinnedOpen.value = true
+                                        isCollapsed.value = false
+                                        dispatchPlanBPageFromOverlay(app, planBActivePage.value)
+                                    } else {
+                                        if (config.overlayAutoCollapseEnabled && !pinnedOpen) {
+                                            isCollapsed.value = true
+                                        }
+                                        bringDxCarToFront(MainActivity.EXTRA_GO_DASHBOARD)
+                                    }
                                 },
                                 onSlotClick = { slot ->
+                                    val isPlanB = config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED &&
+                                        com.dxcar.launcher.system.RootHelperBridge.isRootHelperInstalled(this@PersistentDockOverlayService)
                                     when {
                                         slot.packageName == "ACTION_DIAL" -> app.installedAppsRepository.launchDialer()
                                         !slot.packageName.isNullOrBlank() -> {
-                                            val ok = app.installedAppsRepository.launchAppSmart(
-                                                packageName = slot.packageName,
-                                                avoidDockFreeform = config.launchAppsAvoidDockFreeform,
-                                                metrics = metrics,
-                                                spec = spec
-                                            )
-                                            if (!ok && slot.id == "youtube") {
-                                                bringDxCarToFront(MainActivity.EXTRA_OPEN_YOUTUBE)
+                                            if (isPlanB) {
+                                                launchFullscreenFromOverlay(app, slot.packageName)
+                                            } else {
+                                                val ok = app.installedAppsRepository.launchAppSmart(
+                                                    packageName = slot.packageName,
+                                                    avoidDockFreeform = config.launchAppsAvoidDockFreeform,
+                                                    metrics = metrics,
+                                                    spec = spec
+                                                )
+                                                if (!ok && slot.id == "youtube") {
+                                                    bringDxCarToFront(MainActivity.EXTRA_OPEN_YOUTUBE)
+                                                }
                                             }
                                         }
                                         slot.id == "youtube" -> {
                                             val yt = app.installedAppsRepository.findBestYoutubePackage()
                                             if (yt != null) {
-                                                app.installedAppsRepository.launchAppSmart(
-                                                    packageName = yt,
-                                                    avoidDockFreeform = config.launchAppsAvoidDockFreeform,
-                                                    metrics = metrics,
-                                                    spec = spec
-                                                )
+                                                if (isPlanB) {
+                                                    launchFullscreenFromOverlay(app, yt)
+                                                } else {
+                                                    app.installedAppsRepository.launchAppSmart(
+                                                        packageName = yt,
+                                                        avoidDockFreeform = config.launchAppsAvoidDockFreeform,
+                                                        metrics = metrics,
+                                                        spec = spec
+                                                    )
+                                                }
                                             } else {
                                                 bringDxCarToFront(MainActivity.EXTRA_OPEN_YOUTUBE)
                                             }
                                         }
-                                        else -> bringDxCarToFront(MainActivity.EXTRA_OPEN_DRAWER)
+                                        else -> {
+                                            if (isPlanB) {
+                                                com.dxcar.launcher.system.RootHelperBridge.parkPlanBWindows(
+                                                    this@PersistentDockOverlayService,
+                                                    metrics.widthPx,
+                                                    metrics.heightPx
+                                                )
+                                            }
+                                            bringDxCarToFront(MainActivity.EXTRA_OPEN_DRAWER)
+                                        }
                                     }
-                                    if (config.overlayAutoCollapseEnabled && !pinnedOpen) {
+                                    if (isPlanB || (config.overlayAutoCollapseEnabled && !pinnedOpen)) {
                                         isCollapsed.value = true
                                     }
                                 },
@@ -515,7 +550,16 @@ class PersistentDockOverlayService :
                                     DxCarAccessibilityService.instance?.openQuickSettings()
                                     if (config.overlayAutoCollapseEnabled && !pinnedOpen) isCollapsed.value = true
                                 },
-                                onNotificationsClick = { bringDxCarToFront(MainActivity.EXTRA_OPEN_NOTIFICATIONS) },
+                                onNotificationsClick = {
+                                    if (config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED) {
+                                        com.dxcar.launcher.system.RootHelperBridge.parkPlanBWindows(
+                                            this@PersistentDockOverlayService,
+                                            metrics.widthPx,
+                                            metrics.heightPx
+                                        )
+                                    }
+                                    bringDxCarToFront(MainActivity.EXTRA_OPEN_NOTIFICATIONS)
+                                },
                                 onBackClick = {
                                     interactionTick.value++
                                     val acc = DxCarAccessibilityService.instance
@@ -876,6 +920,7 @@ class PersistentDockOverlayService :
                         IncomingCallBanner(
                             callState = callState,
                             scale = config.notificationBannerScale,
+                            scaleFactorOverride = config.notificationBannerScaleFloat,
                             useCarBoxAudio = useCarBoxAudio,
                             onToggleAudioRoute = { app.notificationCenter.toggleCallAudioRoute(this@PersistentDockOverlayService) },
                             onAnswer = { app.notificationCenter.performCallAction(CallActionCommand.ANSWER) },
@@ -885,6 +930,7 @@ class PersistentDockOverlayService :
                             message = popupMessage,
                             quickReplies = config.quickReplies,
                             scale = config.notificationBannerScale,
+                            scaleFactorOverride = config.notificationBannerScaleFloat,
                             onExpandQuickReplies = { app.notificationCenter.pausePopupDismiss() },
                             onReadAloud = { app.notificationCenter.readMessageAloud(it) },
                             onQuickReply = { item, reply -> app.notificationCenter.sendQuickReply(item, reply) },
@@ -947,6 +993,7 @@ class PersistentDockOverlayService :
                             }
                         }
                     } else {
+                        val isPlanB = config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED
                         Surface(
                             color = palette.cardSurface.copy(alpha = 0.96f),
                             shape = RoundedCornerShape(22.dp),
@@ -957,54 +1004,56 @@ class PersistentDockOverlayService :
                                 .border(1.2.dp, palette.cardBorder, RoundedCornerShape(22.dp))
                         ) {
                             Column(modifier = Modifier.fillMaxSize()) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(palette.cardSurfaceElevated)
-                                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Surface(
-                                        color = palette.accent,
-                                        shape = RoundedCornerShape(10.dp),
-                                        modifier = Modifier.bouncyClickable {
-                                            planCPanelRequested.value = false
-                                            bringDxCarToFront(null)
-                                        }
+                                if (!isPlanB) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(palette.cardSurfaceElevated)
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(Icons.Rounded.Home, contentDescription = null, tint = palette.onAccent, modifier = Modifier.size(14.dp))
-                                            Spacer(Modifier.width(4.dp))
-                                            Text("回首頁", color = palette.onAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         Surface(
-                                            color = palette.cardSurface,
+                                            color = palette.accent,
                                             shape = RoundedCornerShape(10.dp),
-                                            modifier = Modifier.bouncyClickable { planCPanelMinimized.value = true }
+                                            modifier = Modifier.bouncyClickable {
+                                                planCPanelRequested.value = false
+                                                bringDxCarToFront(null)
+                                            }
                                         ) {
-                                            Text(
-                                                text = "縮小",
-                                                color = palette.secondaryText,
-                                                fontSize = 11.sp,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                            )
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(Icons.Rounded.Home, contentDescription = null, tint = palette.onAccent, modifier = Modifier.size(14.dp))
+                                                Spacer(Modifier.width(4.dp))
+                                                Text("回首頁", color = palette.onAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
                                         }
-                                        Surface(
-                                            color = palette.cardSurface,
-                                            shape = CircleShape,
-                                            modifier = Modifier
-                                                .size(24.dp)
-                                                .bouncyClickable { planCPanelRequested.value = false }
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = palette.secondaryText, modifier = Modifier.size(14.dp))
+
+                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Surface(
+                                                color = palette.cardSurface,
+                                                shape = RoundedCornerShape(10.dp),
+                                                modifier = Modifier.bouncyClickable { planCPanelMinimized.value = true }
+                                            ) {
+                                                Text(
+                                                    text = "縮小",
+                                                    color = palette.secondaryText,
+                                                    fontSize = 11.sp,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                                )
+                                            }
+                                            Surface(
+                                                color = palette.cardSurface,
+                                                shape = CircleShape,
+                                                modifier = Modifier
+                                                    .size(24.dp)
+                                                    .bouncyClickable { planCPanelRequested.value = false }
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = palette.secondaryText, modifier = Modifier.size(14.dp))
+                                                }
                                             }
                                         }
                                     }
@@ -1015,8 +1064,8 @@ class PersistentDockOverlayService :
                                         media = media,
                                         weather = weather,
                                         isPrimary = false,
-                                        pureMusicMode = true,
-                                        showSwapButton = false,
+                                        pureMusicMode = !isPlanB,
+                                        showSwapButton = isPlanB,
                                         showSixShortcuts = config.showSixShortcutsInMediaPanel,
                                         customShortcutSlots = config.customShortcutSlots,
                                         splitShortcuts = config.splitShortcuts,
@@ -1027,14 +1076,39 @@ class PersistentDockOverlayService :
                                         onPrevious = { app.mediaControlBridge.skipPrevious() },
                                         onToggleFavorite = { app.mediaControlBridge.toggleFavoriteOrLike() },
                                         onSelectSession = { app.mediaControlBridge.selectSession(it) },
+                                        onSwapRequested = {
+                                            if (isPlanB) {
+                                                app.preferences.update { it.copy(page1Swapped = !it.page1Swapped) }
+                                                dispatchPlanBPageFromOverlay(app, 1)
+                                            }
+                                        },
                                         onOpenMediaApp = {
                                             if (media.packageName.isNotBlank()) {
-                                                app.installedAppsRepository.launchAppFullscreen(media.packageName)
+                                                if (isPlanB) {
+                                                    launchFullscreenFromOverlay(app, media.packageName)
+                                                } else {
+                                                    app.installedAppsRepository.launchAppFullscreen(media.packageName)
+                                                }
                                             }
+                                        },
+                                        onCustomSlotEmptyClick = {
+                                            if (isPlanB) {
+                                                val m = metricsFlow.value
+                                                com.dxcar.launcher.system.RootHelperBridge.parkPlanBWindows(
+                                                    this@PersistentDockOverlayService,
+                                                    m.widthPx,
+                                                    m.heightPx
+                                                )
+                                            }
+                                            bringDxCarToFront(MainActivity.EXTRA_GO_DASHBOARD)
                                         },
                                         onCustomSlotLaunch = { token ->
                                             if (!token.startsWith("__")) {
-                                                app.installedAppsRepository.launchAppFullscreen(token)
+                                                if (isPlanB) {
+                                                    launchFullscreenFromOverlay(app, token)
+                                                } else {
+                                                    app.installedAppsRepository.launchAppFullscreen(token)
+                                                }
                                             }
                                         }
                                     )
@@ -1123,8 +1197,28 @@ class PersistentDockOverlayService :
         runCatching { windowManager.addView(view, params) }
     }
 
+    private fun launchFullscreenFromOverlay(app: DxCarApp, pkg: String) {
+        if (pkg.isBlank()) return
+        planBInFullscreenApp.value = true
+        isPinnedOpen.value = false
+        isCollapsed.value = true
+        val m = metricsFlow.value
+        val ok = com.dxcar.launcher.system.RootHelperBridge.launchFullscreenApp(
+            context = this,
+            packageName = pkg,
+            screenWidth = m.widthPx,
+            screenHeight = m.heightPx
+        )
+        if (ok) {
+            app.installedAppsRepository.recordRecent(pkg)
+        } else {
+            app.installedAppsRepository.launchAppFullscreen(pkg)
+        }
+    }
+
     private fun dispatchPlanBPageFromOverlay(app: DxCarApp, targetPage: Int) {
         val coerced = targetPage.coerceIn(0, 2)
+        planBInFullscreenApp.value = false
         planBActivePage.value = coerced
         onPlanBPageSyncToActivity?.invoke(coerced)
         val cfg = app.preferences.config.value
@@ -1437,7 +1531,7 @@ class PersistentDockOverlayService :
                 FiveState(config, isHomeFg, collapsed, metrics, fgPkg)
             }.collect { (config, isHomeFg, collapsed, metrics, fgPkg) ->
                 val isPlanBMode = config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED
-                if (isPlanBMode) {
+                if (isPlanBMode && !planBInFullscreenApp.value) {
                     isPinnedOpen.value = true
                     isCollapsed.value = false
                 } else if (lastHomeForeground && !isHomeFg) {
@@ -1619,10 +1713,16 @@ class PersistentDockOverlayService :
                 app.isLauncherForeground,
                 planCPanelRequested,
                 planCPanelMinimized,
-                combine(metricsFlow, planBActivePage, DxCarAccessibilityService.foregroundPackage) { m, p, f -> Triple(m, p, f) }
-            ) { config, isHomeFg, requested, minimized, mpf ->
-                FiveState(config, isHomeFg, requested, minimized, mpf)
-            }.collect { (config, isHomeFg, requested, minimized, mpf) ->
+                combine(
+                    metricsFlow,
+                    planBActivePage,
+                    DxCarAccessibilityService.foregroundPackage,
+                    planBInFullscreenApp
+                ) { m, p, f, fs -> Pair(Triple(m, p, f), fs) }
+            ) { config, isHomeFg, requested, minimized, mpffs ->
+                FiveState(config, isHomeFg, requested, minimized, mpffs)
+            }.collect { (config, isHomeFg, requested, minimized, mpffs) ->
+                val (mpf, inPlanBFullscreen) = mpffs
                 val (metrics, activePlanBPage, fgPkg) = mpf
                 val sensitiveFg = fgPkg == "com.topjohnwu.magisk" ||
                     fgPkg.contains("packageinstaller", ignoreCase = true) ||
@@ -1631,9 +1731,10 @@ class PersistentDockOverlayService :
                 val showPlanCPanel = !isHomeFg &&
                     !sensitiveFg &&
                     config.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
-                    requested &&
-                    config.homeExperimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA &&
-                    config.planCOverlayMusicPanelEnabled
+                    (
+                        (requested && config.homeExperimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA && config.planCOverlayMusicPanelEnabled) ||
+                            (isPlanB && !inPlanBFullscreen && activePlanBPage == 1)
+                        )
 
                 val spec = CoolwalkLayoutEngine.compute(
                     metrics = metrics,
@@ -1645,25 +1746,38 @@ class PersistentDockOverlayService :
                     (spec.dockThicknessDp * metrics.density).toInt()
                 } else 0
                 val availW = (metrics.widthPx - dockPx).coerceAtLeast(480)
+                val leftOffset = if (spec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0
+                val helperCfg = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(this@PersistentDockOverlayService)
 
                 val view = planCPanelView
                 val params = planCPanelParams
                 if (view != null && params != null) {
                     view.visibility = if (showPlanCPanel) View.VISIBLE else View.GONE
                     if (showPlanCPanel) {
-                        val panelW = (availW * (1f - spec.primaryWeight)).toInt().coerceIn(260, (availW * 0.45f).toInt())
+                        val ui1Ratio = if (isPlanB && helperCfg.planBEnabled) helperCfg.ui1SplitRatio else spec.primaryWeight
+                        val panelW = (availW * (1f - ui1Ratio)).toInt().coerceIn(240, (availW * 0.75f).toInt())
 
-                        params.gravity = if (config.rightHandDrive) {
-                            Gravity.START or Gravity.CENTER_VERTICAL
-                        } else {
-                            Gravity.END or Gravity.CENTER_VERTICAL
-                        }
-                        if (minimized && !isPlanB) {
-                            params.width = WindowManager.LayoutParams.WRAP_CONTENT
-                            params.height = WindowManager.LayoutParams.WRAP_CONTENT
-                        } else {
+                        if (isPlanB) {
+                            params.gravity = Gravity.TOP or Gravity.START
+                            params.x = if (!config.page1Swapped) leftOffset + (availW - panelW) else leftOffset
+                            params.y = 0
                             params.width = panelW
                             params.height = WindowManager.LayoutParams.MATCH_PARENT
+                        } else {
+                            params.gravity = if (config.rightHandDrive) {
+                                Gravity.START or Gravity.CENTER_VERTICAL
+                            } else {
+                                Gravity.END or Gravity.CENTER_VERTICAL
+                            }
+                            params.x = 0
+                            params.y = 0
+                            if (minimized) {
+                                params.width = WindowManager.LayoutParams.WRAP_CONTENT
+                                params.height = WindowManager.LayoutParams.WRAP_CONTENT
+                            } else {
+                                params.width = panelW
+                                params.height = WindowManager.LayoutParams.MATCH_PARENT
+                            }
                         }
                         runCatching { windowManager.updateViewLayout(view, params) }
                     }
@@ -1672,18 +1786,21 @@ class PersistentDockOverlayService :
                 // Position Plan B Seam Handle on UI 1 and UI 2
                 val seamV = planBSeamView
                 val seamP = planBSeamParams
-                val showSeam = isPlanB && !isHomeFg && !sensitiveFg && (activePlanBPage == 1 || activePlanBPage == 2)
+                val showSeam = isPlanB && !inPlanBFullscreen && !isHomeFg && !sensitiveFg && (activePlanBPage == 1 || activePlanBPage == 2)
                 if (seamV != null && seamP != null) {
                     seamV.visibility = if (showSeam) View.VISIBLE else View.GONE
                     if (showSeam) {
-                        val helperCfg = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(this@PersistentDockOverlayService)
-                        val ratio = if (activePlanBPage == 1) {
+                        val baseRatio = if (activePlanBPage == 1) {
                             if (helperCfg.planBEnabled) helperCfg.ui1SplitRatio else config.primarySplitRatio
                         } else {
                             if (helperCfg.planBEnabled) helperCfg.ui2SplitRatio else config.page2SplitRatio
                         }
-                        val leftOffset = if (spec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0
-                        val splitX = leftOffset + (availW * ratio).toInt()
+                        val effectiveLeftRatio = if (activePlanBPage == 1 && config.page1Swapped) {
+                            (1f - baseRatio)
+                        } else {
+                            baseRatio
+                        }
+                        val splitX = leftOffset + (availW * effectiveLeftRatio).toInt()
                         seamP.gravity = Gravity.TOP or Gravity.START
                         seamP.x = (splitX - (17f * metrics.density).toInt()).coerceAtLeast(0)
                         seamP.y = ((metrics.heightPx - (110f * metrics.density).toInt()) / 2).coerceAtLeast(0)
@@ -1779,6 +1896,7 @@ class PersistentDockOverlayService :
         private val _is3DWindowAttached = MutableStateFlow(false)
         val is3DWindowAttached: kotlinx.coroutines.flow.StateFlow<Boolean> = _is3DWindowAttached
         val planBActivePage = MutableStateFlow(1)
+        val planBInFullscreenApp = MutableStateFlow(false)
         var onPlanBPageSyncToActivity: ((Int) -> Unit)? = null
 
         fun start(context: Context) {

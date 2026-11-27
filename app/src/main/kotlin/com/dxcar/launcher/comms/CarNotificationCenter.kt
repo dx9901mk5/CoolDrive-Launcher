@@ -68,6 +68,37 @@ class CarNotificationCenter(
         popupDismissJob?.cancel()
     }
 
+    fun showLiveDemoBannerForScalePreview() {
+        val cur = _popupMessage.value
+        val demo = if (cur != null && cur.id == "scale_preview_demo") {
+            cur
+        } else {
+            CarMessageItem(
+                id = "scale_preview_demo",
+                notificationKey = "scale_preview_demo",
+                appPackage = "jp.naver.line.android",
+                appName = "LINE",
+                sender = com.dxcar.launcher.i18n.DxCarI18n.tr(
+                    "示範通知預覽 · 陳經理",
+                    "示范通知预览 · 陈经理",
+                    "Demo Preview · Alex",
+                    "通知プレビュー · 田中"
+                ),
+                text = com.dxcar.launcher.i18n.DxCarI18n.tr(
+                    "通知訊息字體已放大 1.5X！拖動滑桿可即時預覽最舒適的通知尺寸。",
+                    "通知消息字体已放大 1.5X！拖动滑块可实时预览最舒适的通知尺寸。",
+                    "Message text is now 1.5X larger! Drag the slider to preview banner size live.",
+                    "通知メッセージ文字を1.5倍に拡大！スライダーでリアルタイムにサイズ調整できます。"
+                ),
+                timestampMs = System.currentTimeMillis(),
+                canReply = true,
+                fromPhoneBridge = false
+            )
+        }
+        _popupMessage.value = demo
+        schedulePopupDismiss(demo.id)
+    }
+
     private fun schedulePopupDismiss(messageId: String) {
         popupDismissJob?.cancel()
         popupDismissJob = scope.launch {

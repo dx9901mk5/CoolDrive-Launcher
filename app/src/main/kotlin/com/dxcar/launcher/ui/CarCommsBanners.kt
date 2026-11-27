@@ -148,6 +148,7 @@ fun SwipeHorizontalToDismissBox(
 fun IncomingCallBanner(
     callState: CarCallState,
     scale: NotificationBannerScale = NotificationBannerScale.SCALE_1_0X,
+    scaleFactorOverride: Float? = null,
     useCarBoxAudio: Boolean = true,
     onToggleAudioRoute: (() -> Unit)? = null,
     onAnswer: () -> Unit,
@@ -155,7 +156,7 @@ fun IncomingCallBanner(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalDxCarColors.current
-    val s = scale.factor
+    val s = (scaleFactorOverride ?: scale.factor).coerceIn(0.5f, 2.2f)
     var elapsedSec by remember(callState.startedAtMs, callState.status) { mutableLongStateOf(0L) }
 
     LaunchedEffect(callState.status, callState.startedAtMs) {
@@ -341,6 +342,7 @@ fun IncomingMessageBanner(
     message: CarMessageItem?,
     quickReplies: List<String>,
     scale: NotificationBannerScale = NotificationBannerScale.SCALE_1_0X,
+    scaleFactorOverride: Float? = null,
     onExpandQuickReplies: () -> Unit = {},
     onReadAloud: (CarMessageItem) -> Unit,
     onQuickReply: (CarMessageItem, String) -> Unit,
@@ -350,7 +352,7 @@ fun IncomingMessageBanner(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalDxCarColors.current
-    val s = scale.factor
+    val s = (scaleFactorOverride ?: scale.factor).coerceIn(0.5f, 2.2f)
 
     AnimatedVisibility(
         visible = message != null,
@@ -362,20 +364,21 @@ fun IncomingMessageBanner(
         val appTint = messageBrandColor(item.appPackage, colors.accent)
         var repliesExpanded by remember(item.id) { mutableStateOf(false) }
 
-        val maxCardW = (380f * s).coerceIn(210f, 770f).dp
-        val cornerDp = (18f * s).coerceIn(12f, 26f).dp
-        val padH = (12f * s).coerceIn(8f, 20f).dp
-        val padV = (9.5f * s).coerceIn(6f, 16f).dp
-        val avatarDp = (34f * s).coerceIn(22f, 54f).dp
-        val avatarIconDp = (18f * s).coerceIn(12f, 29f).dp
-        val senderSp = (17f * s).coerceIn(11f, 32f).sp
-        val badgeSp = (11f * s).coerceIn(8.5f, 19f).sp
-        val bodySp = (14.5f * s).coerceIn(10f, 27f).sp
-        val bodyLineH = (19.5f * s).coerceIn(13.5f, 35f).sp
-        val actionBtnDp = (29f * s).coerceIn(22f, 46f).dp
-        val actionIconDp = (16f * s).coerceIn(12f, 26f).dp
-        val replyBtnSp = (12f * s).coerceIn(9.5f, 20f).sp
-        val replyChipSp = (12.5f * s).coerceIn(10f, 21f).sp
+        val maxCardW = (470f * s).coerceIn(260f, 880f).dp
+        val cornerDp = (18f * s).coerceIn(12f, 28f).dp
+        val padH = (13f * s).coerceIn(9f, 22f).dp
+        val padV = (11f * s).coerceIn(7f, 18f).dp
+        val avatarDp = (38f * s).coerceIn(24f, 60f).dp
+        val avatarIconDp = (20f * s).coerceIn(13f, 32f).dp
+        // Message notification fonts boosted 1.5X per user feedback
+        val senderSp = (25.5f * s).coerceIn(15f, 46f).sp
+        val badgeSp = (15f * s).coerceIn(11f, 26f).sp
+        val bodySp = (22f * s).coerceIn(14f, 40f).sp
+        val bodyLineH = (29.5f * s).coerceIn(18.5f, 52f).sp
+        val actionBtnDp = (32f * s).coerceIn(24f, 50f).dp
+        val actionIconDp = (18f * s).coerceIn(13f, 28f).dp
+        val replyBtnSp = (16f * s).coerceIn(11.5f, 26f).sp
+        val replyChipSp = (16.5f * s).coerceIn(12f, 27f).sp
 
         val chevronRotation by animateFloatAsState(
             targetValue = if (repliesExpanded) 180f else 0f,
