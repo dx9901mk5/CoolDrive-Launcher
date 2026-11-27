@@ -1041,6 +1041,25 @@ fun PhoneCompanionScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                             }
+                            OutlinedButton(
+                                onClick = {
+                                    onToggleSyncAllApps(false)
+                                    onSetAllowedPackages(emptyList())
+                                },
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text(
+                                    str(
+                                        "✕ 全不勾選",
+                                        "✕ 全不勾选",
+                                        "✕ Unselect All",
+                                        "✕ すべて解除"
+                                    ),
+                                    color = Color(0xFFEF4444),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                             Button(
                                 onClick = { showInstalledAppPicker = true },
                                 colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
@@ -1502,7 +1521,7 @@ fun PhoneCompanionScreen(
                             modifier = Modifier.fillMaxWidth()
                         )
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             OutlinedButton(
                                 onClick = {
                                     onToggleSyncAllApps(false)
@@ -1521,6 +1540,20 @@ fun PhoneCompanionScreen(
                                 shape = RoundedCornerShape(12.dp)
                             ) {
                                 Text(str("只勾選預設常用", "只勾选默认常用", "Default Apps Only", "標準アプリのみ選択"), fontSize = 12.sp)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    onToggleSyncAllApps(false)
+                                    onSetAllowedPackages(emptyList())
+                                },
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text(
+                                    str("✕ 全不勾選", "✕ 全不勾选", "✕ Unselect All", "✕ すべて解除"),
+                                    color = Color(0xFFEF4444),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
 
