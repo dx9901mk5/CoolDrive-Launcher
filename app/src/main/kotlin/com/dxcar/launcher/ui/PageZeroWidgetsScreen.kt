@@ -6,6 +6,7 @@ import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProviderInfo
 import android.content.Intent
 import android.os.Bundle
+import android.view.MotionEvent
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -314,6 +315,7 @@ fun PageZeroWidgetBoard(
                         var cardW by remember(widget.id, widget.widthDp) { mutableFloatStateOf(widget.widthDp.coerceIn(180f, 620f)) }
                         var cardH by remember(widget.id, widget.heightDp) { mutableFloatStateOf(widget.heightDp.coerceIn(130f, 440f)) }
 
+                        val topDragBarH = if (isEditMode) 30.dp else 0.dp
                         Box(
                             modifier = Modifier
                                 .offset(x = posX.dp, y = posY.dp)
@@ -322,105 +324,209 @@ fun PageZeroWidgetBoard(
                                 .clip(RoundedCornerShape(22.dp))
                                 .background(colors.cardSurface)
                                 .border(
-                                    width = if (isEditMode) 1.6.dp else 1.dp,
+                                    width = if (isEditMode) 1.8.dp else 1.dp,
                                     color = if (isEditMode) colors.accent else colors.cardBorder,
                                     shape = RoundedCornerShape(22.dp)
                                 )
-                                .pointerInput(widget.id, canvasW, canvasH) {
-                                    detectDragGesturesAfterLongPress(
-                                        onDragStart = {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        },
-                                        onDrag = { change, dragAmount ->
-                                            change.consume()
-                                            val dxDp = dragAmount.x / density.density
-                                            val dyDp = dragAmount.y / density.density
-                                            posX = (posX + dxDp).coerceIn(0f, (canvasW - cardW).coerceAtLeast(0f))
-                                            posY = (posY + dyDp).coerceIn(0f, (canvasH - cardH).coerceAtLeast(0f))
-                                        },
-                                        onDragEnd = {
-                                            onUpdateWidget(widget.copy(xDp = posX, yDp = posY))
-                                        }
-                                    )
+                                .pointerInput(widget.id, canvasW, canvasH, isEditMode) {
+                                    if (isEditMode) {
+                                        detectDragGestures(
+                                            onDragStart = {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                val dxDp = dragAmount.x / density.density
+                                                val dyDp = dragAmount.y / density.density
+                                                posX = (posX + dxDp).coerceIn(0f, (canvasW - cardW).coerceAtLeast(0f))
+                                                posY = (posY + dyDp).coerceIn(0f, (canvasH - cardH).coerceAtLeast(0f))
+                                            },
+                                            onDragEnd = {
+                                                onUpdateWidget(widget.copy(xDp = posX, yDp = posY))
+                                            }
+                                        )
+                                    } else {
+                                        detectDragGesturesAfterLongPress(
+                                            onDragStart = {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                val dxDp = dragAmount.x / density.density
+                                                val dyDp = dragAmount.y / density.density
+                                                posX = (posX + dxDp).coerceIn(0f, (canvasW - cardW).coerceAtLeast(0f))
+                                                posY = (posY + dyDp).coerceIn(0f, (canvasH - cardH).coerceAtLeast(0f))
+                                            },
+                                            onDragEnd = {
+                                                onUpdateWidget(widget.copy(xDp = posX, yDp = posY))
+                                            }
+                                        )
+                                    }
                                 }
                         ) {
-                            when (widget.type) {
-                                "CLOCK" -> BuiltInClockWidget(sysStatus, isNight)
-                                "SPEED" -> BuiltInSpeedWidget(location)
-                                "WEATHER" -> BuiltInWeatherWidget(weather, onWeatherClick)
-                                "QUICK_NAV" -> BuiltInQuickNavWidget(config, onQuickNavigateQuery)
-                                "SYSTEM" -> BuiltInSystemWidget(sysStatus)
-                                "APP_WIDGET" -> {
-                                    val info = remember(widget.appWidgetId) {
-                                        if (widget.appWidgetId > 0) {
-                                            runCatching { appWidgetManager.getAppWidgetInfo(widget.appWidgetId) }.getOrNull()
-                                        } else null
-                                    }
-                                    if (info != null) {
-                                        AndroidView(
-                                            factory = { ctx ->
-                                                val hostView = appWidgetHost.createView(ctx, widget.appWidgetId, info)
-                                                hostView.setAppWidget(widget.appWidgetId, info)
-                                                hostView.updateAppWidgetOptions(Bundle())
-                                                FrameLayout(ctx).apply {
-                                                    layoutParams = ViewGroup.LayoutParams(
-                                                        ViewGroup.LayoutParams.MATCH_PARENT,
-                                                        ViewGroup.LayoutParams.MATCH_PARENT
-                                                    )
-                                                    addView(
-                                                        hostView,
-                                                        FrameLayout.LayoutParams(
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(top = topDragBarH)
+                            ) {
+                                when (widget.type) {
+                                    "CLOCK" -> BuiltInClockWidget(sysStatus, isNight)
+                                    "SPEED" -> BuiltInSpeedWidget(location)
+                                    "WEATHER" -> BuiltInWeatherWidget(
+                                        weather = weather,
+                                        onWeatherClick = if (isEditMode) ({}) else onWeatherClick
+                                    )
+                                    "QUICK_NAV" -> BuiltInQuickNavWidget(
+                                        config = config,
+                                        onQuickNavigateQuery = if (isEditMode) ({}) else onQuickNavigateQuery
+                                    )
+                                    "SYSTEM" -> BuiltInSystemWidget(sysStatus)
+                                    "APP_WIDGET" -> {
+                                        val info = remember(widget.appWidgetId) {
+                                            if (widget.appWidgetId > 0) {
+                                                runCatching { appWidgetManager.getAppWidgetInfo(widget.appWidgetId) }.getOrNull()
+                                            } else null
+                                        }
+                                        if (info != null) {
+                                            AndroidView(
+                                                factory = { ctx ->
+                                                    val hostView = appWidgetHost.createView(ctx, widget.appWidgetId, info)
+                                                    hostView.setAppWidget(widget.appWidgetId, info)
+                                                    hostView.updateAppWidgetOptions(Bundle())
+                                                    object : FrameLayout(ctx) {
+                                                        override fun onInterceptTouchEvent(ev: MotionEvent?): Boolean {
+                                                            // Block all inner AppWidget clicks/scrolls while in Edit Mode!
+                                                            if (tag == true) return true
+                                                            return super.onInterceptTouchEvent(ev)
+                                                        }
+
+                                                        override fun onTouchEvent(event: MotionEvent?): Boolean {
+                                                            if (tag == true) return false
+                                                            return super.onTouchEvent(event)
+                                                        }
+                                                    }.apply {
+                                                        tag = isEditMode
+                                                        layoutParams = ViewGroup.LayoutParams(
                                                             ViewGroup.LayoutParams.MATCH_PARENT,
                                                             ViewGroup.LayoutParams.MATCH_PARENT
                                                         )
-                                                    )
+                                                        addView(
+                                                            hostView,
+                                                            FrameLayout.LayoutParams(
+                                                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                                                ViewGroup.LayoutParams.MATCH_PARENT
+                                                            )
+                                                        )
+                                                    }
+                                                },
+                                                update = { frame ->
+                                                    frame.tag = isEditMode
+                                                },
+                                                modifier = Modifier.fillMaxSize().padding(8.dp)
+                                            )
+                                        } else {
+                                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                                Text(
+                                                    text = widget.label.ifBlank { "AppWidget" },
+                                                    color = colors.secondaryText,
+                                                    fontSize = 13.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // In Edit Mode, place a full-card touch-shield over the widget body so users can drag anywhere without triggering widget clicks!
+                                if (isEditMode) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(Color.Black.copy(alpha = 0.08f))
+                                    )
+                                }
+                            }
+
+                            // Top Drag Handle Bar shown in Edit Mode ("編輯模式下上方多出一個小bar可以讓用戶拖動")
+                            if (isEditMode) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .align(Alignment.TopCenter)
+                                        .fillMaxWidth()
+                                        .height(topDragBarH)
+                                        .background(colors.cardSurfaceElevated.copy(alpha = 0.94f))
+                                        .pointerInput(widget.id, canvasW, canvasH) {
+                                            detectDragGestures(
+                                                onDragStart = {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                },
+                                                onDrag = { change, dragAmount ->
+                                                    change.consume()
+                                                    val dxDp = dragAmount.x / density.density
+                                                    val dyDp = dragAmount.y / density.density
+                                                    posX = (posX + dxDp).coerceIn(0f, (canvasW - cardW).coerceAtLeast(0f))
+                                                    posY = (posY + dyDp).coerceIn(0f, (canvasH - cardH).coerceAtLeast(0f))
+                                                },
+                                                onDragEnd = {
+                                                    onUpdateWidget(widget.copy(xDp = posX, yDp = posY))
                                                 }
-                                            },
-                                            modifier = Modifier.fillMaxSize().padding(8.dp)
-                                        )
-                                    } else {
-                                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                            Text(
-                                                text = widget.label.ifBlank { "AppWidget" },
-                                                color = colors.secondaryText,
-                                                fontSize = 13.sp
                                             )
                                         }
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(44.dp)
+                                                .height(5.dp)
+                                                .clip(CircleShape)
+                                                .background(colors.accent)
+                                        )
+                                        Text(
+                                            text = str("按住拖曳移動", "按住拖拽移动", "Drag to Move", "ドラッグで移動"),
+                                            color = colors.accent,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                 }
                             }
 
-                            // Bottom-right Resize Handle (always accessible in edit mode or subtle corner)
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(6.dp)
-                                    .size(26.dp)
-                                    .clip(CircleShape)
-                                    .background(colors.cardSurfaceElevated.copy(alpha = 0.88f))
-                                    .border(1.dp, colors.accent.copy(alpha = 0.55f), CircleShape)
-                                    .pointerInput(widget.id, canvasW, canvasH) {
-                                        detectDragGestures(
-                                            onDrag = { change, dragAmount ->
-                                                change.consume()
-                                                val dwDp = dragAmount.x / density.density
-                                                val dhDp = dragAmount.y / density.density
-                                                cardW = (cardW + dwDp).coerceIn(180f, (canvasW - posX).coerceAtLeast(180f))
-                                                cardH = (cardH + dhDp).coerceIn(130f, (canvasH - posY).coerceAtLeast(130f))
-                                            },
-                                            onDragEnd = {
-                                                onUpdateWidget(widget.copy(widthDp = cardW, heightDp = cardH))
-                                            }
-                                        )
-                                    }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.OpenInFull,
-                                    contentDescription = str("縮放大小", "缩放大小", "Resize", "サイズ変更"),
-                                    tint = colors.accent,
-                                    modifier = Modifier.size(14.dp)
-                                )
+                            // Bottom-right Resize Handle (only active in Edit Mode so normal mode never accidentally resizes!)
+                            if (isEditMode) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(6.dp)
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(colors.cardSurfaceElevated.copy(alpha = 0.94f))
+                                        .border(1.2.dp, colors.accent.copy(alpha = 0.85f), CircleShape)
+                                        .pointerInput(widget.id, canvasW, canvasH) {
+                                            detectDragGestures(
+                                                onDrag = { change, dragAmount ->
+                                                    change.consume()
+                                                    val dwDp = dragAmount.x / density.density
+                                                    val dhDp = dragAmount.y / density.density
+                                                    cardW = (cardW + dwDp).coerceIn(180f, (canvasW - posX).coerceAtLeast(180f))
+                                                    cardH = (cardH + dhDp).coerceIn(130f, (canvasH - posY).coerceAtLeast(130f))
+                                                },
+                                                onDragEnd = {
+                                                    onUpdateWidget(widget.copy(widthDp = cardW, heightDp = cardH))
+                                                }
+                                            )
+                                        }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.OpenInFull,
+                                        contentDescription = str("縮放大小", "缩放大小", "Resize", "サイズ変更"),
+                                        tint = colors.accent,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
                             }
 
                             if (isEditMode) {
@@ -433,8 +539,8 @@ fun PageZeroWidgetBoard(
                                     },
                                     modifier = Modifier
                                         .align(Alignment.TopEnd)
-                                        .padding(6.dp)
-                                        .size(28.dp)
+                                        .padding(top = 2.dp, end = 4.dp)
+                                        .size(26.dp)
                                         .clip(CircleShape)
                                         .background(Color(0xD9EF4444))
                                 ) {
@@ -442,7 +548,7 @@ fun PageZeroWidgetBoard(
                                         imageVector = Icons.Rounded.DeleteOutline,
                                         contentDescription = str("移除", "移除", "Remove", "削除"),
                                         tint = Color.White,
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(15.dp)
                                     )
                                 }
                             }

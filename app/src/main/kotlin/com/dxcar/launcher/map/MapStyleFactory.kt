@@ -25,14 +25,6 @@ object MapStyleFactory {
         trafficEnabled: Boolean = true
     ): ResolvedMapStyle {
         return when (engineStyle) {
-            MapEngineStyle.OPENFREEMAP_VECTOR_3D -> {
-                ResolvedMapStyle.StyleUrl(
-                    if (isNight) OPENFREEMAP_NIGHT_URL else OPENFREEMAP_DAY_URL
-                )
-            }
-            MapEngineStyle.OPENFREEMAP_DARK -> {
-                ResolvedMapStyle.StyleUrl(OPENFREEMAP_NIGHT_URL)
-            }
             MapEngineStyle.GOOGLE_SATELLITE_HYBRID -> {
                 ResolvedMapStyle.StyleJson(
                     buildGoogleTileJson(
@@ -42,7 +34,9 @@ object MapStyleFactory {
                     )
                 )
             }
-            MapEngineStyle.GOOGLE_TRAFFIC_TILES -> {
+            MapEngineStyle.GOOGLE_TRAFFIC_TILES,
+            MapEngineStyle.OPENFREEMAP_VECTOR_3D,
+            MapEngineStyle.OPENFREEMAP_DARK -> {
                 ResolvedMapStyle.StyleJson(
                     buildGoogleTileJson(
                         name = "DX-Car Google Standard HD",

@@ -51,7 +51,14 @@ enum class MapEngineStyle(val labelZh: String) {
     GOOGLE_TRAFFIC_TILES("Google 繁中地圖"),
     GOOGLE_SATELLITE_HYBRID("Google 衛星混合"),
     OPENFREEMAP_VECTOR_3D("OpenFreeMap 3D 向量"),
-    OPENFREEMAP_DARK("深色極簡向量")
+    OPENFREEMAP_DARK("深色極簡向量");
+
+    companion object {
+        val visibleEntries: List<MapEngineStyle> = listOf(
+            GOOGLE_TRAFFIC_TILES,
+            GOOGLE_SATELLITE_HYBRID
+        )
+    }
 }
 
 @Serializable
@@ -469,6 +476,11 @@ class LauncherPreferences(context: Context) {
                 .putString(KEY_CONFIG_JSON, json.encodeToString(decoded))
                 .putBoolean(KEY_MIGRATED_V152, true)
                 .apply()
+        }
+        if (decoded.mapEngineStyle == MapEngineStyle.OPENFREEMAP_VECTOR_3D ||
+            decoded.mapEngineStyle == MapEngineStyle.OPENFREEMAP_DARK
+        ) {
+            decoded = decoded.copy(mapEngineStyle = MapEngineStyle.GOOGLE_TRAFFIC_TILES)
         }
         return decoded
     }

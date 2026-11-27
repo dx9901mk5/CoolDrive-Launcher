@@ -123,6 +123,16 @@ object RootHelperBridge {
         }
     }
 
+    fun setDockPinnedRightShift(context: Context, enabled: Boolean) {
+        if (!isRootHelperInstalled(context)) return
+        runCatching {
+            val extras = android.os.Bundle().apply {
+                putBoolean("enabled", enabled)
+            }
+            context.contentResolver.call(PROVIDER_URI, "set_dock_pinned_right_shift", null, extras)
+        }
+    }
+
     fun parkPlanBWindows(context: Context, screenWidth: Int, screenHeight: Int) {
         if (!isRootHelperInstalled(context)) return
         runCatching {
@@ -138,7 +148,11 @@ object RootHelperBridge {
         context: Context,
         packageName: String,
         screenWidth: Int,
-        screenHeight: Int
+        screenHeight: Int,
+        dockOffsetLeft: Int = 0,
+        dockOffsetRight: Int = 0,
+        dockOffsetTop: Int = 0,
+        dockOffsetBottom: Int = 0
     ): Boolean {
         if (!isRootHelperInstalled(context) || packageName.isBlank()) return false
         return runCatching {
@@ -146,6 +160,10 @@ object RootHelperBridge {
                 putString("packageName", packageName)
                 putInt("screenWidth", screenWidth)
                 putInt("screenHeight", screenHeight)
+                putInt("dockOffsetLeft", dockOffsetLeft)
+                putInt("dockOffsetRight", dockOffsetRight)
+                putInt("dockOffsetTop", dockOffsetTop)
+                putInt("dockOffsetBottom", dockOffsetBottom)
             }
             val res = context.contentResolver.call(PROVIDER_URI, "launch_fullscreen_app", null, extras)
             res?.getBoolean("ok", false) == true

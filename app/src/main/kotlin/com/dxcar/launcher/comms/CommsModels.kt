@@ -32,7 +32,9 @@ enum class TouchpadAction {
     SWAP_HOME_PANES,
     BACK,
     HOME,
-    OPEN_POINTER_SPEED_SETTINGS
+    OPEN_POINTER_SPEED_SETTINGS,
+    SELECT_PLAN_A,
+    SELECT_PLAN_B
 }
 
 @Serializable

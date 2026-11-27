@@ -66,6 +66,12 @@ object PlanBWindowEngine {
                 RootHelperConfigStore.save(context, cfg.copy(ui2SplitRatio = ratio))
                 out.putBoolean("ok", true)
             }
+            "set_dock_pinned_right_shift" -> {
+                val enabled = extras?.getBoolean("enabled", false) ?: false
+                val cfg = RootHelperConfigStore.load(context)
+                RootHelperConfigStore.save(context, cfg.copy(dockPinnedRightShift = enabled))
+                out.putBoolean("ok", true)
+            }
             "park_plan_b_windows" -> {
                 val screenW = extras?.getInt("screenWidth", 1920) ?: 1920
                 val screenH = extras?.getInt("screenHeight", 1080) ?: 1080
@@ -78,11 +84,24 @@ object PlanBWindowEngine {
                 val targetPkg = extras?.getString("packageName").orEmpty()
                 val screenW = extras?.getInt("screenWidth", 1920) ?: 1920
                 val screenH = extras?.getInt("screenHeight", 1080) ?: 1080
+                val dockLeft = extras?.getInt("dockOffsetLeft", 0) ?: 0
+                val dockRight = extras?.getInt("dockOffsetRight", 0) ?: 0
+                val dockTop = extras?.getInt("dockOffsetTop", 0) ?: 0
+                val dockBottom = extras?.getInt("dockOffsetBottom", 0) ?: 0
                 if (targetPkg.isBlank()) {
                     out.putBoolean("ok", false)
                 } else {
                     scope.launch {
-                        launchFullscreenAppInternal(context.applicationContext, targetPkg, screenW, screenH)
+                        launchFullscreenAppInternal(
+                            context = context.applicationContext,
+                            targetPkg = targetPkg,
+                            screenW = screenW,
+                            screenH = screenH,
+                            dockLeft = dockLeft,
+                            dockRight = dockRight,
+                            dockTop = dockTop,
+                            dockBottom = dockBottom
+                        )
                     }
                     out.putBoolean("ok", true)
                 }
@@ -241,20 +260,41 @@ object PlanBWindowEngine {
     }
 
     /**
-     * Demotes all Plan B Freeform windows and launches/expands [targetPkg] into 100% Fullscreen (windowingMode=1)
-     * without interrupting its running state (e.g. tapping Google Maps on Dock expands ongoing navigation to Fullscreen;
-     * tapping any other app covers Google Maps completely!).
+     * Demotes all Plan B Freeform windows and launches/expands [targetPkg] into 100% Fullscreen (or shifted to avoid
+     * the permanently visible Dock when [cfg.dockPinnedRightShift] is enabled) without interrupting its running state.
      */
     private suspend fun launchFullscreenAppInternal(
         context: Context,
         targetPkg: String,
         screenW: Int,
-        screenH: Int
+        screenH: Int,
+        dockLeft: Int = 0,
+        dockRight: Int = 0,
+        dockTop: Int = 0,
+        dockBottom: Int = 0
     ) {
         val cfg = RootHelperConfigStore.load(context)
+        ensureMultiWindowGlobals()
         val otherPlanBPkgs = listOf(cfg.ui1NavPackage, cfg.ui1RightPackage, cfg.ui2LeftPackage, cfg.ui2RightPackage)
             .filter { it.isNotBlank() && it != targetPkg }
         demotePackagesFromFreeform(context, otherPlanBPkgs, screenW, screenH)
+
+        val effLeft = if (cfg.dockPinnedRightShift) dockLeft else 0
+        val effRight = if (cfg.dockPinnedRightShift) dockRight else 0
+        val effTop = if (cfg.dockPinnedRightShift) dockTop else 0
+        val effBottom = if (cfg.dockPinnedRightShift) dockBottom else 0
+        val hasDockShift = cfg.dockPinnedRightShift && (effLeft > 0 || effRight > 0 || effTop > 0 || effBottom > 0)
+
+        if (hasDockShift) {
+            val targetRect = Rect(
+                effLeft,
+                effTop,
+                (screenW - effRight).coerceAtLeast(effLeft + 320),
+                (screenH - effBottom).coerceAtLeast(effTop + 240)
+            )
+            val ok = launchAndResizeFreeform(context, targetPkg, targetRect, screenW)
+            if (ok) return
+        }
 
         val comp = resolveLaunchComponent(context, targetPkg)
         val compStr = comp?.flattenToShortString()

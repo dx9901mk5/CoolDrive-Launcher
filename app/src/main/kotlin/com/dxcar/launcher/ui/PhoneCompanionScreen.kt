@@ -1324,6 +1324,150 @@ fun PhoneCompanionScreen(
                     }
                 }
             }
+
+            // ==================== BOTTOM REMOTE PLAN A / PLAN B SELECTOR CARD ====================
+            val localView = LocalView.current
+            var remotePlanTip by remember { mutableStateOf("") }
+            Surface(
+                color = colors.cardSurface,
+                shape = RoundedCornerShape(22.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.4.dp, colors.accent.copy(alpha = 0.65f), RoundedCornerShape(22.dp))
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Rounded.DirectionsCar,
+                            contentDescription = null,
+                            tint = colors.accent,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = str(
+                                    "遙控切換車機首頁方案（方案 A ／ 方案 B）",
+                                    "遥控切换车机首页方案（方案 A ／ 方案 B）",
+                                    "Remote Car Home Plan Switcher (Plan A / Plan B)",
+                                    "車載機のホームプラン遠隔切替（プラン A ／ プラン B）"
+                                ),
+                                color = colors.primaryText,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = str(
+                                    "一鍵遙控車機切換「方案 A（內建地圖）」或「方案 B（進階雙窗擴充模式）」",
+                                    "一键遥控车机切换「方案 A（内置地图）」或「方案 B（进阶双窗扩展模式）」",
+                                    "One-tap remote switch between Plan A (Built-in Map) and Plan B (Dual-Window Mode)",
+                                    "ワンタップで車載機を「プラン A（内蔵地図）」または「プラン B（拡張2画面）」に切替"
+                                ),
+                                color = colors.secondaryText,
+                                fontSize = 11.5.sp
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                triggerPhoneConfirmVibration(context, localView, heavy = false)
+                                val ok = BluetoothCompanionService.sendPacketFromPhone(
+                                    BridgePacket(
+                                        type = PacketType.TOUCHPAD_EVENT,
+                                        id = UUID.randomUUID().toString(),
+                                        touchAction = TouchpadAction.SELECT_PLAN_A
+                                    )
+                                )
+                                remotePlanTip = if (ok) {
+                                    DxCarI18n.tr(
+                                        "✓ 已傳送指令：車機已切換為「方案 A」",
+                                        "✓ 已发送指令：车机已切换为「方案 A」",
+                                        "✓ Sent: Car switched to Plan A",
+                                        "✓ 送信完了：車載機をプラン A に切り替えました"
+                                    )
+                                } else {
+                                    DxCarI18n.tr(
+                                        "⚠️ 尚未連上車機，請先確認上方藍牙／Wi-Fi 已連線",
+                                        "⚠️ 尚未连上车机，请先确认上方蓝牙／Wi-Fi 已连接",
+                                        "⚠️ Not connected to Car yet — check connection above",
+                                        "⚠️ 車載機に未接続です。上部の接続状態をご確認ください"
+                                    )
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = colors.accent,
+                                contentColor = colors.onAccent
+                            ),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.weight(1f).height(48.dp)
+                        ) {
+                            Text(
+                                text = str("遙控切換 方案 A", "遥控切换 方案 A", "Select Plan A", "プラン A へ切替"),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                triggerPhoneConfirmVibration(context, localView, heavy = false)
+                                val ok = BluetoothCompanionService.sendPacketFromPhone(
+                                    BridgePacket(
+                                        type = PacketType.TOUCHPAD_EVENT,
+                                        id = UUID.randomUUID().toString(),
+                                        touchAction = TouchpadAction.SELECT_PLAN_B
+                                    )
+                                )
+                                remotePlanTip = if (ok) {
+                                    DxCarI18n.tr(
+                                        "✓ 已傳送指令：車機已切換為「方案 B」",
+                                        "✓ 已发送指令：车机已切换为「方案 B」",
+                                        "✓ Sent: Car switched to Plan B",
+                                        "✓ 送信完了：車載機をプラン B に切り替えました"
+                                    )
+                                } else {
+                                    DxCarI18n.tr(
+                                        "⚠️ 尚未連上車機，請先確認上方藍牙／Wi-Fi 已連線",
+                                        "⚠️ 尚未连上车机，请先确认上方蓝牙／Wi-Fi 已连接",
+                                        "⚠️ Not connected to Car yet — check connection above",
+                                        "⚠️ 車載機に未接続です。上部の接続状態をご確認ください"
+                                    )
+                                }
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.weight(1f).height(48.dp)
+                        ) {
+                            Text(
+                                text = str("遙控切換 方案 B", "遥控切换 方案 B", "Select Plan B", "プラン B へ切替"),
+                                color = colors.accent,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    if (remotePlanTip.isNotBlank()) {
+                        Text(
+                            text = remotePlanTip,
+                            color = colors.accent,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
         }
 
         // DEDICATED PHONE PERMISSIONS SHEET

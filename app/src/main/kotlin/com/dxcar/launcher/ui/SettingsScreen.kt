@@ -493,8 +493,35 @@ fun SettingsScreen(
                         }
 
                         val hasRootHelper = remember { com.dxcar.launcher.system.RootHelperBridge.isRootHelperInstalled(context) }
-                        val planBConfig = remember(hasRootHelper) {
-                            if (hasRootHelper) com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(context) else null
+                        var planBConfig by remember(hasRootHelper, config.homeExperimentMode, config.launchAppsAvoidDockFreeform) {
+                            mutableStateOf(
+                                if (hasRootHelper) com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(context) else null
+                            )
+                        }
+                        fun switchExperimentModeAndSyncDock(targetMode: HomeExperimentMode) {
+                            if (targetMode == HomeExperimentMode.PLAN_A_MULTI_LAYER) {
+                                // Switching to Plan A defaults to canceling permanent Dock shift in both main app & helper!
+                                if (hasRootHelper) {
+                                    com.dxcar.launcher.system.RootHelperBridge.setDockPinnedRightShift(context, false)
+                                    planBConfig = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(context)
+                                }
+                                onUpdateConfig {
+                                    it.copy(
+                                        homeExperimentMode = HomeExperimentMode.PLAN_A_MULTI_LAYER,
+                                        launchAppsAvoidDockFreeform = false,
+                                        overlayAutoCollapseEnabled = true
+                                    )
+                                }
+                            } else {
+                                val helperShift = planBConfig?.dockPinnedRightShift ?: false
+                                onUpdateConfig {
+                                    it.copy(
+                                        homeExperimentMode = targetMode,
+                                        launchAppsAvoidDockFreeform = helperShift,
+                                        overlayAutoCollapseEnabled = !helperShift
+                                    )
+                                }
+                            }
                         }
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             HomeExperimentMode.visibleEntries.forEach { mode ->
@@ -515,7 +542,7 @@ fun SettingsScreen(
                                             shape = RoundedCornerShape(16.dp)
                                         )
                                         .clickable(enabled = effectiveAvailable) {
-                                            onUpdateConfig { it.copy(homeExperimentMode = mode) }
+                                            switchExperimentModeAndSyncDock(mode)
                                         }
                                 ) {
                                     Row(
@@ -583,13 +610,42 @@ fun SettingsScreen(
                                                         fontSize = 11.sp
                                                     )
                                                 }
+                                                if (hasRootHelper && selected) {
+                                                    Spacer(Modifier.height(6.dp))
+                                                    val permDockOn = (planBConfig?.dockPinnedRightShift == true) || config.launchAppsAvoidDockFreeform
+                                                    SettingsToggleRow(
+                                                        title = str(
+                                                            "方案 B 永久顯示 Dock（所有 App 與全螢幕皆自動挪位讓給 Dock）",
+                                                            "方案 B 永久显示 Dock（所有 App 与全屏皆自动挪位让给 Dock）",
+                                                            "Plan B Permanent Dock (Shift All Split & Fullscreen Apps for Dock)",
+                                                            "プランB 常時ドック表示（全アプリ＆全画面表示をドック分シフト）"
+                                                        ),
+                                                        subtitle = str(
+                                                            "與擴充輔助 App 雙向同步；改選方案 A 時將自動預設取消",
+                                                            "与扩展辅助 App 双向同步；改选方案 A 时将自动默认取消",
+                                                            "Synced with Helper App; automatically turned off when switching back to Plan A",
+                                                            "拡張アプリと双方向同期。プラン A 選択時は自動でオフに戻ります"
+                                                        ),
+                                                        checked = permDockOn,
+                                                        onCheckedChange = { enabled ->
+                                                            com.dxcar.launcher.system.RootHelperBridge.setDockPinnedRightShift(context, enabled)
+                                                            planBConfig = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(context)
+                                                            onUpdateConfig {
+                                                                it.copy(
+                                                                    launchAppsAvoidDockFreeform = enabled,
+                                                                    overlayAutoCollapseEnabled = !enabled
+                                                                )
+                                                            }
+                                                        }
+                                                    )
+                                                }
                                             }
                                         }
                                         if (effectiveAvailable) {
                                             Spacer(Modifier.width(8.dp))
                                             Switch(
                                                 checked = selected,
-                                                onCheckedChange = { onUpdateConfig { it.copy(homeExperimentMode = mode) } },
+                                                onCheckedChange = { switchExperimentModeAndSyncDock(mode) },
                                                 colors = SwitchDefaults.colors(checkedThumbColor = colors.onAccent, checkedTrackColor = colors.accent)
                                             )
                                         }
@@ -952,7 +1008,7 @@ fun SettingsScreen(
 
                         Text(str("內建地圖圖層與路況", "内置地图图层与路况", "Map Layers & Traffic", "地図レイヤー・交通状況"), color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            MapEngineStyle.entries.forEach { styleItem ->
+                            MapEngineStyle.visibleEntries.forEach { styleItem ->
                                 SelectablePill(
                                     text = DxCarI18n.mapEngineLabel(styleItem),
                                     selected = config.mapEngineStyle == styleItem,

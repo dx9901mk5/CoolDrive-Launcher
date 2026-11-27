@@ -485,6 +485,10 @@ class PersistentDockOverlayService :
                                 onSlotClick = { slot ->
                                     val isPlanB = config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED &&
                                         com.dxcar.launcher.system.RootHelperBridge.isRootHelperInstalled(this@PersistentDockOverlayService)
+                                    val helperCfg = if (isPlanB) {
+                                        com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(this@PersistentDockOverlayService)
+                                    } else null
+                                    val keepDockPermanent = isPlanB && (helperCfg?.dockPinnedRightShift == true || config.launchAppsAvoidDockFreeform)
                                     when {
                                         slot.packageName == "ACTION_DIAL" -> app.installedAppsRepository.launchDialer()
                                         !slot.packageName.isNullOrBlank() -> {
@@ -530,7 +534,7 @@ class PersistentDockOverlayService :
                                             bringDxCarToFront(MainActivity.EXTRA_OPEN_DRAWER)
                                         }
                                     }
-                                    if (isPlanB || (config.overlayAutoCollapseEnabled && !pinnedOpen)) {
+                                    if (!keepDockPermanent && (isPlanB || (config.overlayAutoCollapseEnabled && !pinnedOpen))) {
                                         isCollapsed.value = true
                                     }
                                 },
@@ -1200,14 +1204,28 @@ class PersistentDockOverlayService :
     private fun launchFullscreenFromOverlay(app: DxCarApp, pkg: String) {
         if (pkg.isBlank()) return
         planBInFullscreenApp.value = true
-        isPinnedOpen.value = false
-        isCollapsed.value = true
+        val cfg = app.preferences.config.value
+        val helperCfg = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(this)
+        val permanentDock = helperCfg.dockPinnedRightShift || cfg.launchAppsAvoidDockFreeform
+        isPinnedOpen.value = permanentDock
+        isCollapsed.value = !permanentDock
         val m = metricsFlow.value
+        val spec = CoolwalkLayoutEngine.compute(
+            metrics = m,
+            dockMode = cfg.dockPositionMode,
+            rightHandDrive = cfg.rightHandDrive,
+            customPrimaryRatio = cfg.primarySplitRatio
+        )
+        val dockPx = (spec.dockThicknessDp * m.density).toInt().coerceAtLeast(0)
         val ok = com.dxcar.launcher.system.RootHelperBridge.launchFullscreenApp(
             context = this,
             packageName = pkg,
             screenWidth = m.widthPx,
-            screenHeight = m.heightPx
+            screenHeight = m.heightPx,
+            dockOffsetLeft = if (spec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0,
+            dockOffsetRight = if (spec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
+            dockOffsetTop = if (spec.dockPlacement == ResolvedDockPlacement.TOP) dockPx else 0,
+            dockOffsetBottom = if (spec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0
         )
         if (ok) {
             app.installedAppsRepository.recordRecent(pkg)
@@ -1531,7 +1549,11 @@ class PersistentDockOverlayService :
                 FiveState(config, isHomeFg, collapsed, metrics, fgPkg)
             }.collect { (config, isHomeFg, collapsed, metrics, fgPkg) ->
                 val isPlanBMode = config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED
-                if (isPlanBMode && !planBInFullscreenApp.value) {
+                val helperCfgForDock = if (isPlanBMode) {
+                    com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(this@PersistentDockOverlayService)
+                } else null
+                val keepPlanBDockPermanent = isPlanBMode && (helperCfgForDock?.dockPinnedRightShift == true || config.launchAppsAvoidDockFreeform)
+                if (isPlanBMode && (!planBInFullscreenApp.value || keepPlanBDockPermanent)) {
                     isPinnedOpen.value = true
                     isCollapsed.value = false
                 } else if (lastHomeForeground && !isHomeFg) {
@@ -1742,12 +1764,13 @@ class PersistentDockOverlayService :
                     rightHandDrive = config.rightHandDrive,
                     customPrimaryRatio = config.primarySplitRatio
                 )
-                val dockPx = if (!spec.dockPlacement.isHorizontalBar) {
+                val helperCfg = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(this@PersistentDockOverlayService)
+                val shiftForDock = !isPlanB || helperCfg.dockPinnedRightShift || config.launchAppsAvoidDockFreeform
+                val dockPx = if (shiftForDock && !spec.dockPlacement.isHorizontalBar) {
                     (spec.dockThicknessDp * metrics.density).toInt()
                 } else 0
                 val availW = (metrics.widthPx - dockPx).coerceAtLeast(480)
-                val leftOffset = if (spec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0
-                val helperCfg = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(this@PersistentDockOverlayService)
+                val leftOffset = if (shiftForDock && spec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0
 
                 val view = planCPanelView
                 val params = planCPanelParams

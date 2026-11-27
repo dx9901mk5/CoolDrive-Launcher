@@ -1915,7 +1915,7 @@ fun LiveMapCard(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        MapEngineStyle.entries.forEach { styleItem ->
+                        MapEngineStyle.visibleEntries.forEach { styleItem ->
                             val selected = mapEngineStyle == styleItem
                             Surface(
                                 color = if (selected) colors.accent else colors.cardSurfaceElevated,

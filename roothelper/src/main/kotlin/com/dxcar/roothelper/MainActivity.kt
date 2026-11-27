@@ -1008,8 +1008,8 @@ private fun PlanBTabContent(
             HorizontalDivider(color = cs.outlineVariant.copy(alpha = 0.5f))
             ModernSwitchTile(
                 icon = Icons.Rounded.ViewSidebar,
-                title = "Dock 常駐釘選時整體右移不重疊",
-                subtitle = "UI 0 / UI 1 / UI 2 視窗自動閃開側邊 Dock 寬度",
+                title = "永久顯示 Dock 且所有顯示的 App 自動挪動讓位",
+                subtitle = "包含 UI 0 / UI 1 / UI 2 及全螢幕開啟的任何 App 皆自動閃開側邊 Dock 寬度（與本體 App 同步，切回方案 A 自動取消）",
                 checked = config.dockPinnedRightShift,
                 onCheckedChange = { onUpdateConfig(config.copy(dockPinnedRightShift = it)) }
             )
@@ -1224,10 +1224,10 @@ private fun PlanBTabContent(
             subtitle = "三介面循環切換，點擊 Dock 或 App 清單自動全螢幕不遮擋"
         ) {
             Text(
-                text = "• 第 0 介面（0/3）：維持原有自訂小工具看板。\n" +
+                text = "• 第 0 介面（0/3）：維持原有自訂小工具看板；進入編輯模式時會鎖定小工具內部點擊，並於每個小工具上方顯示專屬拖曳橫桿。\n" +
                     "• 第 1 介面（1/3）：同方案 A 佈局！左側 70% 調用原生地圖 App（如 Google 地圖），右側 30% 為啟動器媒體卡片（自動擷取封面、左上天氣、下方 6 格捷徑）；點擊專輯封面（或點兩下中線）即可左右交換卡片！\n" +
                     "• 第 2 介面（2/3）：獨立雙原生 App 分割視窗（可自由指定地圖與影音播放器）。\n" +
-                    "• 全螢幕與圖層自動切換：從左側 Dock 或 App 清單點擊任何 App（包含再次點擊 Google 地圖），皆會直接展開為 100% 全螢幕（導航不中斷、地圖不殘留遮擋），Dock 自動收合為最上層邊緣拉條；點擊 Dock「回首頁」即自動恢復分割畫面。\n" +
+                    "• 永久顯示 Dock 與自動讓位：開啟「永久顯示 Dock」後，無論在分割畫面或點擊開啟任何全螢幕 App，所有應用程式都會自動向旁挪位閃開 Dock，絕不遮擋（切回方案 A 時會自動取消此開關）。\n" +
                     "• 懸浮中線手勢：長壓不放開出現「發光脈動 ＋ ◀ 比例 ▶」動畫拖曳調比例、點兩下左右交換、左右滑動切換 0 / 1 / 2 介面。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = cs.onSurfaceVariant,

@@ -107,9 +107,13 @@ class CoolwalkLayoutEngineTest {
         assertTrue(satOn.json.contains("lyrs=y&"))
         assertTrue(satOn.json.contains("lyrs=y,traffic&"))
 
-        val darkVector = MapStyleFactory.resolve(MapEngineStyle.OPENFREEMAP_DARK, isNight = false, trafficEnabled = true)
-            as MapStyleFactory.ResolvedMapStyle.StyleUrl
-        assertEquals(MapStyleFactory.OPENFREEMAP_NIGHT_URL, darkVector.url)
+        val legacyDarkFallback = MapStyleFactory.resolve(MapEngineStyle.OPENFREEMAP_DARK, isNight = false, trafficEnabled = true)
+            as MapStyleFactory.ResolvedMapStyle.StyleJson
+        assertTrue(legacyDarkFallback.json.contains("lyrs=m&"))
+        assertEquals(
+            listOf(MapEngineStyle.GOOGLE_TRAFFIC_TILES, MapEngineStyle.GOOGLE_SATELLITE_HYBRID),
+            MapEngineStyle.visibleEntries
+        )
     }
 
     @Test

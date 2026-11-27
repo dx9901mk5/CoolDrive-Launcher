@@ -34,6 +34,9 @@ object RemoteTouchpadController {
     private val _swapHomePanesSeq = MutableStateFlow(0L)
     val swapHomePanesSeq: StateFlow<Long> = _swapHomePanesSeq.asStateFlow()
 
+    private val _remoteSelectPlanMode = MutableStateFlow<Pair<Long, String>?>(null)
+    val remoteSelectPlanMode: StateFlow<Pair<Long, String>?> = _remoteSelectPlanMode.asStateFlow()
+
     private var initializedCenter = false
 
     fun onTouchpadPacket(context: Context, packet: BridgePacket) {
@@ -221,6 +224,14 @@ object RemoteTouchpadController {
                         Toast.LENGTH_LONG
                     ).show()
                 }
+            }
+
+            TouchpadAction.SELECT_PLAN_A -> {
+                _remoteSelectPlanMode.value = System.currentTimeMillis() to "PLAN_A"
+            }
+
+            TouchpadAction.SELECT_PLAN_B -> {
+                _remoteSelectPlanMode.value = System.currentTimeMillis() to "PLAN_B"
             }
         }
     }

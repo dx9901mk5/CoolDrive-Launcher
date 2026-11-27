@@ -179,6 +179,7 @@ fun DxCarRootScreen(
     val isLauncherFg by app.isLauncherForeground.collectAsState()
     val remoteCursor by RemoteTouchpadController.cursorState.collectAsState()
     val remoteSwapSeq by RemoteTouchpadController.swapHomePanesSeq.collectAsState()
+    val remoteSelectPlan by RemoteTouchpadController.remoteSelectPlanMode.collectAsState()
 
     // Auto-detect Smartphone vs AI Box Car Head Unit on first launch when not pinned by user
     LaunchedEffect(configuration.screenWidthDp, configuration.screenHeightDp, config.roleUserPinned) {
@@ -409,6 +410,74 @@ fun DxCarRootScreen(
         )
     }
 
+    LaunchedEffect(remoteSelectPlan) {
+        val pair = remoteSelectPlan ?: return@LaunchedEffect
+        val targetPlan = pair.second
+        val dockPx = (layoutSpec.dockThicknessDp * screenMetrics.density).toInt().coerceAtLeast(0)
+        if (targetPlan == "PLAN_A") {
+            com.dxcar.launcher.system.RootHelperBridge.setDockPinnedRightShift(context, false)
+            com.dxcar.launcher.system.RootHelperBridge.parkPlanBWindows(
+                context = context,
+                screenWidth = screenMetrics.widthPx,
+                screenHeight = screenMetrics.heightPx
+            )
+            app.preferences.update {
+                it.copy(
+                    homeExperimentMode = HomeExperimentMode.PLAN_A_MULTI_LAYER,
+                    launchAppsAvoidDockFreeform = false,
+                    overlayAutoCollapseEnabled = true
+                )
+            }
+            destination = LauncherDestination.DASHBOARD_SPLIT
+            gestureHudText = DxCarI18n.tr(
+                "📱 已由手機遙控切換至「方案 A」（已預設取消永久顯示 Dock 讓位）",
+                "📱 已由手机遥控切换至「方案 A」（已默认取消永久显示 Dock 让位）",
+                "📱 Remotely switched to Plan A (Permanent Dock shift auto-cleared)",
+                "📱 スマホからプラン A に切り替えました（常時ドックシフトを自動解除）"
+            )
+        } else if (targetPlan == "PLAN_B") {
+            val hasHelper = com.dxcar.launcher.system.RootHelperBridge.isRootHelperInstalled(context)
+            if (!hasHelper) {
+                gestureHudText = DxCarI18n.tr(
+                    "⚠️ 車機尚未安裝 DX-Car 擴充輔助 App，無法切換方案 B",
+                    "⚠️ 车机尚未安装 DX-Car 扩展辅助 App，无法切换方案 B",
+                    "⚠️ Helper APK not installed on Car; cannot switch to Plan B",
+                    "⚠️ 車載機に拡張補助 APK が未インストールのためプラン B に切替できません"
+                )
+            } else {
+                val helperCfg = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(context)
+                app.preferences.update {
+                    it.copy(
+                        homeExperimentMode = HomeExperimentMode.PLAN_D_ROOT_RESERVED,
+                        launchAppsAvoidDockFreeform = helperCfg.dockPinnedRightShift,
+                        overlayAutoCollapseEnabled = !helperCfg.dockPinnedRightShift
+                    )
+                }
+                destination = LauncherDestination.DASHBOARD_SPLIT
+                com.dxcar.launcher.system.RootHelperBridge.applyPlanBPage(
+                    context = context,
+                    page = currentDashboardPage.coerceIn(0, 2),
+                    screenWidth = screenMetrics.widthPx,
+                    screenHeight = screenMetrics.heightPx,
+                    dockOffsetLeft = if (layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0,
+                    dockOffsetRight = if (layoutSpec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
+                    dockOffsetTop = if (layoutSpec.dockPlacement == ResolvedDockPlacement.TOP) dockPx else 0,
+                    dockOffsetBottom = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0,
+                    ui1Ratio = if (helperCfg.planBEnabled) helperCfg.ui1SplitRatio else config.primarySplitRatio,
+                    ui1Swapped = config.page1Swapped,
+                    ui2Ratio = if (helperCfg.planBEnabled) helperCfg.ui2SplitRatio else config.page2SplitRatio,
+                    ui2Swapped = config.page2Swapped
+                )
+                gestureHudText = DxCarI18n.tr(
+                    "📱 已由手機遙控切換至「方案 B 進階雙窗模式」",
+                    "📱 已由手机遥控切换至「方案 B 进阶双窗模式」",
+                    "📱 Remotely switched to Plan B Dual-Window Mode",
+                    "📱 スマホからプラン B（拡張2画面モード）に切り替えました"
+                )
+            }
+        }
+    }
+
     androidx.compose.runtime.DisposableEffect(Unit) {
         PersistentDockOverlayService.onPlanBPageSyncToActivity = { p ->
             currentDashboardPage = p.coerceIn(0, 2)
@@ -520,11 +589,16 @@ fun DxCarRootScreen(
         ) {
             PersistentDockOverlayService.planBInFullscreenApp.value = true
             PersistentDockOverlayService.start(context)
+            val dockPx = (layoutSpec.dockThicknessDp * screenMetrics.density).toInt().coerceAtLeast(0)
             val ok = com.dxcar.launcher.system.RootHelperBridge.launchFullscreenApp(
                 context = context,
                 packageName = packageName,
                 screenWidth = screenMetrics.widthPx,
-                screenHeight = screenMetrics.heightPx
+                screenHeight = screenMetrics.heightPx,
+                dockOffsetLeft = if (layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0,
+                dockOffsetRight = if (layoutSpec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
+                dockOffsetTop = if (layoutSpec.dockPlacement == ResolvedDockPlacement.TOP) dockPx else 0,
+                dockOffsetBottom = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0
             )
             if (ok) {
                 app.installedAppsRepository.recordRecent(packageName)
@@ -1005,7 +1079,7 @@ fun DxCarRootScreen(
                                             }
                                         },
                                         onToggleMapStyle = {
-                                            val allStyles = MapEngineStyle.entries
+                                            val allStyles = MapEngineStyle.visibleEntries
                                             val next = allStyles[(allStyles.indexOf(config.mapEngineStyle) + 1) % allStyles.size]
                                             app.preferences.update { it.copy(mapEngineStyle = next) }
                                             val nextName = mapEngineStyleLabelTr(next)
@@ -1185,7 +1259,7 @@ fun DxCarRootScreen(
                                             app.preferences.update { it.copy(mapTrafficEnabled = !it.mapTrafficEnabled) }
                                         },
                                         onToggleMapStyle = {
-                                            val allStyles = MapEngineStyle.entries
+                                            val allStyles = MapEngineStyle.visibleEntries
                                             val next = allStyles[(allStyles.indexOf(config.mapEngineStyle) + 1) % allStyles.size]
                                             app.preferences.update { it.copy(mapEngineStyle = next) }
                                         },
@@ -1283,8 +1357,8 @@ fun DxCarRootScreen(
                                         app.preferences.update { it.copy(mapTrafficEnabled = !it.mapTrafficEnabled) }
                                     },
                                     onToggleStyle = {
-                                        val allStyles = MapEngineStyle.entries
-                                        val next = allStyles[(allStyles.indexOf(config.mapEngineStyle) + 1) % allStyles.size]
+                                        val allStyles = MapEngineStyle.visibleEntries
+                                        val next = allStyles[(allStyles.indexOf(config.mapEngineStyle).coerceAtLeast(0) + 1) % allStyles.size]
                                         app.preferences.update { it.copy(mapEngineStyle = next) }
                                     },
                                     onSelectOfflinePolicy = { pol ->
