@@ -215,6 +215,13 @@ object RootShell {
             sb.appendLine()
         }
 
+        val lastCrash = File(dir, "last_crash.txt")
+        if (lastCrash.exists()) {
+            sb.appendLine("================ LAST_CRASH ================")
+            sb.appendLine(runCatching { lastCrash.readText() }.getOrDefault(""))
+            sb.appendLine()
+        }
+
         outFile.writeText(sb.toString())
         outFile
     }

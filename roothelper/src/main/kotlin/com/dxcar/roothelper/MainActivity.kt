@@ -12,9 +12,12 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import java.io.File
+import java.io.PrintWriter
+import java.io.StringWriter
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -167,26 +170,22 @@ private data class InstalledHelperApp(
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        installCrashRecorder()
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        runCatching {
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+        }
         setContent {
             val systemDark = isSystemInDarkTheme()
             var darkOverride by remember { mutableStateOf<Boolean?>(null) }
             val useDark = darkOverride ?: systemDark
 
             DisposableEffect(useDark) {
-                enableEdgeToEdge(
-                    statusBarStyle = if (useDark) {
-                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-                    } else {
-                        SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
-                    },
-                    navigationBarStyle = if (useDark) {
-                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-                    } else {
-                        SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
-                    }
-                )
+                runCatching {
+                    val controller = WindowInsetsControllerCompat(window, window.decorView)
+                    controller.isAppearanceLightStatusBars = !useDark
+                    controller.isAppearanceLightNavigationBars = !useDark
+                }
                 onDispose {}
             }
 
@@ -196,6 +195,24 @@ class MainActivity : ComponentActivity() {
                     onToggleTheme = { darkOverride = !useDark }
                 )
             }
+        }
+    }
+
+    private fun installCrashRecorder() {
+        val prev = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            runCatching {
+                val sw = StringWriter()
+                throwable.printStackTrace(PrintWriter(sw))
+                val dir = File(cacheDir, "diag_logs").apply { mkdirs() }
+                File(dir, "last_crash.txt").writeText(
+                    "Version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n" +
+                        "Device: ${Build.MANUFACTURER} ${Build.MODEL} / Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})\n" +
+                        "Thread: ${thread.name}\n\n" +
+                        sw.toString()
+                )
+            }
+            prev?.uncaughtException(thread, throwable)
         }
     }
 }
@@ -218,9 +235,11 @@ private fun RootHelperApp(
     var hzReport by remember { mutableStateOf<Display60HzReport?>(null) }
     var otaCandidates by remember { mutableStateOf<List<String>>(emptyList()) }
     var installedApps by remember { mutableStateOf<List<InstalledHelperApp>>(emptyList()) }
+    var appsLoaded by remember { mutableStateOf(false) }
     var updateInfo by remember { mutableStateOf<HelperUpdateInfo?>(null) }
     var busyLabel by remember { mutableStateOf<String?>(null) }
     var activePickerTarget by remember { mutableStateOf<AppPickTarget?>(null) }
+    var lastCrashSummary by remember { mutableStateOf<String?>(null) }
 
     fun showToastMessage(msg: String) {
         scope.launch {
@@ -298,23 +317,33 @@ private fun RootHelperApp(
     }
 
     LaunchedEffect(Unit) {
-        launch {
-            installedApps = loadInstalledLaunchableApps(context)
+        val crashFile = File(context.cacheDir, "diag_logs/last_crash.txt")
+        if (crashFile.exists()) {
+            lastCrashSummary = runCatching { crashFile.readText().take(420) }.getOrNull()
         }
         rootProbing = true
-        rootStatus = RootShell.probeRootStatus()
+        rootStatus = runCatching { RootShell.probeRootStatus() }.getOrDefault(RootStatusInfo())
         rootProbing = false
-        otaCandidates = RootShell.detectOtaPackages(context)
+        otaCandidates = runCatching { RootShell.detectOtaPackages(context) }.getOrDefault(emptyList())
         if (config.otaInterceptedPackage.isBlank() && otaCandidates.isNotEmpty()) {
             saveCfg(config.copy(otaInterceptedPackage = otaCandidates.first()))
         }
-        val upd = HelperAutoUpdater.checkForUpdate(appVersion)
+        val upd = runCatching { HelperAutoUpdater.checkForUpdate(appVersion) }.getOrNull()
         updateInfo = upd
         if (upd != null && upd.hasUpdate) {
             busyLabel = "偵測到新版本 v${upd.latestVersion}，下載中…"
-            val res = HelperAutoUpdater.downloadAndInstall(context, upd)
+            val res = runCatching { HelperAutoUpdater.downloadAndInstall(context, upd) }
+                .getOrElse { "自動更新失敗：${it.message}" }
             busyLabel = null
             showToastMessage(res)
+        }
+    }
+
+    // Lazy-load installed apps ONLY when opening Plan B tab or App Picker (avoids startup OOM / icon decode spike!)
+    LaunchedEffect(selectedTab, activePickerTarget, appsLoaded) {
+        if (!appsLoaded && (selectedTab == HelperTab.PLAN_B || activePickerTarget != null)) {
+            installedApps = loadInstalledLaunchableApps(context)
+            appsLoaded = true
         }
     }
 
@@ -488,6 +517,11 @@ private fun RootHelperApp(
                                 config = config,
                                 appVersion = appVersion,
                                 updateInfo = updateInfo,
+                                lastCrashSummary = lastCrashSummary,
+                                onDismissCrash = {
+                                    lastCrashSummary = null
+                                    runCatching { File(context.cacheDir, "diag_logs/last_crash.txt").delete() }
+                                },
                                 onRefreshRoot = { refreshRootStatus() },
                                 onOpenPlanB = { selectedTab = HelperTab.PLAN_B },
                                 onCheckUpdate = { checkUpdate(silentIfLatest = false) },
@@ -608,6 +642,8 @@ private fun OverviewTabContent(
     config: RootHelperConfig,
     appVersion: String,
     updateInfo: HelperUpdateInfo?,
+    lastCrashSummary: String?,
+    onDismissCrash: () -> Unit,
     onRefreshRoot: () -> Unit,
     onOpenPlanB: () -> Unit,
     onCheckUpdate: () -> Unit,
@@ -629,6 +665,24 @@ private fun OverviewTabContent(
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        if (!lastCrashSummary.isNullOrBlank()) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = cs.errorContainer.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, cs.error.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("偵測到上次異常紀錄（點「診斷 Log 寄送」將自動附上）", style = MaterialTheme.typography.titleSmall, color = cs.onErrorContainer)
+                    Text(lastCrashSummary, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = cs.onErrorContainer, maxLines = 6, overflow = TextOverflow.Ellipsis)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(onClick = onSendDiagnosticLog, shape = RoundedCornerShape(12.dp)) { Text("寄送錯誤 Log") }
+                        OutlinedButton(onClick = onDismissCrash, shape = RoundedCornerShape(12.dp)) { Text("清除提示") }
+                    }
+                }
+            }
+        }
         // HERO STATUS CARD
         Surface(
             shape = RoundedCornerShape(26.dp),
@@ -1849,19 +1903,29 @@ private suspend fun loadInstalledLaunchableApps(context: Context): List<Installe
             val pkg = ri.activityInfo?.packageName ?: return@mapNotNull null
             if (!seen.add(pkg)) return@mapNotNull null
             val label = runCatching { ri.loadLabel(pm).toString() }.getOrDefault(pkg)
-            val icon = runCatching { drawableToBitmap(ri.loadIcon(pm), 96).asImageBitmap() }.getOrNull()
+            val icon = runCatching { drawableToSafeSoftwareBitmap(ri.loadIcon(pm), 64)?.asImageBitmap() }.getOrNull()
             InstalledHelperApp(packageName = pkg, label = label, icon = icon)
         }.sortedBy { it.label.lowercase() }
     }.getOrDefault(emptyList())
 }
 
-private fun drawableToBitmap(drawable: Drawable, sizePx: Int): Bitmap {
-    if (drawable is BitmapDrawable && drawable.bitmap != null) {
-        return Bitmap.createScaledBitmap(drawable.bitmap, sizePx, sizePx, true)
-    }
-    val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bmp)
-    drawable.setBounds(0, 0, sizePx, sizePx)
-    drawable.draw(canvas)
-    return bmp
+/**
+ * Always renders into a fresh ARGB_8888 software Bitmap so Android 12–15 HARDWARE Bitmaps
+ * or zero-sized OEM drawables can NEVER crash Compose Canvas rendering.
+ */
+private fun drawableToSafeSoftwareBitmap(drawable: Drawable?, sizePx: Int): Bitmap? {
+    if (drawable == null || sizePx <= 0) return null
+    return runCatching {
+        if (drawable is BitmapDrawable) {
+            val src = drawable.bitmap
+            if (src != null && !src.isRecycled && src.width > 0 && src.height > 0 && src.config != Bitmap.Config.HARDWARE) {
+                return@runCatching Bitmap.createScaledBitmap(src, sizePx, sizePx, true)
+            }
+        }
+        val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        drawable.setBounds(0, 0, sizePx, sizePx)
+        drawable.draw(canvas)
+        bmp
+    }.getOrNull()
 }
