@@ -241,6 +241,7 @@ private fun RootHelperApp(
     var busyLabel by remember { mutableStateOf<String?>(null) }
     var activePickerTarget by remember { mutableStateOf<AppPickTarget?>(null) }
     var lastCrashSummary by remember { mutableStateOf<String?>(null) }
+    var showLogConsentDialog by remember { mutableStateOf(false) }
 
     fun showToastMessage(msg: String) {
         scope.launch {
@@ -542,7 +543,7 @@ private fun RootHelperApp(
                                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(HelperAutoUpdater.GITHUB_RELEASES_URL))
                                     runCatching { context.startActivity(intent) }
                                 },
-                                onSendDiagnosticLog = { collectAndSendDiagnosticLog() }
+                                onSendDiagnosticLog = { showLogConsentDialog = true }
                             )
 
                             HelperTab.PLAN_B -> PlanBTabContent(
@@ -615,6 +616,47 @@ private fun RootHelperApp(
                     }
                 }
             }
+        }
+
+        // Voluntary Privacy-First Diagnostic Log Consent Dialog
+        if (showLogConsentDialog) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { showLogConsentDialog = false },
+                icon = {
+                    Icon(
+                        imageVector = Icons.Rounded.BugReport,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                },
+                title = { Text("遇到問題時寄送診斷 Log") },
+                text = {
+                    Text(
+                        text = "當您在使用上遇到問題需要開發者協助判讀時，可自願選擇將系統診斷 Log 寄送給開發者（dx9901mk5@gmail.com）。\n\n" +
+                            "🔒 隱私保護保證：\n" +
+                            "• 僅鎖定擷取必要的車機盒子硬體型號、顯示更新率、藍牙架構與 OTA 套件資訊。\n" +
+                            "• 絕不紀錄或傳送 GPS 定位座標、個人帳號、聯絡人或隱私資料。\n\n" +
+                            "此功能完全自願，若您願意提供協助再點擊下方「同意並產生 Log」。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        lineHeight = 20.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showLogConsentDialog = false
+                            collectAndSendDiagnosticLog()
+                        }
+                    ) {
+                        Text("同意並產生 Log")
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { showLogConsentDialog = false }) {
+                        Text("暫不使用")
+                    }
+                }
+            )
         }
 
         // Modern Material 3 ModalBottomSheet Installed App Picker
@@ -832,9 +874,9 @@ private fun OverviewTabContent(
             BentoActionCard(
                 icon = Icons.Rounded.BugReport,
                 iconTint = cs.tertiary,
-                title = "藍牙與系統診斷 Log",
-                subtitle = "一鍵偵測原生/廠商藍牙架構、顯示與 OTA 並寄送 Gmail",
-                badgeText = "Gmail",
+                title = "問題診斷 Log（自願寄送）",
+                subtitle = "遇問題時可寄給開發者判讀；僅擷取必要盒子資訊，不含定位與個資",
+                badgeText = "隱私安全",
                 badgePositive = true,
                 onClick = onSendDiagnosticLog,
                 modifier = Modifier.weight(1f)

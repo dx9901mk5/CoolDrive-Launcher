@@ -184,6 +184,25 @@ object RootShell {
         return execSu(cmd, 5L)
     }
 
+    private fun sanitizePrivacyFromLog(raw: String): String {
+        if (raw.isBlank()) return raw
+        return raw
+            .lineSequence()
+            .filterNot { line ->
+                val low = line.lowercase(Locale.ROOT)
+                low.contains("latitude") || low.contains("longitude") ||
+                    low.contains("lat=") || low.contains("lon=") ||
+                    low.contains("nmea") || low.contains("locationmanager") ||
+                    low.contains("getlastknownlocation") || low.contains("ssid") ||
+                    low.contains("bssid")
+            }
+            .joinToString("\n")
+            // Redact Bluetooth/Wi-Fi MAC addresses (e.g. AA:BB:CC:DD:EE:FF -> XX:XX:XX:XX:EE:FF)
+            .replace(Regex("([0-9A-Fa-f]{2}:){4}([0-9A-Fa-f]{2}:[0-9A-Fa-f]{2})"), "XX:XX:XX:XX:$2")
+            // Redact high-precision decimal coordinates (e.g. 25.033964 -> [REDACTED_COORD])
+            .replace(Regex("\\b-?\\d{1,3}\\.\\d{5,}\\b"), "[REDACTED_NUM]")
+    }
+
     suspend fun collectDiagnosticReport(context: Context): File = withContext(Dispatchers.IO) {
         val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val dir = File(context.cacheDir, "diag_logs").apply { mkdirs() }
@@ -195,18 +214,20 @@ object RootShell {
             "BT_PACKAGES" to "pm list packages | grep -iE 'blue|bt|goc|nfore|suding|carlink|zlink|speedplay|phone|dialer|call'",
             "BT_PROCESSES_AND_SERVICES" to "ps -A | grep -iE 'blue|bt|goc|nfore|suding|carlink|zlink|speedplay'; echo '---SERVICES---'; dumpsys activity services | grep -iE 'ServiceRecord.*(blue|bt|goc|nfore|suding|carlink|zlink|speedplay)' | head -n 60",
             "BT_PROPS" to "getprop | grep -iE 'bt|blue|goc|nfore|suding' | head -n 80",
-            "BT_MANAGER_DUMPSYS" to "dumpsys bluetooth_manager | head -n 160",
+            "BT_MANAGER_DUMPSYS" to "dumpsys bluetooth_manager | grep -viE 'address:|name:|bonded' | head -n 140",
             "BT_OEM_INTENTS" to "for p in \$(pm list packages | cut -d: -f2 | grep -iE 'goc|nfore|suding.*bt|suding.*blue|btphone|bluetooth' | grep -v '^com.android.bluetooth\$' | head -n 6); do echo \"=== PKG: \$p ===\"; dumpsys package \$p | grep -iE 'Action:|Service|Receiver|Activity' | head -n 40; done",
             "DISPLAY" to "dumpsys display | grep -iE 'mBaseDisplayInfo|supportedModes|renderFrameRate|refreshRate|DisplayMode' | head -n 40",
             "SURFACEFLINGER" to "dumpsys SurfaceFlinger | grep -iE 'refresh|fps|mode|vsync|Display' | head -n 50",
             "CONTAINERS" to "dumpsys activity containers | grep -E 'Task=|ActivityRecord|mode=|bounds=' | head -n 50",
             "SUDING_CONFIG" to "cat /system/etc/sudingConfig.ini 2>/dev/null; echo '---VENDOR---'; cat /mnt/vendor/qcache/FactoryConfig/sudingConfig.ini 2>/dev/null",
             "OTA_AND_OEM_PKGS" to "pm list packages | grep -iE 'ota|fota|update|suding|carsyso|sd\\.'",
-            "LOGCAT_TAIL" to "logcat -d -t 300"
+            "LOGCAT_SYSTEM_FILTERED" to "logcat -d -t 250 -s AndroidRuntime:E SystemServiceManager:I ActivityTaskManager:I BluetoothManagerService:I BluetoothAdapter:I | grep -viE 'location|gps|lat|lon|nmea|ssid|bssid'"
         )
 
         val sb = StringBuilder()
         sb.appendLine("=== DX-Car Root Helper Diagnostic Report (v${BuildConfig.VERSION_NAME}) ===")
+        sb.appendLine("Privacy Notice: Only necessary car-box hardware, display, Bluetooth stack architecture, and OTA package info are collected.")
+        sb.appendLine("Location/GPS coordinates, personal data, and full device MACs are NOT recorded or transmitted.")
         sb.appendLine("Time: $ts")
         sb.appendLine("Model: ${Build.MANUFACTURER} ${Build.MODEL} (Android ${Build.VERSION.RELEASE}, SDK ${Build.VERSION.SDK_INT})")
         sb.appendLine()
@@ -223,7 +244,7 @@ object RootShell {
         val hasGoc = btPkgs.contains("goc") || btProcs.contains("goc")
         val hasNfore = btPkgs.contains("nfore") || btProcs.contains("nfore")
         val hasSudingBt = btPkgs.contains("suding") || btProcs.contains("suding")
-        val hasNativeBt = btDump.contains("enabled: true") || btDump.contains("bonded devices") || btProcs.contains("com.android.bluetooth")
+        val hasNativeBt = btDump.contains("enabled: true") || btProcs.contains("com.android.bluetooth")
         val btVerdict = buildString {
             append("BT_ARCHITECTURE_VERDICT: ")
             val vendors = buildList {
@@ -245,15 +266,15 @@ object RootShell {
         for ((title, r) in results) {
             sb.appendLine("================ $title ================")
             sb.appendLine("exitCode=${r.exitCode}")
-            if (r.stdout.isNotBlank()) sb.appendLine(r.stdout)
-            if (r.stderr.isNotBlank()) sb.appendLine("[stderr] ${r.stderr}")
+            if (r.stdout.isNotBlank()) sb.appendLine(sanitizePrivacyFromLog(r.stdout))
+            if (r.stderr.isNotBlank()) sb.appendLine("[stderr] ${sanitizePrivacyFromLog(r.stderr)}")
             sb.appendLine()
         }
 
         val lastCrash = File(dir, "last_crash.txt")
         if (lastCrash.exists()) {
             sb.appendLine("================ LAST_CRASH ================")
-            sb.appendLine(runCatching { lastCrash.readText() }.getOrDefault(""))
+            sb.appendLine(sanitizePrivacyFromLog(runCatching { lastCrash.readText() }.getOrDefault("")))
             sb.appendLine()
         }
 
