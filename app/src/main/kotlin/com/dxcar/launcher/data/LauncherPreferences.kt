@@ -148,7 +148,9 @@ data class AppFolderItem(
 data class NavAddressShortcut(
     val id: String = UUID.randomUUID().toString().take(8),
     val label: String,
-    val address: String
+    val address: String,
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0
 )
 
 @Serializable
@@ -282,7 +284,11 @@ data class LauncherConfig(
     val dismissedOfflineUpdateAtMs: Long = 0L,
     val phoneTouchpadSensitivity: Float = 1.5f,
     val homeAddress: String = "",
+    val homeLat: Double = 0.0,
+    val homeLon: Double = 0.0,
     val workAddress: String = "",
+    val workLat: Double = 0.0,
+    val workLon: Double = 0.0,
     val showHomeNavShortcut: Boolean = true,
     val showWorkNavShortcut: Boolean = true,
     val homeShortcutLabel: String = "",

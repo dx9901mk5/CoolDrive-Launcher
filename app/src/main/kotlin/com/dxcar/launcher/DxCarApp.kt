@@ -67,7 +67,7 @@ class DxCarApp : Application() {
             evaluateUpdateNeeded(cfg.lastKnownLat, cfg.lastKnownLon)
         }
         ttsAnnouncer = TtsAnnouncer(this)
-        builtInNavEngine = BuiltInNavEngine(ttsAnnouncer)
+        builtInNavEngine = BuiltInNavEngine(ttsAnnouncer, this)
         notificationCenter = CarNotificationCenter(preferences, ttsAnnouncer)
         updateManager = UpdateManager(this)
         billingTrialManager = BillingTrialManager(this).apply { start() }

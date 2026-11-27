@@ -35,6 +35,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.DeleteOutline
@@ -75,6 +77,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -105,6 +109,7 @@ import com.dxcar.launcher.overlay.Cursor3DStateHolder
 import com.dxcar.launcher.overlay.Map3DAction
 import com.dxcar.launcher.theme.LocalDxCarColors
 import com.dxcar.launcher.ui.bouncyClickable
+import kotlinx.coroutines.launch
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
@@ -120,6 +125,27 @@ import org.maplibre.android.style.sources.GeoJsonSource
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+private enum class MapConfirmSlot {
+    HOME,
+    WORK,
+    NEW_CUSTOM,
+    SEARCH_NAV
+}
+
+private data class PendingMapConfirm(
+    val slot: MapConfirmSlot,
+    val label: String,
+    val rawAddress: String,
+    val isDetecting: Boolean = true,
+    val candidates: List<NavSearchResult> = emptyList(),
+    val selectedIndex: Int = 0,
+    val pinLat: Double = 0.0,
+    val pinLon: Double = 0.0,
+    val resolvedTitle: String = "",
+    val resolvedSubtitle: String = "",
+    val manuallyMoved: Boolean = false
+)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -217,6 +243,98 @@ fun LiveMapCard(
     var showOfflineSheet by remember { mutableStateOf(false) }
     var showBuiltInSearchBox by remember { mutableStateOf(false) }
     var builtInQueryText by remember { mutableStateOf("") }
+    var pendingMapConfirm by remember { mutableStateOf<PendingMapConfirm?>(null) }
+    val latestPendingMapConfirm by rememberUpdatedState(pendingMapConfirm)
+    val mapScope = rememberCoroutineScope()
+
+    fun flyMapToPin(lat: Double, lon: Double, zoomLevel: Double = 17.2) {
+        val map = mapLibreMap ?: return
+        if (lat == 0.0 && lon == 0.0) return
+        followVehicle = false
+        val cam = CameraPosition.Builder()
+            .target(LatLng(lat, lon))
+            .zoom(zoomLevel)
+            .bearing(0.0)
+            .tilt(0.0)
+            .build()
+        map.animateCamera(CameraUpdateFactory.newCameraPosition(cam), 520)
+    }
+
+    fun triggerMapLocationConfirm(
+        slot: MapConfirmSlot,
+        label: String,
+        rawAddress: String,
+        preResolved: NavSearchResult? = null
+    ) {
+        val trimmed = rawAddress.trim()
+        if (trimmed.isBlank()) return
+        showNavShortcutEditor = false
+        showBuiltInSearchBox = false
+        followVehicle = false
+
+        val fallbackLat = if (location.latitude != 0.0) location.latitude else (livePrefConfig?.lastKnownLat ?: 25.0330)
+        val fallbackLon = if (location.longitude != 0.0) location.longitude else (livePrefConfig?.lastKnownLon ?: 121.5654)
+
+        if (preResolved != null) {
+            pendingMapConfirm = PendingMapConfirm(
+                slot = slot,
+                label = label,
+                rawAddress = trimmed,
+                isDetecting = false,
+                candidates = listOf(preResolved),
+                selectedIndex = 0,
+                pinLat = preResolved.latitude,
+                pinLon = preResolved.longitude,
+                resolvedTitle = preResolved.name,
+                resolvedSubtitle = preResolved.subtitle
+            )
+            flyMapToPin(preResolved.latitude, preResolved.longitude)
+            return
+        }
+
+        pendingMapConfirm = PendingMapConfirm(
+            slot = slot,
+            label = label,
+            rawAddress = trimmed,
+            isDetecting = true,
+            pinLat = fallbackLat,
+            pinLon = fallbackLon,
+            resolvedTitle = trimmed,
+            resolvedSubtitle = ""
+        )
+
+        mapScope.launch {
+            val engine = com.dxcar.launcher.DxCarApp.instance?.builtInNavEngine
+            val results = engine?.resolveAddressCandidates(trimmed, fallbackLat, fallbackLon).orEmpty()
+            val first = results.firstOrNull()
+            val cur = latestPendingMapConfirm ?: return@launch
+            if (cur.slot != slot || cur.rawAddress != trimmed) return@launch
+            if (first != null) {
+                pendingMapConfirm = cur.copy(
+                    isDetecting = false,
+                    candidates = results,
+                    selectedIndex = 0,
+                    pinLat = first.latitude,
+                    pinLon = first.longitude,
+                    resolvedTitle = first.name,
+                    resolvedSubtitle = first.subtitle,
+                    manuallyMoved = false
+                )
+                flyMapToPin(first.latitude, first.longitude)
+            } else {
+                pendingMapConfirm = cur.copy(
+                    isDetecting = false,
+                    candidates = emptyList(),
+                    pinLat = fallbackLat,
+                    pinLon = fallbackLon,
+                    resolvedTitle = trimmed,
+                    resolvedSubtitle = "",
+                    manuallyMoved = false
+                )
+                flyMapToPin(fallbackLat, fallbackLon, 15.8)
+            }
+        }
+    }
 
     val googleNightPaint = remember {
         Paint().apply {
@@ -360,11 +478,26 @@ fun LiveMapCard(
                         }
                     }
                     map.addOnCameraIdleListener {
-                        val idleZoom = map.cameraPosition.zoom
+                        val idleCam = map.cameraPosition
+                        val idleZoom = idleCam.zoom
                         currentZoom = idleZoom
-                        val prefs = com.dxcar.launcher.DxCarApp.instance?.preferences
-                        if (prefs != null && kotlin.math.abs(prefs.config.value.lastKnownZoom - idleZoom) >= 0.15) {
-                            prefs.update { it.copy(lastKnownZoom = idleZoom) }
+                        val confirmState = latestPendingMapConfirm
+                        val idleTarget = idleCam.target
+                        if (confirmState != null && !confirmState.isDetecting && idleTarget != null) {
+                            val movedFar = kotlin.math.abs(idleTarget.latitude - confirmState.pinLat) > 0.00018 ||
+                                kotlin.math.abs(idleTarget.longitude - confirmState.pinLon) > 0.00018
+                            if (movedFar) {
+                                pendingMapConfirm = confirmState.copy(
+                                    pinLat = idleTarget.latitude,
+                                    pinLon = idleTarget.longitude,
+                                    manuallyMoved = true
+                                )
+                            }
+                        } else {
+                            val prefs = com.dxcar.launcher.DxCarApp.instance?.preferences
+                            if (prefs != null && kotlin.math.abs(prefs.config.value.lastKnownZoom - idleZoom) >= 0.15) {
+                                prefs.update { it.copy(lastKnownZoom = idleZoom) }
+                            }
                         }
                     }
                     val initCam = CameraPosition.Builder()
@@ -382,7 +515,7 @@ fun LiveMapCard(
         )
 
         AnimatedVisibility(
-            visible = followVehicle,
+            visible = followVehicle && pendingMapConfirm == null,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.Center)
@@ -391,6 +524,38 @@ fun LiveMapCard(
                 accentColor = colors.accent,
                 bearingDeg = if (location.speedKmh >= 4) 0f else location.bearingDeg
             )
+        }
+
+        // INTERACTIVE CENTER TARGET PIN WHEN CONFIRMING AN ENTERED ADDRESS ON THE MAP
+        AnimatedVisibility(
+            visible = pendingMapConfirm != null,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(Color(0x33EF4444))
+                        .border(2.dp, Color(0xFFEF4444), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Place,
+                        contentDescription = null,
+                        tint = Color(0xFFEF4444),
+                        modifier = Modifier.size(34.dp)
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFEF4444))
+                )
+            }
         }
 
         if (!isPrimary && !isFullscreen && showSwapButton) {
@@ -587,17 +752,37 @@ fun LiveMapCard(
                                 onClick = { showOfflineSheet = !showOfflineSheet }
                             )
                             if (homeAddress.isNotBlank()) {
+                                val homeLatSaved = livePrefConfig?.homeLat ?: 0.0
+                                val homeLonSaved = livePrefConfig?.homeLon ?: 0.0
+                                val homeLbl = livePrefConfig?.homeShortcutLabel?.takeIf { it.isNotBlank() }
+                                    ?: str("回家", "回家", "Home", "自宅")
                                 MapChipButton(
                                     icon = Icons.Rounded.Home,
-                                    label = str("回家", "回家", "Home", "自宅"),
-                                    onClick = { onQuickBuiltInNavigateQuery(homeAddress) }
+                                    label = homeLbl,
+                                    onClick = {
+                                        if (homeLatSaved != 0.0 && homeLonSaved != 0.0) {
+                                            onStartBuiltInNavResult(NavSearchResult(homeLbl, homeAddress, homeLatSaved, homeLonSaved))
+                                        } else {
+                                            onQuickBuiltInNavigateQuery(homeAddress)
+                                        }
+                                    }
                                 )
                             }
                             if (workAddress.isNotBlank()) {
+                                val workLatSaved = livePrefConfig?.workLat ?: 0.0
+                                val workLonSaved = livePrefConfig?.workLon ?: 0.0
+                                val workLbl = livePrefConfig?.workShortcutLabel?.takeIf { it.isNotBlank() }
+                                    ?: str("公司", "公司", "Work", "職場")
                                 MapChipButton(
                                     icon = Icons.Rounded.Work,
-                                    label = str("公司", "公司", "Work", "職場"),
-                                    onClick = { onQuickBuiltInNavigateQuery(workAddress) }
+                                    label = workLbl,
+                                    onClick = {
+                                        if (workLatSaved != 0.0 && workLonSaved != 0.0) {
+                                            onStartBuiltInNavResult(NavSearchResult(workLbl, workAddress, workLatSaved, workLonSaved))
+                                        } else {
+                                            onQuickBuiltInNavigateQuery(workAddress)
+                                        }
+                                    }
                                 )
                             }
                             MapChipButton(
@@ -647,11 +832,27 @@ fun LiveMapCard(
                                         modifier = Modifier.weight(1f)
                                     )
                                     Button(
-                                        onClick = { onSearchBuiltInPlace(builtInQueryText) },
+                                        onClick = {
+                                            if (builtInQueryText.isNotBlank()) {
+                                                triggerMapLocationConfirm(
+                                                    slot = MapConfirmSlot.SEARCH_NAV,
+                                                    label = builtInQueryText.trim(),
+                                                    rawAddress = builtInQueryText.trim()
+                                                )
+                                            }
+                                        },
                                         colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
-                                        Text(str("搜尋", "搜索", "Search", "検索"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Icon(Icons.Rounded.Place, contentDescription = null, modifier = Modifier.size(15.dp))
+                                        Spacer(Modifier.width(3.dp))
+                                        Text(str("地圖判定", "地图判定", "Locate", "地図確認"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    OutlinedButton(
+                                        onClick = { onSearchBuiltInPlace(builtInQueryText) },
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text(str("清單", "列表", "List", "一覧"), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
                                     IconButton(onClick = onVoiceNavClick) {
                                         Icon(Icons.Rounded.Mic, contentDescription = str("語音輸入", "语音输入", "Voice input", "音声入力"), tint = Color(0xFFA78BFA))
@@ -681,6 +882,8 @@ fun LiveMapCard(
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     if (showHomeChip) {
+                                        val homeLatSaved = livePrefConfig?.homeLat ?: 0.0
+                                        val homeLonSaved = livePrefConfig?.homeLon ?: 0.0
                                         MapChipButton(
                                             icon = Icons.Rounded.Home,
                                             label = if (homeAddress.isNotBlank()) homeChipLabel else "$homeChipLabel (＋)",
@@ -688,7 +891,11 @@ fun LiveMapCard(
                                             onClick = {
                                                 if (homeAddress.isNotBlank()) {
                                                     showBuiltInSearchBox = false
-                                                    onQuickBuiltInNavigateQuery(homeAddress)
+                                                    if (homeLatSaved != 0.0 && homeLonSaved != 0.0) {
+                                                        onStartBuiltInNavResult(NavSearchResult(homeChipLabel, homeAddress, homeLatSaved, homeLonSaved))
+                                                    } else {
+                                                        onQuickBuiltInNavigateQuery(homeAddress)
+                                                    }
                                                 } else {
                                                     showNavShortcutEditor = true
                                                 }
@@ -696,6 +903,8 @@ fun LiveMapCard(
                                         )
                                     }
                                     if (showWorkChip) {
+                                        val workLatSaved = livePrefConfig?.workLat ?: 0.0
+                                        val workLonSaved = livePrefConfig?.workLon ?: 0.0
                                         MapChipButton(
                                             icon = Icons.Rounded.Work,
                                             label = if (workAddress.isNotBlank()) workChipLabel else "$workChipLabel (＋)",
@@ -703,7 +912,11 @@ fun LiveMapCard(
                                             onClick = {
                                                 if (workAddress.isNotBlank()) {
                                                     showBuiltInSearchBox = false
-                                                    onQuickBuiltInNavigateQuery(workAddress)
+                                                    if (workLatSaved != 0.0 && workLonSaved != 0.0) {
+                                                        onStartBuiltInNavResult(NavSearchResult(workChipLabel, workAddress, workLatSaved, workLonSaved))
+                                                    } else {
+                                                        onQuickBuiltInNavigateQuery(workAddress)
+                                                    }
                                                 } else {
                                                     showNavShortcutEditor = true
                                                 }
@@ -717,7 +930,11 @@ fun LiveMapCard(
                                             highlight = true,
                                             onClick = {
                                                 showBuiltInSearchBox = false
-                                                onQuickBuiltInNavigateQuery(sc.address)
+                                                if (sc.latitude != 0.0 && sc.longitude != 0.0) {
+                                                    onStartBuiltInNavResult(NavSearchResult(sc.label, sc.address, sc.latitude, sc.longitude))
+                                                } else {
+                                                    onQuickBuiltInNavigateQuery(sc.address)
+                                                }
                                             }
                                         )
                                     }
@@ -802,7 +1019,8 @@ fun LiveMapCard(
                                                 Text(gmapsImportNote.orEmpty(), color = colors.accent, fontSize = 11.sp)
                                             }
 
-                                            // Default Shortcut 1: Home (editable + removable)
+                                            // Default Shortcut 1: Home (editable + map pin verify + removable)
+                                            val homeConfirmed = (livePrefConfig?.homeLat ?: 0.0) != 0.0 && editHomeAddr.trim() == homeAddress.trim()
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
                                                 verticalAlignment = Alignment.CenterVertically,
@@ -813,7 +1031,7 @@ fun LiveMapCard(
                                                     onValueChange = { editHomeLabel = it },
                                                     singleLine = true,
                                                     placeholder = { Text(str("回家", "回家", "Home", "自宅"), fontSize = 11.sp) },
-                                                    modifier = Modifier.width(86.dp)
+                                                    modifier = Modifier.width(82.dp)
                                                 )
                                                 OutlinedTextField(
                                                     value = editHomeAddr,
@@ -822,24 +1040,63 @@ fun LiveMapCard(
                                                     placeholder = { Text(str("輸入回家地址…", "输入回家地址…", "Home address…", "自宅の住所…"), fontSize = 11.sp) },
                                                     modifier = Modifier.weight(1f)
                                                 )
+                                                Surface(
+                                                    color = if (homeConfirmed) Color(0x2822C55E) else colors.accent.copy(alpha = 0.22f),
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    modifier = Modifier
+                                                        .border(1.dp, if (homeConfirmed) Color(0xFF22C55E) else colors.accent, RoundedCornerShape(10.dp))
+                                                        .bouncyClickable {
+                                                            val addr = editHomeAddr.trim()
+                                                            if (addr.isNotBlank()) {
+                                                                com.dxcar.launcher.DxCarApp.instance?.preferences?.update { cur ->
+                                                                    cur.copy(homeShortcutLabel = editHomeLabel.trim(), homeAddress = addr)
+                                                                }
+                                                                triggerMapLocationConfirm(
+                                                                    slot = MapConfirmSlot.HOME,
+                                                                    label = editHomeLabel.trim().ifBlank { homeChipLabel },
+                                                                    rawAddress = addr
+                                                                )
+                                                            }
+                                                        }
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = if (homeConfirmed) Icons.Rounded.CheckCircle else Icons.Rounded.Place,
+                                                            contentDescription = null,
+                                                            tint = if (homeConfirmed) Color(0xFF22C55E) else colors.accent,
+                                                            modifier = Modifier.size(15.dp)
+                                                        )
+                                                        Spacer(Modifier.width(3.dp))
+                                                        Text(
+                                                            text = if (homeConfirmed) str("已定位", "已定位", "Pinned", "確認済") else str("地圖確認", "地图确认", "Verify", "地図確認"),
+                                                            color = if (homeConfirmed) Color(0xFF22C55E) else colors.accent,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                    }
+                                                }
                                                 IconButton(
                                                     onClick = {
                                                         com.dxcar.launcher.DxCarApp.instance?.preferences?.update { cur ->
                                                             cur.copy(showHomeNavShortcut = !cur.showHomeNavShortcut)
                                                         }
                                                     },
-                                                    modifier = Modifier.size(30.dp)
+                                                    modifier = Modifier.size(28.dp)
                                                 ) {
                                                     Icon(
                                                         imageVector = if (showHomeChip) Icons.Rounded.DeleteOutline else Icons.Rounded.Add,
                                                         contentDescription = null,
                                                         tint = if (showHomeChip) Color(0xFFEF4444) else colors.accent,
-                                                        modifier = Modifier.size(18.dp)
+                                                        modifier = Modifier.size(17.dp)
                                                     )
                                                 }
                                             }
 
-                                            // Default Shortcut 2: Work (editable + removable)
+                                            // Default Shortcut 2: Work (editable + map pin verify + removable)
+                                            val workConfirmed = (livePrefConfig?.workLat ?: 0.0) != 0.0 && editWorkAddr.trim() == workAddress.trim()
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
                                                 verticalAlignment = Alignment.CenterVertically,
@@ -850,7 +1107,7 @@ fun LiveMapCard(
                                                     onValueChange = { editWorkLabel = it },
                                                     singleLine = true,
                                                     placeholder = { Text(str("公司", "公司", "Work", "職場"), fontSize = 11.sp) },
-                                                    modifier = Modifier.width(86.dp)
+                                                    modifier = Modifier.width(82.dp)
                                                 )
                                                 OutlinedTextField(
                                                     value = editWorkAddr,
@@ -859,19 +1116,57 @@ fun LiveMapCard(
                                                     placeholder = { Text(str("輸入公司地址…", "输入公司地址…", "Work address…", "職場の住所…"), fontSize = 11.sp) },
                                                     modifier = Modifier.weight(1f)
                                                 )
+                                                Surface(
+                                                    color = if (workConfirmed) Color(0x2822C55E) else colors.accent.copy(alpha = 0.22f),
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    modifier = Modifier
+                                                        .border(1.dp, if (workConfirmed) Color(0xFF22C55E) else colors.accent, RoundedCornerShape(10.dp))
+                                                        .bouncyClickable {
+                                                            val addr = editWorkAddr.trim()
+                                                            if (addr.isNotBlank()) {
+                                                                com.dxcar.launcher.DxCarApp.instance?.preferences?.update { cur ->
+                                                                    cur.copy(workShortcutLabel = editWorkLabel.trim(), workAddress = addr)
+                                                                }
+                                                                triggerMapLocationConfirm(
+                                                                    slot = MapConfirmSlot.WORK,
+                                                                    label = editWorkLabel.trim().ifBlank { workChipLabel },
+                                                                    rawAddress = addr
+                                                                )
+                                                            }
+                                                        }
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = if (workConfirmed) Icons.Rounded.CheckCircle else Icons.Rounded.Place,
+                                                            contentDescription = null,
+                                                            tint = if (workConfirmed) Color(0xFF22C55E) else colors.accent,
+                                                            modifier = Modifier.size(15.dp)
+                                                        )
+                                                        Spacer(Modifier.width(3.dp))
+                                                        Text(
+                                                            text = if (workConfirmed) str("已定位", "已定位", "Pinned", "確認済") else str("地圖確認", "地图确认", "Verify", "地図確認"),
+                                                            color = if (workConfirmed) Color(0xFF22C55E) else colors.accent,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                    }
+                                                }
                                                 IconButton(
                                                     onClick = {
                                                         com.dxcar.launcher.DxCarApp.instance?.preferences?.update { cur ->
                                                             cur.copy(showWorkNavShortcut = !cur.showWorkNavShortcut)
                                                         }
                                                     },
-                                                    modifier = Modifier.size(30.dp)
+                                                    modifier = Modifier.size(28.dp)
                                                 ) {
                                                     Icon(
                                                         imageVector = if (showWorkChip) Icons.Rounded.DeleteOutline else Icons.Rounded.Add,
                                                         contentDescription = null,
                                                         tint = if (showWorkChip) Color(0xFFEF4444) else colors.accent,
-                                                        modifier = Modifier.size(18.dp)
+                                                        modifier = Modifier.size(17.dp)
                                                     )
                                                 }
                                             }
@@ -888,7 +1183,7 @@ fun LiveMapCard(
                                                     horizontalArrangement = Arrangement.SpaceBetween
                                                 ) {
                                                     Text(
-                                                        text = "${sc.label} · ${sc.address}",
+                                                        text = (if (sc.latitude != 0.0) "✓ " else "") + "${sc.label} · ${sc.address}",
                                                         color = colors.primaryText,
                                                         fontSize = 12.sp,
                                                         maxLines = 1,
@@ -908,7 +1203,7 @@ fun LiveMapCard(
                                                 }
                                             }
 
-                                            // Add new custom shortcut row
+                                            // Add new custom shortcut row -> immediately jumps into Map Pin Detection & Confirmation!
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
                                                 verticalAlignment = Alignment.CenterVertically,
@@ -919,7 +1214,7 @@ fun LiveMapCard(
                                                     onValueChange = { newCustomLabel = it },
                                                     singleLine = true,
                                                     placeholder = { Text(str("名稱", "名称", "Name", "名称"), fontSize = 11.sp) },
-                                                    modifier = Modifier.width(86.dp)
+                                                    modifier = Modifier.width(82.dp)
                                                 )
                                                 OutlinedTextField(
                                                     value = newCustomAddr,
@@ -933,21 +1228,18 @@ fun LiveMapCard(
                                                         val addr = newCustomAddr.trim()
                                                         if (addr.isNotBlank()) {
                                                             val lbl = newCustomLabel.trim().ifBlank { addr.take(6) }
-                                                            com.dxcar.launcher.DxCarApp.instance?.preferences?.update { cur ->
-                                                                cur.copy(
-                                                                    customNavShortcuts = cur.customNavShortcuts + com.dxcar.launcher.data.NavAddressShortcut(
-                                                                        label = lbl,
-                                                                        address = addr
-                                                                    )
-                                                                )
-                                                            }
                                                             newCustomLabel = ""
                                                             newCustomAddr = ""
+                                                            triggerMapLocationConfirm(
+                                                                slot = MapConfirmSlot.NEW_CUSTOM,
+                                                                label = lbl,
+                                                                rawAddress = addr
+                                                            )
                                                         }
                                                     },
                                                     shape = RoundedCornerShape(10.dp)
                                                 ) {
-                                                    Text("＋", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                                    Text(str("＋ 定位", "＋ 定位", "+ Pin", "+ 確認"), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                                 }
                                             }
 
@@ -957,20 +1249,46 @@ fun LiveMapCard(
                                             ) {
                                                 Button(
                                                     onClick = {
+                                                        val nextHome = editHomeAddr.trim()
+                                                        val nextWork = editWorkAddr.trim()
+                                                        val needVerifyHome = nextHome.isNotBlank() &&
+                                                            (nextHome != homeAddress.trim() || (livePrefConfig?.homeLat ?: 0.0) == 0.0)
+                                                        val needVerifyWork = nextWork.isNotBlank() &&
+                                                            (nextWork != workAddress.trim() || (livePrefConfig?.workLat ?: 0.0) == 0.0)
                                                         com.dxcar.launcher.DxCarApp.instance?.preferences?.update { cur ->
                                                             cur.copy(
                                                                 homeShortcutLabel = editHomeLabel.trim(),
-                                                                homeAddress = editHomeAddr.trim(),
+                                                                homeAddress = nextHome,
+                                                                homeLat = if (nextHome == cur.homeAddress.trim()) cur.homeLat else 0.0,
+                                                                homeLon = if (nextHome == cur.homeAddress.trim()) cur.homeLon else 0.0,
                                                                 workShortcutLabel = editWorkLabel.trim(),
-                                                                workAddress = editWorkAddr.trim()
+                                                                workAddress = nextWork,
+                                                                workLat = if (nextWork == cur.workAddress.trim()) cur.workLat else 0.0,
+                                                                workLon = if (nextWork == cur.workAddress.trim()) cur.workLon else 0.0
                                                             )
                                                         }
-                                                        showNavShortcutEditor = false
+                                                        when {
+                                                            needVerifyHome -> triggerMapLocationConfirm(
+                                                                slot = MapConfirmSlot.HOME,
+                                                                label = editHomeLabel.trim().ifBlank { homeChipLabel },
+                                                                rawAddress = nextHome
+                                                            )
+                                                            needVerifyWork -> triggerMapLocationConfirm(
+                                                                slot = MapConfirmSlot.WORK,
+                                                                label = editWorkLabel.trim().ifBlank { workChipLabel },
+                                                                rawAddress = nextWork
+                                                            )
+                                                            else -> showNavShortcutEditor = false
+                                                        }
                                                     },
                                                     colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
                                                     shape = RoundedCornerShape(10.dp)
                                                 ) {
-                                                    Text(str("儲存快捷鍵設定", "保存快捷键设置", "Save Shortcuts", "設定を保存"), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                    Text(
+                                                        str("儲存並於地圖確認", "保存并在地图确认", "Save & Verify on Map", "保存して地図で確認"),
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
                                                 }
                                             }
                                         }
@@ -986,18 +1304,49 @@ fun LiveMapCard(
                                             .clip(RoundedCornerShape(12.dp))
                                             .background(colors.cardSurfaceElevated)
                                             .clickable {
-                                                showBuiltInSearchBox = false
-                                                onStartBuiltInNavResult(res)
+                                                triggerMapLocationConfirm(
+                                                    slot = MapConfirmSlot.SEARCH_NAV,
+                                                    label = res.name,
+                                                    rawAddress = res.subtitle.ifBlank { res.name },
+                                                    preResolved = res
+                                                )
                                             }
                                             .padding(horizontal = 12.dp, vertical = 8.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(res.name, color = colors.primaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             Text(res.subtitle, color = colors.secondaryText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         }
-                                        Text(str("開始導航 →", "开始导航 →", "Start Nav →", "案内開始 →"), color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Surface(
+                                            color = colors.accent.copy(alpha = 0.18f),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text(
+                                                text = str("📍 看地圖", "📍 看地图", "📍 Map", "📍 地図"),
+                                                color = colors.accent,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                            )
+                                        }
+                                        Surface(
+                                            color = colors.accent,
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.bouncyClickable {
+                                                showBuiltInSearchBox = false
+                                                onStartBuiltInNavResult(res)
+                                            }
+                                        ) {
+                                            Text(
+                                                text = str("導航 →", "导航 →", "Go →", "案内 →"),
+                                                color = colors.onAccent,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1217,6 +1566,247 @@ fun LiveMapCard(
                         active = isFullscreen,
                         onClick = onToggleFullscreen
                     )
+                }
+            }
+        }
+
+        // INTERACTIVE MAP LOCATION DETECTION & CONFIRMATION BAR
+        val confirmData = pendingMapConfirm
+        AnimatedVisibility(
+            visible = confirmData != null,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
+        ) {
+            val c = confirmData ?: return@AnimatedVisibility
+            Surface(
+                color = colors.cardSurface.copy(alpha = 0.96f),
+                shape = RoundedCornerShape(20.dp),
+                shadowElevation = 14.dp,
+                modifier = Modifier
+                    .fillMaxWidth(0.86f)
+                    .border(1.5.dp, colors.accent, RoundedCornerShape(20.dp))
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Rounded.Place, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(20.dp))
+                            Text(
+                                text = str(
+                                    "地圖判定確認 · ${c.label}",
+                                    "地图判定确认 · ${c.label}",
+                                    "Confirm on Map · ${c.label}",
+                                    "地図で位置確認 · ${c.label}"
+                                ),
+                                color = colors.primaryText,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Surface(
+                            color = when {
+                                c.isDetecting -> colors.accent.copy(alpha = 0.2f)
+                                c.candidates.isNotEmpty() -> Color(0x2822C55E)
+                                else -> Color(0x28F59E0B)
+                            },
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text(
+                                text = when {
+                                    c.isDetecting -> str("偵測地點中…", "检测地点中…", "Detecting…", "検出中…")
+                                    c.manuallyMoved -> str("已手動微調", "已手动微调", "Adjusted", "微調整済")
+                                    c.candidates.isNotEmpty() -> str("✓ 已判定地點", "✓ 已判定地点", "✓ Located", "✓ 検出済")
+                                    else -> str("請拖曳地圖選點", "请拖拽地图选点", "Drag map to pin", "地図を動かして指定")
+                                },
+                                color = when {
+                                    c.isDetecting -> colors.accent
+                                    c.candidates.isNotEmpty() || c.manuallyMoved -> Color(0xFF22C55E)
+                                    else -> Color(0xFFF59E0B)
+                                },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    if (c.isDetecting) {
+                        LinearProgressIndicator(
+                            color = colors.accent,
+                            modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp))
+                        )
+                    } else {
+                        Text(
+                            text = c.resolvedSubtitle.ifBlank { c.resolvedTitle.ifBlank { c.rawAddress } },
+                            color = colors.primaryText,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = str(
+                                "座標：%.5f, %.5f（可直接拖曳地圖微調紅色大頭針位置）",
+                                "坐标：%.5f, %.5f（可直接拖拽地图微调红色大头针位置）",
+                                "Coords: %.5f, %.5f (Drag map to fine-tune red pin)",
+                                "座標：%.5f, %.5f（地図をドラッグして赤ピン位置を微調整できます）"
+                            ).format(Locale.US, c.pinLat, c.pinLon),
+                            color = colors.secondaryText,
+                            fontSize = 11.sp
+                        )
+                    }
+
+                    if (!c.isDetecting && c.candidates.size > 1) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            c.candidates.take(3).forEachIndexed { idx, cand ->
+                                val selected = idx == c.selectedIndex && !c.manuallyMoved
+                                Surface(
+                                    color = if (selected) colors.accent else colors.cardSurfaceElevated,
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .border(1.dp, if (selected) colors.accent else colors.cardBorder, RoundedCornerShape(10.dp))
+                                        .bouncyClickable {
+                                            pendingMapConfirm = c.copy(
+                                                selectedIndex = idx,
+                                                pinLat = cand.latitude,
+                                                pinLon = cand.longitude,
+                                                resolvedTitle = cand.name,
+                                                resolvedSubtitle = cand.subtitle,
+                                                manuallyMoved = false
+                                            )
+                                            flyMapToPin(cand.latitude, cand.longitude)
+                                        }
+                                ) {
+                                    Text(
+                                        text = "${idx + 1}. ${cand.name.take(14)}",
+                                        color = if (selected) colors.onAccent else colors.primaryText,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val prevSlot = c.slot
+                                pendingMapConfirm = null
+                                followVehicle = true
+                                if (prevSlot == MapConfirmSlot.SEARCH_NAV) {
+                                    showBuiltInSearchBox = true
+                                } else {
+                                    showBuiltInSearchBox = true
+                                    showNavShortcutEditor = true
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(str("返回修改", "返回修改", "Back", "戻る"), fontSize = 12.sp)
+                        }
+                        Button(
+                            enabled = !c.isDetecting && (c.pinLat != 0.0 || c.pinLon != 0.0),
+                            onClick = {
+                                val prefs = com.dxcar.launcher.DxCarApp.instance?.preferences
+                                when (c.slot) {
+                                    MapConfirmSlot.HOME -> {
+                                        prefs?.update { cur ->
+                                            cur.copy(
+                                                homeAddress = c.rawAddress,
+                                                homeLat = c.pinLat,
+                                                homeLon = c.pinLon
+                                            )
+                                        }
+                                        val nextWorkAddr = prefs?.config?.value?.workAddress?.trim().orEmpty()
+                                        val nextWorkLat = prefs?.config?.value?.workLat ?: 0.0
+                                        if (nextWorkAddr.isNotBlank() && nextWorkLat == 0.0) {
+                                            val wLbl = prefs?.config?.value?.workShortcutLabel?.takeIf { it.isNotBlank() }
+                                                ?: DxCarI18n.tr("公司", "公司", "Work", "職場")
+                                            triggerMapLocationConfirm(MapConfirmSlot.WORK, wLbl, nextWorkAddr)
+                                        } else {
+                                            pendingMapConfirm = null
+                                            followVehicle = true
+                                        }
+                                    }
+                                    MapConfirmSlot.WORK -> {
+                                        prefs?.update { cur ->
+                                            cur.copy(
+                                                workAddress = c.rawAddress,
+                                                workLat = c.pinLat,
+                                                workLon = c.pinLon
+                                            )
+                                        }
+                                        pendingMapConfirm = null
+                                        followVehicle = true
+                                    }
+                                    MapConfirmSlot.NEW_CUSTOM -> {
+                                        prefs?.update { cur ->
+                                            cur.copy(
+                                                customNavShortcuts = cur.customNavShortcuts + com.dxcar.launcher.data.NavAddressShortcut(
+                                                    label = c.label,
+                                                    address = c.rawAddress,
+                                                    latitude = c.pinLat,
+                                                    longitude = c.pinLon
+                                                )
+                                            )
+                                        }
+                                        pendingMapConfirm = null
+                                        followVehicle = true
+                                    }
+                                    MapConfirmSlot.SEARCH_NAV -> {
+                                        val dest = NavSearchResult(
+                                            name = c.resolvedTitle.ifBlank { c.label },
+                                            subtitle = c.resolvedSubtitle.ifBlank { c.rawAddress },
+                                            latitude = c.pinLat,
+                                            longitude = c.pinLon
+                                        )
+                                        pendingMapConfirm = null
+                                        followVehicle = true
+                                        onStartBuiltInNavResult(dest)
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = if (c.slot == MapConfirmSlot.SEARCH_NAV) {
+                                    str("確認並開始導航", "确认并开始导航", "Confirm & Navigate", "確定して案内開始")
+                                } else {
+                                    str("確認此地點並儲存", "确认此地点并保存", "Confirm & Save Pin", "この位置で保存")
+                                },
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
                 }
             }
         }

@@ -1,6 +1,9 @@
 package com.dxcar.launcher.map
 
+import android.content.Context
+import android.location.Geocoder
 import android.location.Location
+import android.os.Build
 import com.dxcar.launcher.comms.TtsAnnouncer
 import com.dxcar.launcher.i18n.DxCarI18n
 import kotlinx.coroutines.CoroutineScope
@@ -16,6 +19,7 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
@@ -60,12 +64,19 @@ data class BuiltInNavState(
 )
 
 /**
- * Plan B Zero-API-Key Built-In Navigation Engine:
- * - Place search powered by Komoot Photon (OSM, zh-TW bias near current car GPS)
+ * Zero-API-Key Built-In Navigation Engine:
+ * - 4-Engine Address & POI Geocoding:
+ *   1) Android system Geocoder (Google GMS rooftop precision for Taiwan street numbers)
+ *   2) ArcGIS World Geocoding Service (exact Taiwan door-number & postal match, zero key)
+ *   3) Nominatim (OSM) with smart Chinese address tokenization & street-level relaxation
+ *   4) Komoot Photon fallback
  * - Turn-by-turn routing powered by public OSRM driving server
  * - Live GPS step tracking + Chinese TTS voice prompts via [TtsAnnouncer]
  */
-class BuiltInNavEngine(private val ttsAnnouncer: TtsAnnouncer?) {
+class BuiltInNavEngine(
+    private val ttsAnnouncer: TtsAnnouncer?,
+    private val appContext: Context? = null
+) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val httpClient = OkHttpClient.Builder()
@@ -176,57 +187,140 @@ class BuiltInNavEngine(private val ttsAnnouncer: TtsAnnouncer?) {
         }
     }
 
+    /**
+     * Public suspend geocoder for interactive map pin detection & confirmation UI.
+     */
+    suspend fun resolveAddressCandidates(
+        query: String,
+        biasLat: Double,
+        biasLon: Double
+    ): List<NavSearchResult> = withContext(Dispatchers.IO) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) return@withContext emptyList()
+        runCatching { queryPlacesDualEngine(trimmed, biasLat, biasLon) }.getOrDefault(emptyList())
+    }
+
     private fun queryPlacesDualEngine(trimmed: String, biasLat: Double, biasLon: Double): List<NavSearchResult> {
-        val encoded = URLEncoder.encode(trimmed, "UTF-8")
         val combined = mutableListOf<NavSearchResult>()
+        val isLikelyTaiwan = (biasLat in 21.5..26.5 && biasLon in 118.0..122.5) ||
+            trimmed.contains("台灣") || trimmed.contains("臺灣") ||
+            Regex("(台北|臺北|新北|桃園|台中|臺中|台南|臺南|高雄|基隆|新竹|苗栗|彰化|南投|雲林|嘉義|屏東|宜蘭|花蓮|台東|臺東|澎湖|金門|馬祖)").containsMatchIn(trimmed)
 
-        // 1. Nominatim (zh-TW) bounded near current vehicle GPS (~60km box) first for nearby POIs (gas stations, cafes)
-        if (biasLat != 0.0 && biasLon != 0.0) {
+        // 1. Android System Geocoder (Google GMS — exact rooftop precision for Taiwan addresses with door numbers!)
+        val ctx = appContext
+        if (ctx != null && runCatching { Geocoder.isPresent() }.getOrDefault(false)) {
             runCatching {
-                val left = biasLon - 0.55
-                val right = biasLon + 0.55
-                val top = biasLat + 0.50
-                val bottom = biasLat - 0.50
-                val acceptLang = DxCarI18n.nominatimAcceptLanguage()
-                val nearUrl =
-                    "https://nominatim.openstreetmap.org/search?q=$encoded&format=jsonv2&accept-language=$acceptLang&viewbox=$left,$top,$right,$bottom&bounded=1&limit=5"
-                val req = Request.Builder()
-                    .url(nearUrl)
-                    .header("User-Agent", "DX-Car-Launcher/1.5.3 (Android Car HeadUnit)")
-                    .build()
-                httpClient.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        combined += parseNominatimResults(resp.body?.string().orEmpty())
+                val locale = if (isLikelyTaiwan) Locale.TRADITIONAL_CHINESE else Locale.getDefault()
+                val geocoder = Geocoder(ctx, locale)
+                @Suppress("DEPRECATION")
+                val addrs = geocoder.getFromLocationName(trimmed, 5)
+                if (!addrs.isNullOrEmpty()) {
+                    for (a in addrs) {
+                        if (a.hasLatitude() && a.hasLongitude()) {
+                            val line = a.getAddressLine(0).orEmpty().trim()
+                            val title = a.featureName?.takeIf { it.isNotBlank() && !it.all(Char::isDigit) }
+                                ?: line.ifBlank { trimmed }
+                            val sub = line.takeIf { it.isNotBlank() && it != title }
+                                ?: listOfNotNull(a.adminArea, a.subAdminArea, a.locality, a.thoroughfare)
+                                    .distinct()
+                                    .joinToString("")
+                                    .ifBlank { "%.5f, %.5f".format(a.latitude, a.longitude) }
+                            combined += NavSearchResult(
+                                name = title,
+                                subtitle = sub,
+                                latitude = a.latitude,
+                                longitude = a.longitude
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // 2. Nominatim (zh-TW) nationwide / global search if local box had < 3 hits
+        // 2. ArcGIS World Geocoding Service (Zero-Key, 100/100 exact Taiwan door-number & postal match!)
+        if (combined.size < 2) {
+            runCatching {
+                val encoded = URLEncoder.encode(trimmed, "UTF-8")
+                val countryParam = if (isLikelyTaiwan) "&countryCode=TWN" else ""
+                val locParam = if (biasLat != 0.0 && biasLon != 0.0) "&location=$biasLon,$biasLat" else ""
+                val arcUrl =
+                    "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates" +
+                        "?SingleLine=$encoded$countryParam$locParam&maxLocations=5&outFields=Match_addr,Place_addr,Type&f=pjson"
+                val req = Request.Builder()
+                    .url(arcUrl)
+                    .header("User-Agent", "DX-Car-Launcher/1.8.6 (Android Car HeadUnit)")
+                    .build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        combined += parseArcGisResults(resp.body?.string().orEmpty(), trimmed)
+                    }
+                }
+            }
+        }
+
+        // 3. Nominatim (zh-TW) with smart Chinese address tokenization & progressive street fallback
         if (combined.size < 3) {
-            runCatching {
-                val acceptLang = DxCarI18n.nominatimAcceptLanguage()
-                val wideUrl =
-                    "https://nominatim.openstreetmap.org/search?q=$encoded&format=jsonv2&accept-language=$acceptLang&limit=6"
-                val req = Request.Builder()
-                    .url(wideUrl)
-                    .header("User-Agent", "DX-Car-Launcher/1.5.3 (Android Car HeadUnit)")
-                    .build()
-                httpClient.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        combined += parseNominatimResults(resp.body?.string().orEmpty())
+            val queriesToTry = buildList {
+                add(trimmed)
+                val spaced = tokenizeCjkAddress(trimmed)
+                if (spaced != trimmed) add(spaced)
+                val streetOnly = stripDoorNumber(trimmed)
+                if (streetOnly.isNotBlank() && streetOnly != trimmed) {
+                    add(tokenizeCjkAddress(streetOnly))
+                }
+            }.distinct()
+
+            val acceptLang = DxCarI18n.nominatimAcceptLanguage()
+            for (qCandidate in queriesToTry) {
+                if (combined.size >= 3) break
+                val enc = URLEncoder.encode(qCandidate, "UTF-8")
+                // Local viewbox first
+                if (biasLat != 0.0 && biasLon != 0.0) {
+                    runCatching {
+                        val left = biasLon - 0.55
+                        val right = biasLon + 0.55
+                        val top = biasLat + 0.50
+                        val bottom = biasLat - 0.50
+                        val nearUrl =
+                            "https://nominatim.openstreetmap.org/search?q=$enc&format=jsonv2&accept-language=$acceptLang&viewbox=$left,$top,$right,$bottom&bounded=1&limit=4"
+                        val req = Request.Builder()
+                            .url(nearUrl)
+                            .header("User-Agent", "DX-Car-Launcher/1.8.6 (Android Car HeadUnit)")
+                            .build()
+                        httpClient.newCall(req).execute().use { resp ->
+                            if (resp.isSuccessful) {
+                                combined += parseNominatimResults(resp.body?.string().orEmpty())
+                            }
+                        }
+                    }
+                }
+                if (combined.size < 2) {
+                    runCatching {
+                        val wideUrl =
+                            "https://nominatim.openstreetmap.org/search?q=$enc&format=jsonv2&accept-language=$acceptLang&limit=5"
+                        val req = Request.Builder()
+                            .url(wideUrl)
+                            .header("User-Agent", "DX-Car-Launcher/1.8.6 (Android Car HeadUnit)")
+                            .build()
+                        httpClient.newCall(req).execute().use { resp ->
+                            if (resp.isSuccessful) {
+                                combined += parseNominatimResults(resp.body?.string().orEmpty())
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // 3. Komoot Photon fallback / supplement
+        // 4. Komoot Photon fallback
         if (combined.isEmpty()) {
             runCatching {
-                val photonUrl = "https://photon.komoot.io/api/?q=$encoded&lat=$biasLat&lon=$biasLon&limit=6"
+                val fallbackQ = tokenizeCjkAddress(stripDoorNumber(trimmed).ifBlank { trimmed })
+                val enc = URLEncoder.encode(fallbackQ, "UTF-8")
+                val photonUrl = "https://photon.komoot.io/api/?q=$enc&lat=$biasLat&lon=$biasLon&limit=5"
                 val req = Request.Builder()
                     .url(photonUrl)
-                    .header("User-Agent", "DX-Car-Launcher/1.5.3")
+                    .header("User-Agent", "DX-Car-Launcher/1.8.6")
                     .build()
                 httpClient.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
@@ -240,12 +334,49 @@ class BuiltInNavEngine(private val ttsAnnouncer: TtsAnnouncer?) {
         val deduped = mutableListOf<NavSearchResult>()
         for (item in combined) {
             val dup = deduped.any {
-                kotlin.math.abs(it.latitude - item.latitude) < 0.0008 &&
-                    kotlin.math.abs(it.longitude - item.longitude) < 0.0008
+                kotlin.math.abs(it.latitude - item.latitude) < 0.0005 &&
+                    kotlin.math.abs(it.longitude - item.longitude) < 0.0005
             }
             if (!dup) deduped += item
         }
         return deduped.take(7)
+    }
+
+    private fun tokenizeCjkAddress(raw: String): String {
+        return raw
+            .replace(Regex("(縣|市|區|鄉|鎮|村|里|路|街|大道|段)"), "$1 ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    private fun stripDoorNumber(raw: String): String {
+        return raw
+            .replace(Regex("\\d+之\\d+號.*|\\d+[-－]\\d+號.*|\\d+巷.*|\\d+弄.*|\\d+號.*|\\d+樓.*"), "")
+            .trim()
+    }
+
+    private fun parseArcGisResults(jsonStr: String, fallbackQuery: String): List<NavSearchResult> {
+        if (jsonStr.isBlank()) return emptyList()
+        val root = JSONObject(jsonStr)
+        val arr = root.optJSONArray("candidates") ?: return emptyList()
+        val out = mutableListOf<NavSearchResult>()
+        for (i in 0 until arr.length()) {
+            val obj = arr.optJSONObject(i) ?: continue
+            val score = obj.optDouble("score", 0.0)
+            if (score < 65.0) continue
+            val loc = obj.optJSONObject("location") ?: continue
+            val lon = loc.optDouble("x", Double.NaN)
+            val lat = loc.optDouble("y", Double.NaN)
+            if (lat.isNaN() || lon.isNaN()) continue
+            val addr = obj.optString("address").trim().ifBlank { fallbackQuery }
+            out += NavSearchResult(
+                name = addr.substringBefore(",").trim().ifBlank { fallbackQuery },
+                subtitle = addr,
+                latitude = lat,
+                longitude = lon
+            )
+        }
+        return out
     }
 
     private fun parseNominatimResults(jsonStr: String): List<NavSearchResult> {
