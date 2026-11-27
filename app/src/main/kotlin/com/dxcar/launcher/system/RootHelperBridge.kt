@@ -11,6 +11,8 @@ data class PlanBHelperConfig(
     val planBEnabled: Boolean = true,
     val dockPinnedRightShift: Boolean = true,
     val ui1NavPackage: String = "com.google.android.apps.maps",
+    val ui1RightPackage: String = "com.google.android.youtube",
+    val ui1SplitRatio: Float = 0.70f,
     val ui2LeftPackage: String = "com.google.android.apps.maps",
     val ui2RightPackage: String = "com.google.android.youtube",
     val ui2SplitRatio: Float = 0.50f,
@@ -77,6 +79,7 @@ object RootHelperBridge {
         dockOffsetTop: Int,
         dockOffsetBottom: Int,
         ui1Ratio: Float,
+        ui1Swapped: Boolean = false,
         ui2Ratio: Float,
         ui2Swapped: Boolean
     ): Boolean {
@@ -91,12 +94,23 @@ object RootHelperBridge {
                 putInt("dockOffsetTop", dockOffsetTop)
                 putInt("dockOffsetBottom", dockOffsetBottom)
                 putFloat("ui1Ratio", ui1Ratio)
+                putBoolean("ui1Swapped", ui1Swapped)
                 putFloat("ui2Ratio", ui2Ratio)
                 putBoolean("ui2Swapped", ui2Swapped)
             }
             val res = context.contentResolver.call(PROVIDER_URI, "apply_plan_b_page", null, extras)
             res?.getBoolean("ok", false) == true
         }.getOrDefault(false)
+    }
+
+    fun updateUi1Ratio(context: Context, ratio: Float) {
+        if (!isRootHelperInstalled(context)) return
+        runCatching {
+            val extras = android.os.Bundle().apply {
+                putFloat("ratio", ratio.coerceIn(0.25f, 0.75f))
+            }
+            context.contentResolver.call(PROVIDER_URI, "update_ui1_ratio", null, extras)
+        }
     }
 
     fun updateUi2Ratio(context: Context, ratio: Float) {

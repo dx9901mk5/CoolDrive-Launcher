@@ -1,5 +1,7 @@
 package com.dxcar.launcher.overlay
 
+import androidx.compose.animation.core.animateFloat
+
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -1135,6 +1137,7 @@ class PersistentDockOverlayService :
         )
         val dockPx = (spec.dockThicknessDp * metrics.density).toInt().coerceAtLeast(0)
         val helperCfg = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(this)
+        val ui1Ratio = if (helperCfg.planBEnabled) helperCfg.ui1SplitRatio else cfg.primarySplitRatio
         val ui2Ratio = if (helperCfg.planBEnabled) helperCfg.ui2SplitRatio else cfg.page2SplitRatio
         if (coerced == 0) {
             bringDxCarToFront(null)
@@ -1148,7 +1151,8 @@ class PersistentDockOverlayService :
             dockOffsetRight = if (spec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
             dockOffsetTop = if (spec.dockPlacement == ResolvedDockPlacement.TOP) dockPx else 0,
             dockOffsetBottom = if (spec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0,
-            ui1Ratio = spec.primaryWeight,
+            ui1Ratio = ui1Ratio,
+            ui1Swapped = cfg.page1Swapped,
             ui2Ratio = ui2Ratio,
             ui2Swapped = cfg.page2Swapped
         )
@@ -1170,12 +1174,30 @@ class PersistentDockOverlayService :
                 val metrics by metricsFlow.collectAsState()
                 val haptic = LocalHapticFeedback.current
                 var isRatioDragging by remember { mutableStateOf(false) }
-                var liveRatio by remember(config.page2SplitRatio) { mutableStateOf(config.page2SplitRatio) }
+                var liveRatio by remember(activePage, config.primarySplitRatio, config.page2SplitRatio) {
+                    mutableStateOf(if (activePage == 1) config.primarySplitRatio else config.page2SplitRatio)
+                }
+
+                val pulseTrans = androidx.compose.animation.core.rememberInfiniteTransition(label = "planBSeamPulse")
+                val pulseAlpha by pulseTrans.animateFloat(
+                    initialValue = 0.55f,
+                    targetValue = 1.0f,
+                    animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                        animation = androidx.compose.animation.core.tween(420),
+                        repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+                    ),
+                    label = "pulseAlpha"
+                )
+                val pillWidth by androidx.compose.animation.core.animateDpAsState(
+                    targetValue = if (isRatioDragging) 64.dp else 34.dp,
+                    animationSpec = androidx.compose.animation.core.tween(180),
+                    label = "planBPillW"
+                )
 
                 val labelText = when {
                     isRatioDragging -> {
                         val l = (liveRatio * 100).toInt()
-                        "$l:${100 - l}"
+                        "◀ $l:${100 - l} ▶"
                     }
                     activePage == 1 -> "1/3"
                     else -> "2/3"
@@ -1184,12 +1206,16 @@ class PersistentDockOverlayService :
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .width(34.dp)
-                        .height(110.dp)
-                        .pointerInput(activePage, config.page2Swapped) {
+                        .width(pillWidth)
+                        .height(118.dp)
+                        .pointerInput(activePage, config.page1Swapped, config.page2Swapped) {
                             detectTapGestures(
                                 onDoubleTap = {
-                                    if (activePage == 2) {
+                                    if (activePage == 1) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        app.preferences.update { it.copy(page1Swapped = !it.page1Swapped) }
+                                        dispatchPlanBPageFromOverlay(app, 1)
+                                    } else if (activePage == 2) {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         app.preferences.update { it.copy(page2Swapped = !it.page2Swapped) }
                                         dispatchPlanBPageFromOverlay(app, 2)
@@ -1198,12 +1224,16 @@ class PersistentDockOverlayService :
                             )
                         }
                         .pointerInput(activePage, metrics.widthPx) {
-                            if (activePage == 2) {
+                            if (activePage == 1 || activePage == 2) {
                                 detectDragGesturesAfterLongPress(
                                     onDragStart = {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         val helperCfg = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(this@PersistentDockOverlayService)
-                                        liveRatio = if (helperCfg.planBEnabled) helperCfg.ui2SplitRatio else config.page2SplitRatio
+                                        liveRatio = if (activePage == 1) {
+                                            if (helperCfg.planBEnabled) helperCfg.ui1SplitRatio else config.primarySplitRatio
+                                        } else {
+                                            if (helperCfg.planBEnabled) helperCfg.ui2SplitRatio else config.page2SplitRatio
+                                        }
                                         isRatioDragging = true
                                     },
                                     onDrag = { change, dragAmount ->
@@ -1214,9 +1244,15 @@ class PersistentDockOverlayService :
                                     onDragEnd = {
                                         isRatioDragging = false
                                         val finalR = liveRatio
-                                        app.preferences.update { it.copy(page2SplitRatio = finalR) }
-                                        com.dxcar.launcher.system.RootHelperBridge.updateUi2Ratio(this@PersistentDockOverlayService, finalR)
-                                        dispatchPlanBPageFromOverlay(app, 2)
+                                        if (activePage == 1) {
+                                            app.preferences.update { it.copy(primarySplitRatio = finalR) }
+                                            com.dxcar.launcher.system.RootHelperBridge.updateUi1Ratio(this@PersistentDockOverlayService, finalR)
+                                            dispatchPlanBPageFromOverlay(app, 1)
+                                        } else {
+                                            app.preferences.update { it.copy(page2SplitRatio = finalR) }
+                                            com.dxcar.launcher.system.RootHelperBridge.updateUi2Ratio(this@PersistentDockOverlayService, finalR)
+                                            dispatchPlanBPageFromOverlay(app, 2)
+                                        }
                                     },
                                     onDragCancel = {
                                         isRatioDragging = false
@@ -1253,28 +1289,41 @@ class PersistentDockOverlayService :
                             )
                         }
                 ) {
+                    val borderColor = if (isRatioDragging) {
+                        androidx.compose.ui.graphics.Color(0xFF38BDF8).copy(alpha = pulseAlpha)
+                    } else {
+                        androidx.compose.ui.graphics.Color(0x9964B5F6)
+                    }
+                    val bgColor = if (isRatioDragging) {
+                        androidx.compose.ui.graphics.Color(0xEE0F172A)
+                    } else {
+                        androidx.compose.ui.graphics.Color(0xCC101828)
+                    }
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
                         modifier = Modifier
                             .clip(RoundedCornerShape(14.dp))
-                            .background(androidx.compose.ui.graphics.Color(0xCC101828))
-                            .border(1.2.dp, androidx.compose.ui.graphics.Color(0x9964B5F6), RoundedCornerShape(14.dp))
-                            .padding(horizontal = 5.dp, vertical = 10.dp)
+                            .background(bgColor)
+                            .border(if (isRatioDragging) 2.dp else 1.2.dp, borderColor, RoundedCornerShape(14.dp))
+                            .padding(horizontal = if (isRatioDragging) 6.dp else 5.dp, vertical = 10.dp)
                     ) {
                         Box(
                             modifier = Modifier
-                                .width(4.dp)
-                                .height(26.dp)
+                                .width(if (isRatioDragging) 6.dp else 4.dp)
+                                .height(if (isRatioDragging) 34.dp else 26.dp)
                                 .clip(CircleShape)
-                                .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.85f))
+                                .background(
+                                    if (isRatioDragging) androidx.compose.ui.graphics.Color(0xFF38BDF8).copy(alpha = pulseAlpha)
+                                    else androidx.compose.ui.graphics.Color.White.copy(alpha = 0.85f)
+                                )
                         )
                         Spacer(Modifier.height(5.dp))
                         Text(
                             text = labelText,
-                            color = androidx.compose.ui.graphics.Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
+                            color = if (isRatioDragging) androidx.compose.ui.graphics.Color(0xFF7DD3FC) else androidx.compose.ui.graphics.Color.White,
+                            fontSize = if (isRatioDragging) 10.sp else 9.sp,
+                            fontWeight = FontWeight.ExtraBold
                         )
                     }
                 }
@@ -1582,10 +1631,9 @@ class PersistentDockOverlayService :
                 val showPlanCPanel = !isHomeFg &&
                     !sensitiveFg &&
                     config.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
-                    (
-                        (requested && config.homeExperimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA && config.planCOverlayMusicPanelEnabled) ||
-                            (isPlanB && activePlanBPage == 1)
-                        )
+                    requested &&
+                    config.homeExperimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA &&
+                    config.planCOverlayMusicPanelEnabled
 
                 val spec = CoolwalkLayoutEngine.compute(
                     metrics = metrics,
@@ -1630,7 +1678,7 @@ class PersistentDockOverlayService :
                     if (showSeam) {
                         val helperCfg = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(this@PersistentDockOverlayService)
                         val ratio = if (activePlanBPage == 1) {
-                            spec.primaryWeight
+                            if (helperCfg.planBEnabled) helperCfg.ui1SplitRatio else config.primarySplitRatio
                         } else {
                             if (helperCfg.planBEnabled) helperCfg.ui2SplitRatio else config.page2SplitRatio
                         }

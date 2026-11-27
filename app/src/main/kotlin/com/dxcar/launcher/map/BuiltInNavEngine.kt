@@ -200,48 +200,141 @@ class BuiltInNavEngine(
         runCatching { queryPlacesDualEngine(trimmed, biasLat, biasLon) }.getOrDefault(emptyList())
     }
 
-    private fun queryPlacesDualEngine(trimmed: String, biasLat: Double, biasLon: Double): List<NavSearchResult> {
-        val combined = mutableListOf<NavSearchResult>()
-        val isLikelyTaiwan = (biasLat in 21.5..26.5 && biasLon in 118.0..122.5) ||
-            trimmed.contains("台灣") || trimmed.contains("臺灣") ||
-            Regex("(台北|臺北|新北|桃園|台中|臺中|台南|臺南|高雄|基隆|新竹|苗栗|彰化|南投|雲林|嘉義|屏東|宜蘭|花蓮|台東|臺東|澎湖|金門|馬祖)").containsMatchIn(trimmed)
+    private data class GeoRegionPolicy(
+        val code: String,
+        val isIsland: Boolean,
+        val nominatimCc: String,
+        val arcGisCc: String,
+        val minLat: Double,
+        val maxLat: Double,
+        val minLon: Double,
+        val maxLon: Double,
+        val countryHint: String
+    )
 
-        // 1. Android System Geocoder (Google GMS — exact rooftop precision for Taiwan addresses with door numbers!)
+    private fun detectGeoRegion(biasLat: Double, biasLon: Double, query: String): GeoRegionPolicy? {
+        val twHint = query.contains("台灣") || query.contains("臺灣") ||
+            Regex("(台北|臺北|新北|桃園|台中|臺中|台南|臺南|高雄|基隆|新竹|苗栗|彰化|南投|雲林|嘉義|屏東|宜蘭|花蓮|台東|臺東|澎湖|金門|馬祖)").containsMatchIn(query)
+        return when {
+            (biasLat in 21.5..26.5 && biasLon in 118.0..122.6) || twHint ->
+                GeoRegionPolicy("TW", true, "tw", "TWN", 21.8, 25.4, 119.2, 122.1, "台灣")
+            biasLat in 24.0..46.0 && biasLon in 122.9..146.0 ->
+                GeoRegionPolicy("JP", true, "jp", "JPN", 24.0, 46.0, 122.9, 146.0, "日本")
+            biasLat in 4.5..21.2 && biasLon in 116.8..126.8 ->
+                GeoRegionPolicy("PH", true, "ph", "PHL", 4.5, 21.2, 116.8, 126.8, "Philippines")
+            biasLat in -44.0..-10.0 && biasLon in 112.0..154.0 ->
+                GeoRegionPolicy("AU", true, "au", "AUS", -44.0, -10.0, 112.0, 154.0, "Australia")
+            biasLat in -47.5..-34.0 && biasLon in 166.0..179.0 ->
+                GeoRegionPolicy("NZ", true, "nz", "NZL", -47.5, -34.0, 166.0, 179.0, "New Zealand")
+            biasLat in 1.15..1.48 && biasLon in 103.6..104.1 ->
+                GeoRegionPolicy("SG", true, "sg", "SGP", 1.15, 1.48, 103.6, 104.1, "Singapore")
+            biasLat in 49.8..60.9 && biasLon in -8.2..1.8 ->
+                GeoRegionPolicy("GB", true, "gb", "GBR", 49.8, 60.9, -8.2, 1.8, "United Kingdom")
+            else -> null
+        }
+    }
+
+    private fun matchLocalRegisteredShortcuts(trimmed: String): List<NavSearchResult> {
+        val cfg = com.dxcar.launcher.DxCarApp.instance?.preferences?.config?.value ?: return emptyList()
+        val q = trimmed.lowercase(Locale.ROOT)
+        val out = mutableListOf<NavSearchResult>()
+        val homeLbl = cfg.homeShortcutLabel.ifBlank { "回家" }
+        if (cfg.homeAddress.isNotBlank() && cfg.homeLat != 0.0 && cfg.homeLon != 0.0 &&
+            (homeLbl.lowercase(Locale.ROOT).contains(q) || q.contains(homeLbl.lowercase(Locale.ROOT)) ||
+                cfg.homeAddress.lowercase(Locale.ROOT).contains(q))
+        ) {
+            out += NavSearchResult("★ $homeLbl", cfg.homeAddress, cfg.homeLat, cfg.homeLon)
+        }
+        val workLbl = cfg.workShortcutLabel.ifBlank { "公司" }
+        if (cfg.workAddress.isNotBlank() && cfg.workLat != 0.0 && cfg.workLon != 0.0 &&
+            (workLbl.lowercase(Locale.ROOT).contains(q) || q.contains(workLbl.lowercase(Locale.ROOT)) ||
+                cfg.workAddress.lowercase(Locale.ROOT).contains(q))
+        ) {
+            out += NavSearchResult("★ $workLbl", cfg.workAddress, cfg.workLat, cfg.workLon)
+        }
+        cfg.customNavShortcuts.forEach { sc ->
+            if (sc.latitude != 0.0 && sc.longitude != 0.0 &&
+                (sc.label.lowercase(Locale.ROOT).contains(q) || q.contains(sc.label.lowercase(Locale.ROOT)) ||
+                    sc.address.lowercase(Locale.ROOT).contains(q))
+            ) {
+                out += NavSearchResult("★ ${sc.label}", sc.address, sc.latitude, sc.longitude)
+            }
+        }
+        return out
+    }
+
+    private fun isWithinPolicy(item: NavSearchResult, region: GeoRegionPolicy?, biasLat: Double, biasLon: Double): Boolean {
+        if (region != null && region.isIsland) {
+            return item.latitude in region.minLat..region.maxLat &&
+                item.longitude in region.minLon..region.maxLon
+        }
+        if (biasLat != 0.0 && biasLon != 0.0) {
+            val distKm = distanceMeters(biasLat, biasLon, item.latitude, item.longitude) / 1000.0
+            if (distKm > 2500.0) return false
+        }
+        return true
+    }
+
+    private fun queryPlacesDualEngine(trimmed: String, biasLat: Double, biasLon: Double): List<NavSearchResult> {
+        val localMatches = matchLocalRegisteredShortcuts(trimmed)
+        val combined = mutableListOf<NavSearchResult>()
+        val region = detectGeoRegion(biasLat, biasLon, trimmed)
+        val isLikelyTaiwan = region?.code == "TW"
+
+        // 1. Android System Geocoder (Google GMS — strictly bounded when inside an island country)
         val ctx = appContext
         if (ctx != null && runCatching { Geocoder.isPresent() }.getOrDefault(false)) {
             runCatching {
                 val locale = if (isLikelyTaiwan) Locale.TRADITIONAL_CHINESE else Locale.getDefault()
                 val geocoder = Geocoder(ctx, locale)
-                @Suppress("DEPRECATION")
-                val addrs = geocoder.getFromLocationName(trimmed, 5)
-                if (!addrs.isNullOrEmpty()) {
-                    for (a in addrs) {
-                        if (a.hasLatitude() && a.hasLongitude()) {
-                            val line = a.getAddressLine(0).orEmpty().trim()
-                            val title = a.featureName?.takeIf { it.isNotBlank() && !it.all(Char::isDigit) }
-                                ?: line.ifBlank { trimmed }
-                            val sub = line.takeIf { it.isNotBlank() && it != title }
-                                ?: listOfNotNull(a.adminArea, a.subAdminArea, a.locality, a.thoroughfare)
-                                    .distinct()
-                                    .joinToString("")
-                                    .ifBlank { "%.5f, %.5f".format(a.latitude, a.longitude) }
-                            combined += NavSearchResult(
-                                name = title,
-                                subtitle = sub,
-                                latitude = a.latitude,
-                                longitude = a.longitude
-                            )
+                val geoQueries = if (region != null && region.isIsland && !trimmed.contains(region.countryHint)) {
+                    listOf(trimmed, "$trimmed ${region.countryHint}")
+                } else {
+                    listOf(trimmed)
+                }
+                for (gq in geoQueries) {
+                    if (combined.size >= 3) break
+                    @Suppress("DEPRECATION")
+                    val addrs = if (region != null && region.isIsland) {
+                        geocoder.getFromLocationName(
+                            gq, 5,
+                            region.minLat, region.minLon, region.maxLat, region.maxLon
+                        )
+                    } else {
+                        geocoder.getFromLocationName(gq, 5)
+                    }
+                    if (!addrs.isNullOrEmpty()) {
+                        for (a in addrs) {
+                            if (a.hasLatitude() && a.hasLongitude()) {
+                                val line = a.getAddressLine(0).orEmpty().trim()
+                                val title = a.featureName?.takeIf { it.isNotBlank() && !it.all(Char::isDigit) }
+                                    ?: line.ifBlank { trimmed }
+                                val sub = line.takeIf { it.isNotBlank() && it != title }
+                                    ?: listOfNotNull(a.adminArea, a.subAdminArea, a.locality, a.thoroughfare)
+                                        .distinct()
+                                        .joinToString("")
+                                        .ifBlank { "%.5f, %.5f".format(a.latitude, a.longitude) }
+                                val candidate = NavSearchResult(
+                                    name = title,
+                                    subtitle = sub,
+                                    latitude = a.latitude,
+                                    longitude = a.longitude
+                                )
+                                if (isWithinPolicy(candidate, region, biasLat, biasLon)) {
+                                    combined += candidate
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-        // 2. ArcGIS World Geocoding Service (Zero-Key, 100/100 exact Taiwan door-number & postal match!)
+        // 2. ArcGIS World Geocoding Service (Zero-Key, locked to countryCode when in island region)
         if (combined.size < 2) {
             runCatching {
                 val encoded = URLEncoder.encode(trimmed, "UTF-8")
-                val countryParam = if (isLikelyTaiwan) "&countryCode=TWN" else ""
+                val countryParam = if (region != null && region.arcGisCc.isNotBlank()) "&countryCode=${region.arcGisCc}" else ""
                 val locParam = if (biasLat != 0.0 && biasLon != 0.0) "&location=$biasLon,$biasLat" else ""
                 val arcUrl =
                     "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates" +
@@ -253,12 +346,13 @@ class BuiltInNavEngine(
                 httpClient.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
                         combined += parseArcGisResults(resp.body?.string().orEmpty(), trimmed)
+                            .filter { isWithinPolicy(it, region, biasLat, biasLon) }
                     }
                 }
             }
         }
 
-        // 3. Nominatim (zh-TW) with smart Chinese address tokenization & progressive street fallback
+        // 3. Nominatim (zh-TW) with countrycodes lock when in island country
         if (combined.size < 3) {
             val queriesToTry = buildList {
                 add(trimmed)
@@ -271,6 +365,7 @@ class BuiltInNavEngine(
             }.distinct()
 
             val acceptLang = DxCarI18n.nominatimAcceptLanguage()
+            val ccParam = if (region != null && region.nominatimCc.isNotBlank()) "&countrycodes=${region.nominatimCc}" else ""
             for (qCandidate in queriesToTry) {
                 if (combined.size >= 3) break
                 val enc = URLEncoder.encode(qCandidate, "UTF-8")
@@ -282,7 +377,7 @@ class BuiltInNavEngine(
                         val top = biasLat + 0.50
                         val bottom = biasLat - 0.50
                         val nearUrl =
-                            "https://nominatim.openstreetmap.org/search?q=$enc&format=jsonv2&accept-language=$acceptLang&viewbox=$left,$top,$right,$bottom&bounded=1&limit=4"
+                            "https://nominatim.openstreetmap.org/search?q=$enc&format=jsonv2&accept-language=$acceptLang$ccParam&viewbox=$left,$top,$right,$bottom&bounded=1&limit=4"
                         val req = Request.Builder()
                             .url(nearUrl)
                             .header("User-Agent", "DX-Car-Launcher/1.8.6 (Android Car HeadUnit)")
@@ -290,6 +385,7 @@ class BuiltInNavEngine(
                         httpClient.newCall(req).execute().use { resp ->
                             if (resp.isSuccessful) {
                                 combined += parseNominatimResults(resp.body?.string().orEmpty())
+                                    .filter { isWithinPolicy(it, region, biasLat, biasLon) }
                             }
                         }
                     }
@@ -297,7 +393,7 @@ class BuiltInNavEngine(
                 if (combined.size < 2) {
                     runCatching {
                         val wideUrl =
-                            "https://nominatim.openstreetmap.org/search?q=$enc&format=jsonv2&accept-language=$acceptLang&limit=5"
+                            "https://nominatim.openstreetmap.org/search?q=$enc&format=jsonv2&accept-language=$acceptLang$ccParam&limit=5"
                         val req = Request.Builder()
                             .url(wideUrl)
                             .header("User-Agent", "DX-Car-Launcher/1.8.6 (Android Car HeadUnit)")
@@ -305,6 +401,7 @@ class BuiltInNavEngine(
                         httpClient.newCall(req).execute().use { resp ->
                             if (resp.isSuccessful) {
                                 combined += parseNominatimResults(resp.body?.string().orEmpty())
+                                    .filter { isWithinPolicy(it, region, biasLat, biasLon) }
                             }
                         }
                     }
@@ -312,12 +409,17 @@ class BuiltInNavEngine(
             }
         }
 
-        // 4. Komoot Photon fallback
+        // 4. Komoot Photon fallback (strictly bbox-locked when in island country)
         if (combined.isEmpty()) {
             runCatching {
                 val fallbackQ = tokenizeCjkAddress(stripDoorNumber(trimmed).ifBlank { trimmed })
                 val enc = URLEncoder.encode(fallbackQ, "UTF-8")
-                val photonUrl = "https://photon.komoot.io/api/?q=$enc&lat=$biasLat&lon=$biasLon&limit=5"
+                val bboxParam = if (region != null && region.isIsland) {
+                    "&bbox=${region.minLon},${region.minLat},${region.maxLon},${region.maxLat}"
+                } else {
+                    ""
+                }
+                val photonUrl = "https://photon.komoot.io/api/?q=$enc&lat=$biasLat&lon=$biasLon$bboxParam&limit=5"
                 val req = Request.Builder()
                     .url(photonUrl)
                     .header("User-Agent", "DX-Car-Launcher/1.8.6")
@@ -325,14 +427,21 @@ class BuiltInNavEngine(
                 httpClient.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
                         combined += parsePhotonResults(resp.body?.string().orEmpty())
+                            .filter { isWithinPolicy(it, region, biasLat, biasLon) }
                     }
                 }
             }
         }
 
-        // Deduplicate close coordinates
+        // Sort external results by distance from user's GPS position, then prepend local registered shortcuts
+        val sortedExternal = if (biasLat != 0.0 && biasLon != 0.0) {
+            combined.sortedBy { distanceMeters(biasLat, biasLon, it.latitude, it.longitude) }
+        } else {
+            combined
+        }
+
         val deduped = mutableListOf<NavSearchResult>()
-        for (item in combined) {
+        for (item in (localMatches + sortedExternal)) {
             val dup = deduped.any {
                 kotlin.math.abs(it.latitude - item.latitude) < 0.0005 &&
                     kotlin.math.abs(it.longitude - item.longitude) < 0.0005

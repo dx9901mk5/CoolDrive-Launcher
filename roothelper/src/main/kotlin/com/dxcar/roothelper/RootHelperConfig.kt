@@ -15,6 +15,8 @@ data class RootHelperConfig(
     val planBEnabled: Boolean = true,
     val dockPinnedRightShift: Boolean = true,
     val ui1NavPackage: String = "com.google.android.apps.maps",
+    val ui1RightPackage: String = "com.google.android.youtube",
+    val ui1SplitRatio: Float = 0.70f,
     val ui2LeftPackage: String = "com.google.android.apps.maps",
     val ui2RightPackage: String = "com.google.android.youtube",
     val ui2SplitRatio: Float = 0.50f,

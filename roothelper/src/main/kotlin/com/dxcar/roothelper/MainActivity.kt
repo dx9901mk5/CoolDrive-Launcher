@@ -157,7 +157,8 @@ private enum class HelperTab(
 }
 
 private enum class AppPickTarget(val title: String) {
-    UI1_NAV("選擇 UI 1 左側 70% 導航 App"),
+    UI1_NAV("選擇 UI 1 左側預設 App（預設 70%）"),
+    UI1_RIGHT("選擇 UI 1 右側預設 App（預設 30%）"),
     UI2_LEFT("選擇 UI 2 左側預設 App"),
     UI2_RIGHT("選擇 UI 2 右側預設 App")
 }
@@ -609,6 +610,7 @@ private fun RootHelperApp(
         if (pickerTarget != null) {
             val currentPkg = when (pickerTarget) {
                 AppPickTarget.UI1_NAV -> config.ui1NavPackage
+                AppPickTarget.UI1_RIGHT -> config.ui1RightPackage
                 AppPickTarget.UI2_LEFT -> config.ui2LeftPackage
                 AppPickTarget.UI2_RIGHT -> config.ui2RightPackage
             }
@@ -619,6 +621,7 @@ private fun RootHelperApp(
                 onSelectPackage = { pkg ->
                     when (pickerTarget) {
                         AppPickTarget.UI1_NAV -> saveCfg(config.copy(ui1NavPackage = pkg))
+                        AppPickTarget.UI1_RIGHT -> saveCfg(config.copy(ui1RightPackage = pkg))
                         AppPickTarget.UI2_LEFT -> saveCfg(config.copy(ui2LeftPackage = pkg))
                         AppPickTarget.UI2_RIGHT -> saveCfg(config.copy(ui2RightPackage = pkg))
                     }
@@ -901,9 +904,10 @@ private fun PlanBTabContent(
     onRequestPickApp: (AppPickTarget) -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
-    var previewUiIndex by remember { mutableIntStateOf(1) } // 0 = UI 1 (70:30), 1 = UI 2 (Split)
+    var previewUiIndex by remember { mutableIntStateOf(0) } // 0 = UI 1 (70:30), 1 = UI 2 (50:50)
 
     val ui1NavApp = appMap[config.ui1NavPackage]
+    val ui1RightApp = appMap[config.ui1RightPackage]
     val ui2LeftApp = appMap[config.ui2LeftPackage]
     val ui2RightApp = appMap[config.ui2RightPackage]
 
@@ -918,7 +922,7 @@ private fun PlanBTabContent(
         ModernSectionCard(
             icon = Icons.Rounded.Tune,
             title = "方案 B 核心開關",
-            subtitle = "維持 0 / 1 / 2 三介面架構，透過特權視窗引擎貼合原生 App"
+            subtitle = "維持 0 / 1 / 2 三介面架構，UI 1 與 UI 2 皆支援獨立雙原生 App 分屏"
         ) {
             ModernSwitchTile(
                 icon = Icons.Rounded.Splitscreen,
@@ -941,10 +945,10 @@ private fun PlanBTabContent(
         ModernSectionCard(
             icon = Icons.Rounded.Dashboard,
             title = "車機畫面即時預覽與分割比例",
-            subtitle = "車機端 UI 2 支援「長壓懸浮中線自由拖曳比例」與「點兩下左右交換」"
+            subtitle = "UI 1 與 UI 2 中央皆有懸浮中線：長壓不放開拖曳比例（附動畫提示）、點兩下左右交換"
         ) {
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                val options = listOf("UI 1 · 70:30 主畫面", "UI 2 · 雙視窗分屏")
+                val options = listOf("UI 1 · 主雙窗 (預設 70:30)", "UI 2 · 副雙窗 (預設 50:50)")
                 options.forEachIndexed { idx, label ->
                     SegmentedButton(
                         selected = previewUiIndex == idx,
@@ -962,7 +966,12 @@ private fun PlanBTabContent(
                 animationSpec = tween(260),
                 label = "previewDockWidth"
             )
-            val leftWeight = if (previewUiIndex == 0) 0.70f else config.ui2SplitRatio.coerceIn(0.25f, 0.75f)
+            val activeRatio = if (previewUiIndex == 0) {
+                config.ui1SplitRatio.coerceIn(0.25f, 0.75f)
+            } else {
+                config.ui2SplitRatio.coerceIn(0.25f, 0.75f)
+            }
+            val leftWeight = activeRatio
             val rightWeight = (1f - leftWeight).coerceAtLeast(0.20f)
 
             Surface(
@@ -1029,9 +1038,9 @@ private fun PlanBTabContent(
 
                     // Right Window Pane
                     PreviewPaneBox(
-                        title = if (previewUiIndex == 0) "懸浮媒體控盤" else (ui2RightApp?.label ?: shortPkgLabel(config.ui2RightPackage)),
+                        title = if (previewUiIndex == 0) (ui1RightApp?.label ?: shortPkgLabel(config.ui1RightPackage)) else (ui2RightApp?.label ?: shortPkgLabel(config.ui2RightPackage)),
                         ratioText = "${(rightWeight * 100).roundToInt()}%",
-                        iconBitmap = if (previewUiIndex == 0) null else ui2RightApp?.icon,
+                        iconBitmap = if (previewUiIndex == 0) ui1RightApp?.icon else ui2RightApp?.icon,
                         fallbackIcon = Icons.Rounded.MusicNote,
                         tint = cs.secondary,
                         modifier = Modifier.weight(rightWeight).fillMaxHeight()
@@ -1039,8 +1048,8 @@ private fun PlanBTabContent(
                 }
             }
 
-            // UI 2 Split Ratio Slider + Preset Snap Chips
-            val leftPct = (config.ui2SplitRatio * 100).roundToInt()
+            // Active UI Split Ratio Slider + Preset Snap Chips
+            val leftPct = (activeRatio * 100).roundToInt()
             val rightPct = 100 - leftPct
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1048,7 +1057,7 @@ private fun PlanBTabContent(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "UI 2 預設分割比例",
+                    text = if (previewUiIndex == 0) "UI 1 預設分割比例" else "UI 2 預設分割比例",
                     style = MaterialTheme.typography.titleSmall,
                     color = cs.onSurface
                 )
@@ -1065,10 +1074,14 @@ private fun PlanBTabContent(
                 }
             }
             Slider(
-                value = config.ui2SplitRatio,
-                onValueChange = {
-                    previewUiIndex = 1
-                    onUpdateConfig(config.copy(ui2SplitRatio = it.coerceIn(0.25f, 0.75f)))
+                value = activeRatio,
+                onValueChange = { nextVal ->
+                    val clamped = nextVal.coerceIn(0.25f, 0.75f)
+                    if (previewUiIndex == 0) {
+                        onUpdateConfig(config.copy(ui1SplitRatio = clamped))
+                    } else {
+                        onUpdateConfig(config.copy(ui2SplitRatio = clamped))
+                    }
                 },
                 valueRange = 0.25f..0.75f
             )
@@ -1081,14 +1094,17 @@ private fun PlanBTabContent(
                     0.40f to "4:6",
                     0.50f to "5:5 均分",
                     0.60f to "6:4",
-                    0.70f to "7:3"
+                    0.70f to "7:3 導航優先"
                 ).forEach { (ratio, label) ->
-                    val selected = kotlin.math.abs(config.ui2SplitRatio - ratio) < 0.025f
+                    val selected = kotlin.math.abs(activeRatio - ratio) < 0.025f
                     FilterChip(
                         selected = selected,
                         onClick = {
-                            previewUiIndex = 1
-                            onUpdateConfig(config.copy(ui2SplitRatio = ratio))
+                            if (previewUiIndex == 0) {
+                                onUpdateConfig(config.copy(ui1SplitRatio = ratio))
+                            } else {
+                                onUpdateConfig(config.copy(ui2SplitRatio = ratio))
+                            }
                         },
                         label = { Text(label) }
                     )
@@ -1096,23 +1112,31 @@ private fun PlanBTabContent(
             }
         }
 
-        // 3. APP ASSIGNMENT CARD (REAL APP PICKER — NO TYPING REQUIRED!)
+        // 3. APP ASSIGNMENT CARD (UI 1 & UI 2 BOTH SUPPORT CUSTOM LEFT/RIGHT APPS)
         ModernSectionCard(
             icon = Icons.Rounded.Apps,
-            title = "各視窗指定應用程式",
-            subtitle = "點擊任一列即可從已安裝 App 挑選（附真實圖示與快速搜尋）"
+            title = "UI 1 與 UI 2 指定應用程式",
+            subtitle = "點擊任一列即可改選已安裝的地圖、影音或播放器 App（附真實圖示與搜尋）"
         ) {
             AppSlotSelectorRow(
-                slotBadge = "UI 1 · 左 70%",
-                slotTitle = "主畫面導航 App",
+                slotBadge = "UI 1 · 左側",
+                slotTitle = "UI 1 左側 App（預設 Google 地圖 70%）",
                 packageName = config.ui1NavPackage,
                 appInfo = ui1NavApp,
                 onClick = { onRequestPickApp(AppPickTarget.UI1_NAV) }
             )
             HorizontalDivider(color = cs.outlineVariant.copy(alpha = 0.5f))
             AppSlotSelectorRow(
+                slotBadge = "UI 1 · 右側",
+                slotTitle = "UI 1 右側 App（預設 YouTube 30%）",
+                packageName = config.ui1RightPackage,
+                appInfo = ui1RightApp,
+                onClick = { onRequestPickApp(AppPickTarget.UI1_RIGHT) }
+            )
+            HorizontalDivider(color = cs.outlineVariant.copy(alpha = 0.5f))
+            AppSlotSelectorRow(
                 slotBadge = "UI 2 · 左側",
-                slotTitle = "雙窗左側 App",
+                slotTitle = "UI 2 左側 App（預設地圖）",
                 packageName = config.ui2LeftPackage,
                 appInfo = ui2LeftApp,
                 onClick = { onRequestPickApp(AppPickTarget.UI2_LEFT) }
@@ -1120,10 +1144,29 @@ private fun PlanBTabContent(
             HorizontalDivider(color = cs.outlineVariant.copy(alpha = 0.5f))
             AppSlotSelectorRow(
                 slotBadge = "UI 2 · 右側",
-                slotTitle = "雙窗右側 App",
+                slotTitle = "UI 2 右側 App（預設播放器）",
                 packageName = config.ui2RightPackage,
                 appInfo = ui2RightApp,
                 onClick = { onRequestPickApp(AppPickTarget.UI2_RIGHT) }
+            )
+        }
+
+        // 4. PLAN B OPERATION GUIDE CARD
+        ModernSectionCard(
+            icon = Icons.Rounded.Info,
+            title = "方案 B 操作手勢教學",
+            subtitle = "三介面循環切換，UI 1 與 UI 2 操作邏輯完全一致"
+        ) {
+            Text(
+                text = "• 第 0 介面（0/3）：維持原有自訂小工具看板。\n" +
+                    "• 第 1 介面（1/3）：預設左 Google 地圖 70% ＋ 右 YouTube 30%，可於上方改選任意 App。\n" +
+                    "• 第 2 介面（2/3）：獨立第二組雙原生視窗，同樣可自由指定地圖與影音播放器。\n" +
+                    "• 長壓中線不放開：懸浮中線會出現「發光脈動 ＋ ◀ 比例 ▶」動畫提示，手指左右拖曳放開即套用新比例。\n" +
+                    "• 點兩下懸浮中線：立即將左右兩個視窗互換位置。\n" +
+                    "• 左右滑動懸浮中線：於 0 / 1 / 2 三個工作介面間快速循環切換。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = cs.onSurfaceVariant,
+                lineHeight = 22.sp
             )
         }
     }

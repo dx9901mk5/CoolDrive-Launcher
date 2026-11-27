@@ -90,6 +90,8 @@ class OfflineMapManager(
     private val mainHandler = Handler(Looper.getMainLooper())
     private var activeDownloadingRegion: OfflineRegion? = null
     private val pendingQueue = ArrayDeque<OfflineRegionPreset>()
+    private val failedRegionTitles = mutableListOf<String>()
+    private var currentPresetRetryCount = 0
     private var activeBatchTotal = 1
     private var activeBatchCompleted = 0
     private var lastBatchLat = 25.0330
@@ -274,7 +276,8 @@ class OfflineMapManager(
         presetId: String,
         currentLat: Double,
         currentLon: Double,
-        style: MapEngineStyle
+        style: MapEngineStyle,
+        forceRedownload: Boolean = false
     ) {
         if (_state.value.downloadingRegionId != null) return
         val effLat = if (currentLat != 0.0) currentLat else preferences.config.value.lastKnownLat
@@ -283,18 +286,46 @@ class OfflineMapManager(
         lastBatchLon = effLon
         lastBatchStyle = style
 
-        val batchList: List<OfflineRegionPreset> = when (presetId) {
+        val rawBatchList: List<OfflineRegionPreset> = when (presetId) {
             TOKEN_AUTO_LOCAL_REGION -> buildLocalRegionBatch(effLat, effLon)
             TOKEN_AUTO_ENTIRE_COUNTRY -> buildEntireCountryBatch(effLat, effLon)
             else -> listOfNotNull(presets.firstOrNull { it.id == presetId })
         }
-        if (batchList.isEmpty()) return
+        if (rawBatchList.isEmpty()) return
+
+        // Resume interrupted country batch by skipping regions already downloaded (unless forceRedownload)
+        val batchList = if (presetId == TOKEN_AUTO_ENTIRE_COUNTRY && !forceRedownload) {
+            val doneIds = preferences.config.value.offlineRegions.map { it.regionId }.toSet()
+            val remaining = rawBatchList.filterNot { it.id in doneIds }
+            remaining.ifEmpty { rawBatchList }
+        } else {
+            rawBatchList
+        }
 
         pendingQueue.clear()
+        failedRegionTitles.clear()
+        currentPresetRetryCount = 0
         pendingQueue.addAll(batchList)
         activeBatchTotal = batchList.size.coerceAtLeast(1)
         activeBatchCompleted = 0
         mainHandler.post { startNextInQueue() }
+    }
+
+    fun clearAndRedownloadAll(
+        currentLat: Double,
+        currentLon: Double,
+        style: MapEngineStyle
+    ) {
+        cancelCurrentDownload()
+        deleteAllOfflineRegions {
+            downloadOrUpdatePreset(
+                presetId = TOKEN_AUTO_ENTIRE_COUNTRY,
+                currentLat = currentLat,
+                currentLon = currentLon,
+                style = style,
+                forceRedownload = true
+            )
+        }
     }
 
     private fun buildLocalRegionBatch(lat: Double, lon: Double): List<OfflineRegionPreset> {
@@ -313,7 +344,7 @@ class OfflineMapManager(
         return when (detected.countryCode) {
             "TW" -> presets
                 .filterNot { it.id == "current_gps_20km" }
-                .map { it.copy(maxZoom = it.maxZoom.coerceAtMost(12.8)) }
+                .map { it.copy(maxZoom = it.maxZoom.coerceAtMost(13.5)) }
             "HK_MO" -> listOf(
                 OfflineRegionPreset(
                     id = "country_hk_mo",
@@ -395,12 +426,13 @@ class OfflineMapManager(
         val pTitle = presetTitleTr(preset.id, preset.titleZh)
 
         val (minLat, maxLat, minLon, maxLon) = if (preset.isDynamicAroundGps && lastBatchLat != 0.0 && lastBatchLon != 0.0) {
-            val dLat = 0.16
-            val dLon = 0.18
+            val dLat = 0.32
+            val dLon = 0.34
             listOf(lastBatchLat - dLat, lastBatchLat + dLat, lastBatchLon - dLon, lastBatchLon + dLon)
         } else {
             listOf(preset.minLat, preset.maxLat, preset.minLon, preset.maxLon)
         }
+        val effectiveMaxZoom = if (preset.isDynamicAroundGps) preset.maxZoom.coerceAtLeast(15.5) else preset.maxZoom
 
         val cLat = (minLat + maxLat) / 2.0
         val cLon = (minLon + maxLon) / 2.0
@@ -426,7 +458,7 @@ class OfflineMapManager(
         runCatching {
             MapLibre.getInstance(context)
             val manager = OfflineManager.getInstance(context)
-            manager.setOfflineMapboxTileCountLimit(250_000L)
+            manager.setOfflineMapboxTileCountLimit(300_000L)
 
             val bounds = LatLngBounds.Builder()
                 .include(LatLng(minLat, minLon))
@@ -438,175 +470,247 @@ class OfflineMapManager(
                 styleUri,
                 bounds,
                 preset.minZoom,
-                preset.maxZoom,
+                effectiveMaxZoom,
                 1.0f
             )
             val metadataBytes = "${preset.id}|${preset.titleZh}".toByteArray(Charsets.UTF_8)
 
-            manager.createOfflineRegion(
-                definition,
-                metadataBytes,
-                object : OfflineManager.CreateOfflineRegionCallback {
-                    override fun onCreate(offlineRegion: OfflineRegion) {
-                        val completedOnce = AtomicBoolean(false)
-                        activeDownloadingRegion = offlineRegion
-                        offlineRegion.setObserver(object : OfflineRegion.OfflineRegionObserver {
-                            override fun onStatusChanged(status: OfflineRegionStatus) {
-                                mainHandler.post {
-                                    runCatching {
-                                        val req = status.requiredResourceCount
-                                        val comp = status.completedResourceCount
-                                        val regionPct = if (req > 0L) {
-                                            (comp.toFloat() / req.toFloat()).coerceIn(0f, 1f)
-                                        } else {
-                                            0f
-                                        }
-                                        val sizeMb = status.completedResourceSize / (1024f * 1024f)
-                                        val liveTitle = presetTitleTr(preset.id, preset.titleZh)
+            // Clean up any stale/partial regions for the same preset.id before creating a fresh one
+            val startCreate: () -> Unit = {
+                manager.createOfflineRegion(
+                    definition,
+                    metadataBytes,
+                    object : OfflineManager.CreateOfflineRegionCallback {
+                        override fun onCreate(offlineRegion: OfflineRegion) {
+                            val completedOnce = AtomicBoolean(false)
+                            activeDownloadingRegion = offlineRegion
+                            offlineRegion.setObserver(object : OfflineRegion.OfflineRegionObserver {
+                                override fun onStatusChanged(status: OfflineRegionStatus) {
+                                    mainHandler.post {
+                                        runCatching {
+                                            val req = status.requiredResourceCount
+                                            val comp = status.completedResourceCount
+                                            val regionPct = if (req > 0L) {
+                                                (comp.toFloat() / req.toFloat()).coerceIn(0f, 1f)
+                                            } else {
+                                                0f
+                                            }
+                                            val sizeMb = status.completedResourceSize / (1024f * 1024f)
+                                            val liveTitle = presetTitleTr(preset.id, preset.titleZh)
 
-                                        if (status.isComplete && req > 0L) {
-                                            if (!completedOnce.compareAndSet(false, true)) return@post
-                                            runCatching { offlineRegion.setObserver(null) }
-                                            runCatching { offlineRegion.setDownloadState(OfflineRegion.STATE_INACTIVE) }
-                                            activeDownloadingRegion = null
-                                            val rec = OfflineRegionRecord(
-                                                regionId = preset.id,
-                                                titleZh = preset.titleZh,
-                                                centerLat = cLat,
-                                                centerLon = cLon,
-                                                minLat = minLat,
-                                                maxLat = maxLat,
-                                                minLon = minLon,
-                                                maxLon = maxLon,
-                                                downloadedAtMs = System.currentTimeMillis(),
-                                                approxSizeMb = sizeMb.coerceAtLeast(0.1f),
-                                                maplibreRegionId = offlineRegion.id
-                                            )
-                                            preferences.update { cur ->
-                                                val nextList = cur.offlineRegions.filterNot { it.regionId == preset.id } + rec
-                                                cur.copy(offlineRegions = nextList)
-                                            }
-                                            activeBatchCompleted++
-                                            if (pendingQueue.isNotEmpty()) {
-                                                startNextInQueue()
-                                            } else {
-                                                val sizeStr = "%.1f".format(DxCarI18n.currentLocale(), sizeMb.coerceAtLeast(0.1f))
-                                                _state.value = OfflineMapUiState(
-                                                    progress = 1f,
-                                                    statusMessage = if (safeBatchTotal > 1) {
+                                            if (status.isComplete && req > 0L) {
+                                                if (!completedOnce.compareAndSet(false, true)) return@post
+                                                runCatching { offlineRegion.setObserver(null) }
+                                                runCatching { offlineRegion.setDownloadState(OfflineRegion.STATE_INACTIVE) }
+                                                activeDownloadingRegion = null
+                                                currentPresetRetryCount = 0
+                                                val rec = OfflineRegionRecord(
+                                                    regionId = preset.id,
+                                                    titleZh = preset.titleZh,
+                                                    centerLat = cLat,
+                                                    centerLon = cLon,
+                                                    minLat = minLat,
+                                                    maxLat = maxLat,
+                                                    minLon = minLon,
+                                                    maxLon = maxLon,
+                                                    downloadedAtMs = System.currentTimeMillis(),
+                                                    approxSizeMb = sizeMb.coerceAtLeast(0.1f),
+                                                    maplibreRegionId = offlineRegion.id
+                                                )
+                                                preferences.update { cur ->
+                                                    val nextList = cur.offlineRegions.filterNot { it.regionId == preset.id } + rec
+                                                    cur.copy(offlineRegions = nextList)
+                                                }
+                                                activeBatchCompleted++
+                                                if (pendingQueue.isNotEmpty()) {
+                                                    startNextInQueue()
+                                                } else {
+                                                    val sizeStr = "%.1f".format(DxCarI18n.currentLocale(), sizeMb.coerceAtLeast(0.1f))
+                                                    val failNote = if (failedRegionTitles.isNotEmpty()) {
                                                         DxCarI18n.tr(
-                                                            "✓ 所在國家／區域共 $safeBatchTotal 區離線地圖已全數下載完成 (100%)！",
-                                                            "✓ 所在国家／区域共 $safeBatchTotal 区离线地图已全部下载完成 (100%)！",
-                                                            "✓ All $safeBatchTotal offline map regions downloaded (100%)!",
-                                                            "✓ 全 $safeBatchTotal エリアのオフライン地図ダウンロードが完了しました (100%)！"
+                                                            "（部分區未完成：${failedRegionTitles.joinToString("、")}，可單獨重試）",
+                                                            "（部分区未完成：${failedRegionTitles.joinToString("、")}，可单独重试）",
+                                                            " (Incomplete: ${failedRegionTitles.joinToString(", ")}; retry individually)",
+                                                            "（一部未完了：${failedRegionTitles.joinToString("・")}）"
                                                         )
-                                                    } else {
-                                                        DxCarI18n.tr(
-                                                            "✓ 「$liveTitle」離線地圖下載完成 100%（約 $sizeStr MB）",
-                                                            "✓ 「$liveTitle」离线地图下载完成 100%（约 $sizeStr MB）",
-                                                            "✓ \"$liveTitle\" offline map downloaded 100% (~$sizeStr MB)",
-                                                            "✓ 「$liveTitle」オフライン地図ダウンロード完了 100%（約 $sizeStr MB）"
-                                                        )
-                                                    },
-                                                    updateSuggestion = null
-                                                )
-                                            }
-                                        } else {
-                                            val overallPct = ((activeBatchCompleted + regionPct) / safeBatchTotal.toFloat()).coerceIn(0f, 0.99f)
-                                            val displayPctInt = (overallPct * 100f).toInt()
-                                            val regionPctInt = (regionPct * 100f).toInt()
-                                            val liveStepPrefix = if (safeBatchTotal > 1) {
-                                                DxCarI18n.tr(
-                                                    "[全區下載 $stepIdx/$safeBatchTotal] ",
-                                                    "[全区下载 $stepIdx/$safeBatchTotal] ",
-                                                    "[Batch $stepIdx/$safeBatchTotal] ",
-                                                    "[一括保存 $stepIdx/$safeBatchTotal] "
-                                                )
+                                                    } else ""
+                                                    _state.value = OfflineMapUiState(
+                                                        progress = 1f,
+                                                        statusMessage = if (safeBatchTotal > 1) {
+                                                            DxCarI18n.tr(
+                                                                "✓ 所在國家／區域共 $safeBatchTotal 區離線地圖已處理完成！$failNote",
+                                                                "✓ 所在国家／区域共 $safeBatchTotal 区离线地图已处理完成！$failNote",
+                                                                "✓ Processed all $safeBatchTotal offline map regions!$failNote",
+                                                                "✓ 全 $safeBatchTotal エリアのオフライン地図処理が完了しました！$failNote"
+                                                            )
+                                                        } else {
+                                                            DxCarI18n.tr(
+                                                                "✓ 「$liveTitle」離線地圖下載完成 100%（約 $sizeStr MB）",
+                                                                "✓ 「$liveTitle」离线地图下载完成 100%（约 $sizeStr MB）",
+                                                                "✓ \"$liveTitle\" offline map downloaded 100% (~$sizeStr MB)",
+                                                                "✓ 「$liveTitle」オフライン地図ダウンロード完了 100%（約 $sizeStr MB）"
+                                                            )
+                                                        },
+                                                        updateSuggestion = null
+                                                    )
+                                                }
                                             } else {
-                                                ""
-                                            }
-                                            val sizeStr = "%.1f".format(DxCarI18n.currentLocale(), sizeMb)
-                                            val detailText = if (req > 0L) {
-                                                DxCarI18n.tr(
-                                                    "${liveStepPrefix}下載中 $liveTitle：$regionPctInt% ($comp / $req 圖磚 · $sizeStr MB)",
-                                                    "${liveStepPrefix}下载中 $liveTitle：$regionPctInt% ($comp / $req 图砖 · $sizeStr MB)",
-                                                    "${liveStepPrefix}Downloading $liveTitle: $regionPctInt% ($comp / $req tiles · $sizeStr MB)",
-                                                    "${liveStepPrefix}ダウンロード中 $liveTitle：$regionPctInt% ($comp / $req タイル · $sizeStr MB)"
+                                                val overallPct = ((activeBatchCompleted + regionPct) / safeBatchTotal.toFloat()).coerceIn(0f, 0.99f)
+                                                val displayPctInt = (overallPct * 100f).toInt()
+                                                val regionPctInt = (regionPct * 100f).toInt()
+                                                val liveStepPrefix = if (safeBatchTotal > 1) {
+                                                    DxCarI18n.tr(
+                                                        "[全區下載 $stepIdx/$safeBatchTotal] ",
+                                                        "[全区下载 $stepIdx/$safeBatchTotal] ",
+                                                        "[Batch $stepIdx/$safeBatchTotal] ",
+                                                        "[一括保存 $stepIdx/$safeBatchTotal] "
+                                                    )
+                                                } else {
+                                                    ""
+                                                }
+                                                val sizeStr = "%.1f".format(DxCarI18n.currentLocale(), sizeMb)
+                                                val detailText = if (req > 0L) {
+                                                    DxCarI18n.tr(
+                                                        "${liveStepPrefix}下載中 $liveTitle：$regionPctInt% ($comp / $req 圖磚 · $sizeStr MB)",
+                                                        "${liveStepPrefix}下载中 $liveTitle：$regionPctInt% ($comp / $req 图砖 · $sizeStr MB)",
+                                                        "${liveStepPrefix}Downloading $liveTitle: $regionPctInt% ($comp / $req tiles · $sizeStr MB)",
+                                                        "${liveStepPrefix}ダウンロード中 $liveTitle：$regionPctInt% ($comp / $req タイル · $sizeStr MB)"
+                                                    )
+                                                } else {
+                                                    DxCarI18n.tr(
+                                                        "${liveStepPrefix}正在計算「$liveTitle」圖磚清單 ($displayPctInt%)…",
+                                                        "${liveStepPrefix}正在计算「$liveTitle」图砖清单 ($displayPctInt%)…",
+                                                        "${liveStepPrefix}Calculating tiles for \"$liveTitle\" ($displayPctInt%)…",
+                                                        "${liveStepPrefix}「$liveTitle」のタイルを計算中 ($displayPctInt%)…"
+                                                    )
+                                                }
+                                                _state.value = _state.value.copy(
+                                                    progress = overallPct,
+                                                    completedTiles = comp,
+                                                    requiredTiles = req,
+                                                    statusMessage = detailText
                                                 )
-                                            } else {
-                                                DxCarI18n.tr(
-                                                    "${liveStepPrefix}正在計算「$liveTitle」圖磚清單 ($displayPctInt%)…",
-                                                    "${liveStepPrefix}正在计算「$liveTitle」图砖清单 ($displayPctInt%)…",
-                                                    "${liveStepPrefix}Calculating tiles for \"$liveTitle\" ($displayPctInt%)…",
-                                                    "${liveStepPrefix}「$liveTitle」のタイルを計算中 ($displayPctInt%)…"
-                                                )
                                             }
-                                            _state.value = _state.value.copy(
-                                                progress = overallPct,
-                                                completedTiles = comp,
-                                                requiredTiles = req,
-                                                statusMessage = detailText
-                                            )
                                         }
                                     }
                                 }
-                            }
 
-                            override fun onError(error: OfflineRegionError) {
-                                mainHandler.post {
-                                    runCatching { offlineRegion.setObserver(null) }
-                                    runCatching { activeDownloadingRegion?.setDownloadState(OfflineRegion.STATE_INACTIVE) }
-                                    activeDownloadingRegion = null
-                                    pendingQueue.clear()
+                                override fun onError(error: OfflineRegionError) {
+                                    mainHandler.post {
+                                        runCatching { offlineRegion.setObserver(null) }
+                                        runCatching { activeDownloadingRegion?.setDownloadState(OfflineRegion.STATE_INACTIVE) }
+                                        activeDownloadingRegion = null
+                                        if (currentPresetRetryCount < 2) {
+                                            currentPresetRetryCount++
+                                            pendingQueue.addFirst(preset)
+                                            _state.value = _state.value.copy(
+                                                statusMessage = DxCarI18n.tr(
+                                                    "${stepPrefix}「$pTitle」連線逾時，自動重試第 $currentPresetRetryCount 次…",
+                                                    "${stepPrefix}「$pTitle」连接超时，自动重试第 $currentPresetRetryCount 次…",
+                                                    "${stepPrefix}\"$pTitle\" timed out, retrying (#$currentPresetRetryCount)…",
+                                                    "${stepPrefix}「$pTitle」タイムアウト、自動再試行 ($currentPresetRetryCount 回目)…"
+                                                )
+                                            )
+                                            mainHandler.postDelayed({ startNextInQueue() }, 1500L)
+                                        } else {
+                                            currentPresetRetryCount = 0
+                                            failedRegionTitles += pTitle
+                                            activeBatchCompleted++
+                                            if (pendingQueue.isNotEmpty()) {
+                                                _state.value = _state.value.copy(
+                                                    statusMessage = DxCarI18n.tr(
+                                                        "「$pTitle」重試失敗，先繼續下載下一區…",
+                                                        "「$pTitle」重试失败，先继续下载下一区…",
+                                                        "\"$pTitle\" failed after retries, continuing to next region…",
+                                                        "「$pTitle」再試行失敗、次のエリアへ進みます…"
+                                                    )
+                                                )
+                                                mainHandler.postDelayed({ startNextInQueue() }, 800L)
+                                            } else {
+                                                _state.value = _state.value.copy(
+                                                    downloadingRegionId = null,
+                                                    statusMessage = DxCarI18n.tr(
+                                                        "下載中斷（${failedRegionTitles.joinToString("、")}）：${error.message}，可點「重新下載」補齊",
+                                                        "下载中断（${failedRegionTitles.joinToString("、")}）：${error.message}，可点「重新下载」补齐",
+                                                        "Download interrupted (${failedRegionTitles.joinToString(", ")}): ${error.message}",
+                                                        "ダウンロード中断（${failedRegionTitles.joinToString("・")}）：${error.message}"
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                override fun mapboxTileCountLimitExceeded(limit: Long) {
+                                    mainHandler.post {
+                                        runCatching { offlineRegion.setObserver(null) }
+                                        runCatching { activeDownloadingRegion?.setDownloadState(OfflineRegion.STATE_INACTIVE) }
+                                        activeDownloadingRegion = null
+                                        pendingQueue.clear()
+                                        _state.value = _state.value.copy(
+                                            downloadingRegionId = null,
+                                            statusMessage = DxCarI18n.tr(
+                                                "已達圖磚儲存上限 ($limit)，已保存目前已下載範圍",
+                                                "已达图砖存储上限 ($limit)，已保存当前已下载范围",
+                                                "Tile limit reached ($limit). Downloaded area saved.",
+                                                "タイル保存上限 ($limit) に達しました。保存済み範囲を維持します"
+                                            )
+                                        )
+                                    }
+                                }
+                            })
+                            offlineRegion.setDownloadState(OfflineRegion.STATE_ACTIVE)
+                        }
+
+                        override fun onError(error: String) {
+                            mainHandler.post {
+                                failedRegionTitles += pTitle
+                                activeBatchCompleted++
+                                if (pendingQueue.isNotEmpty()) {
+                                    mainHandler.postDelayed({ startNextInQueue() }, 800L)
+                                } else {
                                     _state.value = _state.value.copy(
                                         downloadingRegionId = null,
                                         statusMessage = DxCarI18n.tr(
-                                            "下載中斷：${error.message}（請確認網路連線後重試）",
-                                            "下载中断：${error.message}（请确认网络连接后重试）",
-                                            "Download interrupted: ${error.message} (Check network and retry)",
-                                            "ダウンロード中断：${error.message}（通信環境を確認して再試行してください）"
+                                            "建立離線區域失敗：$error",
+                                            "创建离线区域失败：$error",
+                                            "Failed to create offline region: $error",
+                                            "オフライン領域の作成に失敗：$error"
                                         )
                                     )
                                 }
                             }
-
-                            override fun mapboxTileCountLimitExceeded(limit: Long) {
-                                mainHandler.post {
-                                    runCatching { offlineRegion.setObserver(null) }
-                                    runCatching { activeDownloadingRegion?.setDownloadState(OfflineRegion.STATE_INACTIVE) }
-                                    activeDownloadingRegion = null
-                                    pendingQueue.clear()
-                                    _state.value = _state.value.copy(
-                                        downloadingRegionId = null,
-                                        statusMessage = DxCarI18n.tr(
-                                            "已達圖磚儲存上限 ($limit)，已保存目前已下載範圍",
-                                            "已达图砖存储上限 ($limit)，已保存当前已下载范围",
-                                            "Tile limit reached ($limit). Downloaded area saved.",
-                                            "タイル保存上限 ($limit) に達しました。保存済み範囲を維持します"
-                                        )
-                                    )
-                                }
-                            }
-                        })
-                        offlineRegion.setDownloadState(OfflineRegion.STATE_ACTIVE)
+                        }
                     }
+                )
+            }
 
-                    override fun onError(error: String) {
-                        mainHandler.post {
-                            pendingQueue.clear()
-                            _state.value = _state.value.copy(
-                                downloadingRegionId = null,
-                                statusMessage = DxCarI18n.tr(
-                                    "建立離線區域失敗：$error",
-                                    "创建离线区域失败：$error",
-                                    "Failed to create offline region: $error",
-                                    "オフライン領域の作成に失敗：$error"
-                                )
-                            )
+            manager.listOfflineRegions(object : OfflineManager.ListOfflineRegionsCallback {
+                override fun onList(offlineRegions: Array<OfflineRegion>?) {
+                    val stale = offlineRegions?.filter { reg ->
+                        val meta = runCatching { String(reg.metadata, Charsets.UTF_8) }.getOrDefault("")
+                        meta.startsWith("${preset.id}|")
+                    }.orEmpty()
+                    if (stale.isEmpty()) {
+                        startCreate()
+                    } else {
+                        var remaining = stale.size
+                        stale.forEach { old ->
+                            old.delete(object : OfflineRegion.OfflineRegionDeleteCallback {
+                                override fun onDelete() {
+                                    if (--remaining <= 0) startCreate()
+                                }
+                                override fun onError(error: String) {
+                                    if (--remaining <= 0) startCreate()
+                                }
+                            })
                         }
                     }
                 }
-            )
+                override fun onError(error: String) {
+                    startCreate()
+                }
+            })
         }.onFailure { e ->
             pendingQueue.clear()
             val errMsg = e.localizedMessage ?: DxCarI18n.tr(
@@ -675,6 +779,64 @@ class OfflineMapManager(
                 "「$removedTitle」オフライン地図を削除しました"
             )
         )
+    }
+
+    fun deleteAllOfflineRegions(onComplete: () -> Unit = {}) {
+        cancelCurrentDownload()
+        preferences.update { cur -> cur.copy(offlineRegions = emptyList()) }
+        runCatching {
+            MapLibre.getInstance(context)
+            val manager = OfflineManager.getInstance(context)
+            manager.listOfflineRegions(object : OfflineManager.ListOfflineRegionsCallback {
+                override fun onList(offlineRegions: Array<OfflineRegion>?) {
+                    val all = offlineRegions?.toList().orEmpty()
+                    if (all.isEmpty()) {
+                        mainHandler.post {
+                            _state.value = _state.value.copy(
+                                statusMessage = DxCarI18n.tr(
+                                    "✓ 已清空所有離線圖資與殘留快取",
+                                    "✓ 已清空所有离线图资与残留缓存",
+                                    "✓ Cleared all offline maps & cached fragments",
+                                    "✓ すべてのオフライン地図とキャッシュを削除しました"
+                                )
+                            )
+                            onComplete()
+                        }
+                        return
+                    }
+                    var remaining = all.size
+                    all.forEach { reg ->
+                        reg.delete(object : OfflineRegion.OfflineRegionDeleteCallback {
+                            override fun onDelete() {
+                                if (--remaining <= 0) {
+                                    mainHandler.post {
+                                        _state.value = _state.value.copy(
+                                            statusMessage = DxCarI18n.tr(
+                                                "✓ 已清空全部 ${all.size} 組離線圖資與殘留區段",
+                                                "✓ 已清空全部 ${all.size} 组离线图资与残留区段",
+                                                "✓ Cleared all ${all.size} offline map regions",
+                                                "✓ 全 ${all.size} 件のオフライン地図を削除しました"
+                                            )
+                                        )
+                                        onComplete()
+                                    }
+                                }
+                            }
+                            override fun onError(error: String) {
+                                if (--remaining <= 0) {
+                                    mainHandler.post { onComplete() }
+                                }
+                            }
+                        })
+                    }
+                }
+                override fun onError(error: String) {
+                    mainHandler.post { onComplete() }
+                }
+            })
+        }.onFailure {
+            mainHandler.post { onComplete() }
+        }
     }
 
     private fun resolveOfflineCapableStyleUri(style: MapEngineStyle): String {

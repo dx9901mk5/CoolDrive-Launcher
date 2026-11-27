@@ -310,6 +310,8 @@ data class LauncherConfig(
     val lastKnownLon: Double = 121.5654,
     val lastKnownBearingDeg: Float = 0f,
     val lastKnownZoom: Double = 15.6,
+    val mapNorthUpMode: Boolean = true,
+    val page1Swapped: Boolean = false,
     val page2Swapped: Boolean = false,
     val page2SplitRatio: Float = 0.50f
 ) {

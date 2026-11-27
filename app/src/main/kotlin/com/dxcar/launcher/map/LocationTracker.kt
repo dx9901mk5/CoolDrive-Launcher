@@ -109,7 +109,8 @@ class LocationTracker(
 
     private fun onNewLocation(loc: Location) {
         val speedKmh = if (loc.hasSpeed()) (loc.speed * 3.6f).roundToInt().coerceAtLeast(0) else 0
-        val bearing = if (loc.hasBearing() && speedKmh >= 3) loc.bearing else _location.value.bearingDeg
+        // Only update heading when speed >= 10 km/h to avoid 180-degree GPS drift in stop-and-go traffic
+        val bearing = if (loc.hasBearing() && speedKmh >= 10) loc.bearing else _location.value.bearingDeg
         _location.value = VehicleLocationState(
             latitude = loc.latitude,
             longitude = loc.longitude,

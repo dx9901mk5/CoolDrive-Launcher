@@ -206,20 +206,21 @@ class DxCarAccessibilityService : AccessibilityService() {
             if (isSystemInSplitScreenNow()) return true
         }
 
-        // Stage B: AOSP Recents Overview Split-Screen button click
+        // Stage B: AOSP / OEM Recents Overview Split-Screen button click
         if (!openRecents()) return directOk
-        delay(520L)
+        delay(680L)
 
         if (findAndClickSplitNode()) {
-            delay(450L)
+            delay(550L)
+            if (isSystemInSplitScreenNow()) return true
             return true
         }
 
-        // In AOSP Launcher3 QuickStep, tapping the task's top app icon opens the popup menu containing "分割畫面 / Split top"
+        // In AOSP Launcher3 QuickStep / SdLauncher3, tapping the task's top app icon opens the popup menu containing "分割畫面 / Split top"
         if (findAndClickRecentsTaskHeaderIcon()) {
-            delay(360L)
+            delay(460L)
             if (findAndClickSplitNode()) {
-                delay(450L)
+                delay(550L)
                 return true
             }
         }
@@ -244,8 +245,8 @@ class DxCarAccessibilityService : AccessibilityService() {
     private fun findAndClickSplitNode(): Boolean {
         val roots = collectNonSelfRoots()
         val splitKeywords = listOf(
-            "分割畫面", "分割螢幕", "分屏", "左右分屏", "開啟分屏", "雙屏", "雙視窗",
-            "split screen", "split top", "split left", "enter split", "multi window"
+            "分割畫面", "分割螢幕", "分割視窗", "分屏", "左右分屏", "開啟分屏", "雙屏", "雙視窗",
+            "split screen", "split top", "split left", "enter split", "multi window", "split"
         )
         for (root in roots) {
             val found = searchNodeRecursive(root) { node ->
@@ -253,7 +254,8 @@ class DxCarAccessibilityService : AccessibilityService() {
                 val desc = node.contentDescription?.toString()?.lowercase().orEmpty()
                 val id = node.viewIdResourceName?.lowercase().orEmpty()
                 splitKeywords.any { kw -> text.contains(kw) || desc.contains(kw) } ||
-                    id.contains("split") || id.contains("multi_window") || id.contains("dock_top")
+                    id.contains("split") || id.contains("btn_split") || id.contains("iv_split") ||
+                    id.contains("shortcut_split") || id.contains("multi_window") || id.contains("dock_top")
             }
             if (found != null && performClickUpHierarchy(found)) {
                 return true

@@ -31,7 +31,8 @@ object PlanBWindowEngine {
                 val dockRight = b.getInt("dockOffsetRight", 0)
                 val dockTop = b.getInt("dockOffsetTop", 0)
                 val dockBottom = b.getInt("dockOffsetBottom", 0)
-                val ui1Ratio = b.getFloat("ui1Ratio", 0.70f).coerceIn(0.45f, 0.80f)
+                val ui1Ratio = b.getFloat("ui1Ratio", 0.70f).coerceIn(0.25f, 0.75f)
+                val ui1Swapped = b.getBoolean("ui1Swapped", false)
                 val ui2Ratio = b.getFloat("ui2Ratio", 0.50f).coerceIn(0.25f, 0.75f)
                 val ui2Swapped = b.getBoolean("ui2Swapped", false)
 
@@ -46,10 +47,17 @@ object PlanBWindowEngine {
                         dockTop = dockTop,
                         dockBottom = dockBottom,
                         ui1Ratio = ui1Ratio,
+                        ui1Swapped = ui1Swapped,
                         ui2Ratio = ui2Ratio,
                         ui2Swapped = ui2Swapped
                     )
                 }
+                out.putBoolean("ok", true)
+            }
+            "update_ui1_ratio" -> {
+                val ratio = extras?.getFloat("ratio", 0.70f)?.coerceIn(0.25f, 0.75f) ?: 0.70f
+                val cfg = RootHelperConfigStore.load(context)
+                RootHelperConfigStore.save(context, cfg.copy(ui1SplitRatio = ratio))
                 out.putBoolean("ok", true)
             }
             "update_ui2_ratio" -> {
@@ -86,6 +94,7 @@ object PlanBWindowEngine {
         dockTop: Int,
         dockBottom: Int,
         ui1Ratio: Float,
+        ui1Swapped: Boolean,
         ui2Ratio: Float,
         ui2Swapped: Boolean
     ) {
@@ -108,15 +117,23 @@ object PlanBWindowEngine {
                 )
             }
             1 -> {
-                val navPkg = cfg.ui1NavPackage.ifBlank { "com.google.android.apps.maps" }
-                val navW = (availW * ui1Ratio).toInt().coerceIn(280, availW - 220)
-                val navRect = Rect(effLeft, effTop, effLeft + navW, effTop + availH)
-                val freeformOk = launchAndResizeFreeform(context, navPkg, navRect, screenW)
-                if (!freeformOk) {
-                    // Fallback to native split-screen: Left 70% Nav + Right 30% DX-Car SplitSidePanelActivity
+                val rawLeft = cfg.ui1NavPackage.ifBlank { "com.google.android.apps.maps" }
+                val rawRight = cfg.ui1RightPackage.ifBlank { "com.google.android.youtube" }
+                val firstPkg = if (!ui1Swapped) rawLeft else rawRight
+                val secondPkg = if (!ui1Swapped) rawRight else rawLeft
+
+                val leftW = (availW * ui1Ratio).toInt().coerceIn(220, availW - 220)
+                val splitX = effLeft + leftW
+                val leftRect = Rect(effLeft, effTop, splitX, effTop + availH)
+                val rightRect = Rect(splitX, effTop, effLeft + availW, effTop + availH)
+
+                val okLeft = launchAndResizeFreeform(context, firstPkg, leftRect, screenW)
+                delay(220L)
+                val okRight = launchAndResizeFreeform(context, secondPkg, rightRect, screenW)
+                if (!okLeft || !okRight) {
                     triggerOemOrAospSplit(
-                        leftPkg = navPkg,
-                        rightComponentOrPkg = "com.dxcar.launcher/com.dxcar.launcher.SplitSidePanelActivity",
+                        leftPkg = firstPkg,
+                        rightComponentOrPkg = secondPkg,
                         ratio = ui1Ratio
                     )
                 }

@@ -1,5 +1,7 @@
 package com.dxcar.launcher.ui
 
+import androidx.compose.animation.core.animateFloat
+
 import android.content.res.Configuration
 import android.graphics.Rect
 import android.provider.Settings
@@ -423,6 +425,7 @@ fun DxCarRootScreen(
         PersistentDockOverlayService.start(context)
         val dockPx = (layoutSpec.dockThicknessDp * screenMetrics.density).toInt().coerceAtLeast(0)
         val helperCfg = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(context)
+        val effUi1Ratio = if (helperCfg.planBEnabled) helperCfg.ui1SplitRatio else config.primarySplitRatio
         val effUi2Ratio = if (helperCfg.planBEnabled) helperCfg.ui2SplitRatio else config.page2SplitRatio
         com.dxcar.launcher.system.RootHelperBridge.applyPlanBPage(
             context = context,
@@ -433,7 +436,8 @@ fun DxCarRootScreen(
             dockOffsetRight = if (layoutSpec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
             dockOffsetTop = if (layoutSpec.dockPlacement == ResolvedDockPlacement.TOP) dockPx else 0,
             dockOffsetBottom = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0,
-            ui1Ratio = layoutSpec.primaryWeight,
+            ui1Ratio = effUi1Ratio,
+            ui1Swapped = config.page1Swapped,
             ui2Ratio = effUi2Ratio,
             ui2Swapped = config.page2Swapped
         )
@@ -2032,6 +2036,7 @@ private fun InfiniteLoopTwoPageDashboard(
 @Composable
 private fun DashboardSeamSwipeHandle(
     pageIndicator: String,
+    activeRatioLabel: String? = null,
     onDragDelta: (Float) -> Unit,
     onDragEnd: () -> Unit,
     onLongPress: (() -> Unit)? = null,
@@ -2043,6 +2048,16 @@ private fun DashboardSeamSwipeHandle(
     val colors = LocalDxCarColors.current
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     var inRatioDrag by remember { mutableStateOf(false) }
+    val pulseTrans = androidx.compose.animation.core.rememberInfiniteTransition(label = "seamPulse")
+    val pulseAlpha by pulseTrans.animateFloat(
+        initialValue = 0.55f,
+        targetValue = 1.0f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(420),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+        ),
+        label = "seamPulseAlpha"
+    )
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
@@ -2102,40 +2117,51 @@ private fun DashboardSeamSwipeHandle(
                 )
             }
     ) {
-        // Subtle vertical center seam line
+        // Subtle vertical center seam line (glows & thickens when in ratio-adjust mode)
         Box(
             modifier = Modifier
-                .width(3.dp)
-                .fillMaxHeight(0.76f)
-                .clip(RoundedCornerShape(2.dp))
-                .background(colors.accent.copy(alpha = 0.35f))
+                .width(if (inRatioDrag) 5.dp else 3.dp)
+                .fillMaxHeight(if (inRatioDrag) 0.90f else 0.76f)
+                .clip(RoundedCornerShape(3.dp))
+                .background(
+                    if (inRatioDrag) colors.accent.copy(alpha = pulseAlpha)
+                    else colors.accent.copy(alpha = 0.35f)
+                )
         )
 
-        // Tactile Center Grip Pill ("往右滑動切換介面")
+        // Tactile Center Grip Pill (expands & pulses with ◀ ratio ▶ animation when ready to adjust)
         Surface(
-            color = colors.cardSurfaceElevated.copy(alpha = 0.94f),
-            shape = RoundedCornerShape(12.dp),
-            shadowElevation = 6.dp,
+            color = if (inRatioDrag) colors.cardSurface.copy(alpha = 0.98f) else colors.cardSurfaceElevated.copy(alpha = 0.94f),
+            shape = RoundedCornerShape(14.dp),
+            shadowElevation = if (inRatioDrag) 12.dp else 6.dp,
             modifier = Modifier
-                .border(1.2.dp, colors.accent.copy(alpha = 0.85f), RoundedCornerShape(12.dp))
+                .border(
+                    width = if (inRatioDrag) 2.2.dp else 1.2.dp,
+                    color = if (inRatioDrag) colors.accent.copy(alpha = pulseAlpha) else colors.accent.copy(alpha = 0.85f),
+                    shape = RoundedCornerShape(14.dp)
+                )
         ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(3.dp),
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp)
+                modifier = Modifier.padding(
+                    horizontal = if (inRatioDrag) 7.dp else 4.dp,
+                    vertical = if (inRatioDrag) 12.dp else 10.dp
+                )
             ) {
                 Box(
                     modifier = Modifier
-                        .width(4.dp)
-                        .height(22.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(colors.accent)
+                        .width(if (inRatioDrag) 6.dp else 4.dp)
+                        .height(if (inRatioDrag) 28.dp else 22.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(if (inRatioDrag) colors.accent.copy(alpha = pulseAlpha) else colors.accent)
                 )
                 Text(
-                    text = pageIndicator,
-                    color = colors.primaryText,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.ExtraBold
+                    text = if (inRatioDrag && !activeRatioLabel.isNullOrBlank()) activeRatioLabel else pageIndicator,
+                    color = if (inRatioDrag) colors.accent else colors.primaryText,
+                    fontSize = if (inRatioDrag) 10.sp else 9.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1
                 )
             }
         }
@@ -2272,10 +2298,11 @@ private fun SecondEqualMapYoutubeDashboard(
                 EmbeddedYoutubePlayerCard()
             }
 
-            // Center Seam Divider Line (Double-tap to swap Left <-> Right; Long-press drag to resize ratio; Swipe to Page 1)
+            // Center Seam Divider Line (Double-tap to swap Left <-> Right; Long-press drag to resize ratio with glow animation; Swipe to Page 1)
             val pctL = (ratio * 100).toInt()
             DashboardSeamSwipeHandle(
                 pageIndicator = if (kotlin.math.abs(ratio - page2SplitRatio) > 0.005f) "$pctL:${100 - pctL}" else "2/3",
+                activeRatioLabel = "◀ $pctL:${100 - pctL} ▶",
                 onDragDelta = onSeamDragDelta,
                 onDragEnd = onSeamDragEnd,
                 onDoubleTap = onSwapPage2,
@@ -2287,8 +2314,8 @@ private fun SecondEqualMapYoutubeDashboard(
                 },
                 modifier = Modifier
                     .zIndex(5f)
-                    .offset(x = leftPaneW + (gap / 2f) - 16.dp, y = 0.dp)
-                    .width(32.dp)
+                    .offset(x = leftPaneW + (gap / 2f) - 28.dp, y = 0.dp)
+                    .width(56.dp)
                     .height(fullH)
             )
         } else {

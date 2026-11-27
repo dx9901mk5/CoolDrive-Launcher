@@ -419,10 +419,10 @@ fun SettingsScreen(
                             ) {
                                 Text(
                                     text = str(
-                                        "📖 第一介面 (1/2) ＆ 第二介面 (2/2) 操作說明",
-                                        "📖第一界面 (1/2) ＆ 第二界面 (2/2) 操作说明",
-                                        "📖 First UI (1/2) & Second UI (2/2) Usage Guide",
-                                        "📖 第1画面 (1/2) ＆ 第2画面 (2/2) 操作ガイド"
+                                        "📖 方案 A · 第 0 / 第 1 / 第 2 介面操作說明",
+                                        "📖 方案 A · 第 0 / 第 1 / 第 2 界面操作说明",
+                                        "📖 Plan A · UI 0 / UI 1 / UI 2 Usage Guide",
+                                        "📖 プラン A · 第0 / 第1 / 第2 画面操作ガイド"
                                     ),
                                     color = colors.accent,
                                     fontSize = 14.sp,
@@ -430,10 +430,10 @@ fun SettingsScreen(
                                 )
                                 Text(
                                     text = str(
-                                        "• 切換第一／第二介面：按住畫面中央分隔線握把（1/2 或 2/2）向左或向右滑動即可切換。",
-                                        "• 切换第一／第二界面：按住画面中央分隔线握把（1/2 或 2/2）向左或向右滑动即可切换。",
-                                        "• Switch UI 1 / UI 2: Drag the center divider handle (1/2 or 2/2) left or right.",
-                                        "• 第1／第2画面の切替：中央の区切りバー（1/2・2/2）を左右にスライドします。"
+                                        "• 切換介面：按住畫面中央分隔線握把（0/3、1/3、2/3）向左或向右滑動即可循環切換。",
+                                        "• 切换界面：按住画面中央分隔线握把（0/3、1/3、2/3）向左或向右滑动即可循环切换。",
+                                        "• Switch Pages: Drag the center divider handle (0/3, 1/3, 2/3) left or right.",
+                                        "• 画面切替：中央の区切りバー（0/3・1/3・2/3）を左右にスライドして切替えます。"
                                     ),
                                     color = colors.primaryText,
                                     fontSize = 12.sp,
@@ -441,22 +441,26 @@ fun SettingsScreen(
                                 )
                                 Text(
                                     text = str(
-                                        "① 第一介面（導航地圖 ＋ 音樂天氣）：\n" +
-                                            "  - 卡片互換：點擊播放器「專輯封面」即可左右交換主／副視窗大小（下方按鈕與 6 格捷徑皆可直接點擊）。\n" +
-                                            "  - 天氣與播放 App：點擊封面左上角「天氣地點膠囊」直開 Google 天氣；點擊點讚（♡）旁的「App 圖示」直入該音樂 App。\n" +
-                                            "  - 地圖圖層與路況：點擊地圖右下角「圖層圓鈕」可切換標準／衛星／3D 向量與疊加即時路況。",
-                                        "① 第一界面（导航地图 ＋ 音乐天气）：\n" +
-                                            "  - 卡片互换：点击播放器「专辑封面」即可左右交换主／副窗口大小（下方按钮与 6 格快捷均可直接点击）。\n" +
-                                            "  - 天气与播放 App：点击封面左上角「天气地点胶囊」直开 Google 天气；点击点赞（♡）旁的「App 图标」直入该音乐 App。\n" +
-                                            "  - 地图图层与路况：点击地图右下角「图层圆钮」可切换标准／卫星／3D 矢量与叠加实时路况。",
-                                        "① First UI (Map + Media & Weather):\n" +
-                                            "  - Swap Cards: Tap the Album Cover to swap left/right pane sizes (all bottom controls & 6 shortcuts stay directly clickable).\n" +
-                                            "  - Weather & App: Tap top-left weather pill on cover for Google Weather; tap App Icon next to Like (♡) to open the player app.\n" +
-                                            "  - Map Layers & Traffic: Tap bottom-right Layers button to switch Standard/Satellite/3D & live traffic.",
-                                        "① 第1画面（ナビ地図＋音楽・天気）：\n" +
-                                            "  - カード入替：「アルバムカバー」をタップで左右サイズを入替（下部ボタンと6枠ショートカットはそのまま操作可能）。\n" +
-                                            "  - 天気＆アプリ：カバー左上の天気ピルで Google 天気を表示。いいね（♡）横のアプリアイコンで再生アプリを起動。\n" +
-                                            "  - 地図レイヤー＆渋滞：地図右下のレイヤーボタンで標準／衛星／3D地図とリアルタイム渋滞を切替。"
+                                        "⓪ 第 0 介面（自訂小工具看板）：自由放置時間、時速、天氣與導航捷徑卡片。\n" +
+                                            "① 第 1 介面（仿 Android Auto 卡片左右切換）：\n" +
+                                            "  - 卡片左右切換：點擊播放器「專輯封面」即可仿 Android Auto 流暢交換主／副卡片位置與大小。\n" +
+                                            "  - 天氣與播放 App：點擊封面左上角「天氣地點膠囊」直開天氣；點擊點讚（♡）旁的「App 圖示」直入該音樂 App。\n" +
+                                            "  - 導航方向與圖層：地圖右下角可一鍵切換「正北朝上 / 車頭朝上」與底圖圖層；搜尋欄「+ 新增」最多支援 8 組快捷導航並可左右滑動選擇。",
+                                        "⓪ 第 0 界面（自定义小组件看板）：自由放置时间、时速、天气与导航快捷卡片。\n" +
+                                            "① 第 1 界面（仿 Android Auto 卡片左右切换）：\n" +
+                                            "  - 卡片左右切换：点击播放器「专辑封面」即可仿 Android Auto 流畅交换主／副卡片位置与大小。\n" +
+                                            "  - 天气与播放 App：点击封面左上角「天气地点胶囊」直开天气；点击点赞（♡）旁的「App 图标」直入该音乐 App。\n" +
+                                            "  - 导航方向与图层：地图右下角可一键切换「正北朝上 / 车头朝上」与底图图层；搜索栏「+ 新增」最多支持 8 组快捷导航并可左右滑动选择。",
+                                        "⓪ UI 0 (Custom Widgets Board): Place clock, speedometer, weather & nav shortcut widgets.\n" +
+                                            "① UI 1 (Android Auto-Style Left/Right Card Swap):\n" +
+                                            "  - Swap Cards: Tap the Album Cover to smoothly swap primary/secondary card sizes just like Android Auto.\n" +
+                                            "  - Weather & Player: Tap top-left weather pill for Weather; tap App Icon next to Like (♡) to open the player app.\n" +
+                                            "  - Heading & Shortcuts: Toggle North-Up / Heading-Up at bottom-right; add up to 8 custom nav shortcuts with horizontal scroll.",
+                                        "⓪ 第0画面（カスタムウィジェット）：時計・速度・天気・ナビショートカットを自由に配置。\n" +
+                                            "① 第1画面（Android Auto 風カード左右切替）：\n" +
+                                            "  - カード左右切替：「アルバムカバー」をタップで Android Auto のように左右カードを入替。\n" +
+                                            "  - 天気＆アプリ：左上の天気ピルで天気表示、いいね（♡）横のアイコンで再生アプリを起動。\n" +
+                                            "  - 方位切替＆登録：右下でノースアップ/ヘディングアップ切替、最大8件のナビ登録を横スクロール可能。"
                                     ),
                                     color = colors.secondaryText,
                                     fontSize = 11.5.sp,
@@ -464,26 +468,22 @@ fun SettingsScreen(
                                 )
                                 Text(
                                     text = str(
-                                        "② 第二介面（1:1 內建地圖 ＋ YouTube 視窗播放 · 預設 720p）：\n" +
-                                            "  - 左右視窗對調：長壓中央「2/2 分隔線」即可平滑互換地圖與 YouTube 左右位置。\n" +
-                                            "  - 右半邊全螢幕：於 YouTube「上半部影片區上滑」（或點右下角全螢幕鈕）進入滿版右半全螢幕；「下滑」或再點按鈕退出。\n" +
-                                            "  - 全螢幕快轉手勢：左 1/3 點兩下倒退 10 秒、右 1/3 點兩下快轉 10 秒；左右 1/3 點兩下按住不放可「持續加速倒退／快轉」；左右橫滑可拖曳時間軸（中央 1/3 維持 YouTube 原生點控）。\n" +
-                                            "  - 背景持續播音：支援方向盤鍵控播；切去 Google 地圖、瀏覽器或回原車機盒桌面皆持續背景播放（僅其他音樂 App 播放時自動暫停）。",
-                                        "② 第二界面（1:1 内置地图 ＋ YouTube 窗口播放 · 默认 720p）：\n" +
-                                            "  - 左右窗口对调：长按中央「2/2 分隔线」即可平滑互换地图与 YouTube 左右位置。\n" +
-                                            "  - 右半边全屏：在 YouTube「上半部视频区上滑」（或点右下角全屏钮）进入满版右半全屏；「下滑」或再点按钮退出。\n" +
-                                            "  - 全屏快进手势：左 1/3 双击快退 10 秒、右 1/3 双击快进 10 秒；左右 1/3 双击按住可「持续加速快退／快进」；左右横滑可拖拽时间轴（中央 1/3 维持 YouTube 原生点控）。\n" +
-                                            "  - 后台持续播音：支持方向盘按键控播；切去 Google 地图、浏览器或回原车机盒桌面均持续后台播放（仅其他音乐 App 播放时自动暂停）。",
-                                        "② Second UI (1:1 Map + YouTube Player · Default 720p):\n" +
-                                            "  - Swap Left/Right: Long-press the center 2/2 divider line to swap Map and YouTube sides.\n" +
-                                            "  - Right-Half Fullscreen: Swipe UP on the upper video area (or tap player fullscreen icon) to fill right pane; Swipe DOWN to exit.\n" +
-                                            "  - Fullscreen Gestures: Double-tap Left/Right 1/3 for -10s / +10s; double-tap & hold Left/Right 1/3 for accelerated rewind/fast-forward; swipe horizontally to scrub timeline (Center 1/3 keeps native YouTube tap).\n" +
-                                            "  - Background Audio: Keeps playing across Google Maps, Browser & Stock Launcher; pauses automatically only when another music app plays.",
-                                        "② 第2画面（1:1 内蔵地図＋YouTube ウィンドウ再生・標準 720p）：\n" +
-                                            "  - 左右入替：中央の「2/2 区切り線」を長押しで地図と YouTube の左右を入れ替え。\n" +
-                                            "  - 右半分フルスクリーン：上部の動画エリアを上にスワイプ（または右下の全画面ボタン）で右半分全画面へ。下スワイプで終了。\n" +
-                                            "  - 全画面ジェスチャー：左/右 1/3 ダブルタップで 10秒戻し/送り、ダブルタップ長押しで高速戻し/送り、左右スワイプでシーク（中央 1/3 は標準操作）。\n" +
-                                            "  - バックグラウンド再生：Google マップ・ブラウザ・標準ホームへ移動しても再生継続（他音楽アプリ再生時のみ自動一時停止）。"
+                                        "② 第 2 介面（內建地圖 ＋ YouTube 雙視窗 · 預設 720p）：\n" +
+                                            "  - 長壓中線不放開調比例：長壓中央「2/3 分隔線」手指不放開，出現發光與「◀ 比例 ▶」動畫提示時左右拖曳即可自由調整視窗比例。\n" +
+                                            "  - 點兩下左右交換：快速「點兩下」中央分隔線，立即平滑交換左右兩個視窗位置。\n" +
+                                            "  - 右半邊全螢幕與快轉：於 YouTube 上半部上滑進入滿版全螢幕（下滑退出）；左/右 1/3 點兩下倒退/快轉 10 秒，按住可持續加速。",
+                                        "② 第 2 界面（内置地图 ＋ YouTube 双窗口 · 默认 720p）：\n" +
+                                            "  - 长按中线不放空调比例：长按中央「2/3 分隔线」手指不放开，出现发光与「◀ 比例 ▶」动画提示时左右拖拽即可自由调整窗口比例。\n" +
+                                            "  - 双击左右交换：快速「双击」中央分隔线，立即平滑交换左右两个窗口位置。\n" +
+                                            "  - 右半边全屏与快进：在 YouTube 上半部上滑进入满版全屏（下滑退出）；左/右 1/3 双击快退/快进 10 秒，按住可持续加速。",
+                                        "② UI 2 (Built-in Map + YouTube Dual Window · Default 720p):\n" +
+                                            "  - Long-Press & Hold Divider to Resize: Long-press the center 2/3 divider without lifting; when the glowing ◀ ratio ▶ animation appears, drag left/right to resize.\n" +
+                                            "  - Double-Tap to Swap: Double-tap the center divider to swap left and right windows immediately.\n" +
+                                            "  - Fullscreen & Seek: Swipe up on upper video for fullscreen (swipe down to exit); double-tap left/right 1/3 for -10s/+10s.",
+                                        "② 第2画面（内蔵地図＋YouTube 2画面・標準 720p）：\n" +
+                                            "  - 長押しホールドで比率調整：中央「2/3 区切り線」を指を離さず長押しし、発光＆「◀ 比率 ▶」アニメ表示中に左右ドラッグで比率変更。\n" +
+                                            "  - ダブルタップで左右入替：中央の区切り線を2回タップすると左右ウィンドウが即座に入れ替わります。\n" +
+                                            "  - 全画面＆シーク：動画上部を上スワイプで全画面（下スワイプで終了）、左右1/3ダブルタップで10秒戻し/送り。"
                                     ),
                                     color = colors.secondaryText,
                                     fontSize = 11.5.sp,

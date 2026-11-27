@@ -15,6 +15,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +42,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Mic
@@ -411,17 +413,22 @@ fun LiveMapCard(
         }
     }
 
-    LaunchedEffect(mapLibreMap, location, followVehicle, isPrimary, mapEngineStyle, manualTiltOverride) {
+    val mapNorthUpMode = livePrefConfig?.mapNorthUpMode ?: true
+
+    LaunchedEffect(mapLibreMap, location, followVehicle, isPrimary, mapEngineStyle, manualTiltOverride, mapNorthUpMode) {
         val map = mapLibreMap ?: return@LaunchedEffect
         if (!followVehicle) return@LaunchedEffect
         val defaultTilt = if (mapEngineStyle == MapEngineStyle.OPENFREEMAP_VECTOR_3D ||
             mapEngineStyle == MapEngineStyle.OPENFREEMAP_DARK
         ) 44.0 else 32.0
         val resolvedTilt = manualTiltOverride ?: if (isPrimary || isFullscreen) defaultTilt else 18.0
+        // North-Up: map stays north (0 deg), puck rotates with vehicle heading.
+        // Heading-Up: map rotates with vehicle heading and NEVER snaps back to 0 deg at red lights!
+        val resolvedBearing = if (mapNorthUpMode) 0.0 else location.bearingDeg.toDouble()
         val cam = CameraPosition.Builder()
             .target(LatLng(location.latitude, location.longitude))
             .zoom(currentZoom)
-            .bearing(if (location.speedKmh >= 4) location.bearingDeg.toDouble() else 0.0)
+            .bearing(resolvedBearing)
             .tilt(resolvedTilt)
             .build()
         map.animateCamera(CameraUpdateFactory.newCameraPosition(cam), 700)
@@ -500,10 +507,16 @@ fun LiveMapCard(
                             }
                         }
                     }
+                    runCatching { map.setPrefetchesTiles(true) }
+                    runCatching { map.setPrefetchZoomDelta(4) }
+                    runCatching {
+                        org.maplibre.android.offline.OfflineManager.getInstance(context)
+                            .setMaximumAmbientCacheSize(256L * 1024L * 1024L, null)
+                    }
                     val initCam = CameraPosition.Builder()
                         .target(LatLng(location.latitude, location.longitude))
                         .zoom(currentZoom)
-                        .bearing(location.bearingDeg.toDouble())
+                        .bearing(if (mapNorthUpMode) 0.0 else location.bearingDeg.toDouble())
                         .tilt(30.0)
                         .build()
                     map.cameraPosition = initCam
@@ -522,7 +535,7 @@ fun LiveMapCard(
         ) {
             VehiclePuckOverlay(
                 accentColor = colors.accent,
-                bearingDeg = if (location.speedKmh >= 4) 0f else location.bearingDeg
+                bearingDeg = if (mapNorthUpMode) location.bearingDeg else 0f
             )
         }
 
@@ -875,11 +888,14 @@ fun LiveMapCard(
                                 val workChipLabel = livePrefConfig?.workShortcutLabel?.takeIf { it.isNotBlank() }
                                     ?: str("公司", "公司", "Work", "職場")
                                 val customShortcuts = livePrefConfig?.customNavShortcuts ?: emptyList()
+                                val maxCustomShortcuts = 8
 
-                                FlowRow(
-                                    modifier = Modifier.fillMaxWidth(),
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     if (showHomeChip) {
                                         val homeLatSaved = livePrefConfig?.homeLat ?: 0.0
@@ -923,7 +939,7 @@ fun LiveMapCard(
                                             }
                                         )
                                     }
-                                    customShortcuts.forEach { sc ->
+                                    customShortcuts.take(maxCustomShortcuts).forEach { sc ->
                                         MapChipButton(
                                             icon = Icons.Rounded.Place,
                                             label = sc.label,
@@ -938,13 +954,20 @@ fun LiveMapCard(
                                             }
                                         )
                                     }
-                                    // Blank (+) quick-add slot
-                                    MapChipButton(
-                                        icon = Icons.Rounded.Add,
-                                        label = if (customShortcuts.isEmpty()) str("新增", "新增", "Add", "追加") else "",
-                                        highlight = false,
-                                        onClick = { showNavShortcutEditor = true }
-                                    )
+                                    // Blank (+) quick-add slot (up to 8 custom shortcuts, horizontally scrollable)
+                                    if (customShortcuts.size < maxCustomShortcuts) {
+                                        MapChipButton(
+                                            icon = Icons.Rounded.Add,
+                                            label = str(
+                                                "新增 (${customShortcuts.size}/$maxCustomShortcuts)",
+                                                "新增 (${customShortcuts.size}/$maxCustomShortcuts)",
+                                                "Add (${customShortcuts.size}/$maxCustomShortcuts)",
+                                                "追加 (${customShortcuts.size}/$maxCustomShortcuts)"
+                                            ),
+                                            highlight = false,
+                                            onClick = { showNavShortcutEditor = true }
+                                        )
+                                    }
                                     // Settings Gear button
                                     MapChipButton(
                                         icon = Icons.Rounded.Settings,
@@ -1203,44 +1226,52 @@ fun LiveMapCard(
                                                 }
                                             }
 
-                                            // Add new custom shortcut row -> immediately jumps into Map Pin Detection & Confirmation!
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                            ) {
-                                                OutlinedTextField(
-                                                    value = newCustomLabel,
-                                                    onValueChange = { newCustomLabel = it },
-                                                    singleLine = true,
-                                                    placeholder = { Text(str("名稱", "名称", "Name", "名称"), fontSize = 11.sp) },
-                                                    modifier = Modifier.width(82.dp)
-                                                )
-                                                OutlinedTextField(
-                                                    value = newCustomAddr,
-                                                    onValueChange = { newCustomAddr = it },
-                                                    singleLine = true,
-                                                    placeholder = { Text(str("新增自訂導航地址…", "新增自定义导航地址…", "New shortcut address…", "新しい住所…"), fontSize = 11.sp) },
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                                Button(
-                                                    onClick = {
-                                                        val addr = newCustomAddr.trim()
-                                                        if (addr.isNotBlank()) {
-                                                            val lbl = newCustomLabel.trim().ifBlank { addr.take(6) }
-                                                            newCustomLabel = ""
-                                                            newCustomAddr = ""
-                                                            triggerMapLocationConfirm(
-                                                                slot = MapConfirmSlot.NEW_CUSTOM,
-                                                                label = lbl,
-                                                                rawAddress = addr
-                                                            )
-                                                        }
-                                                    },
-                                                    shape = RoundedCornerShape(10.dp)
+                                            // Add new custom shortcut row (up to 8) -> immediately jumps into Map Pin Detection & Confirmation!
+                                            if (customShortcuts.size < 8) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                                 ) {
-                                                    Text(str("＋ 定位", "＋ 定位", "+ Pin", "+ 確認"), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                    OutlinedTextField(
+                                                        value = newCustomLabel,
+                                                        onValueChange = { newCustomLabel = it },
+                                                        singleLine = true,
+                                                        placeholder = { Text(str("名稱", "名称", "Name", "名称"), fontSize = 11.sp) },
+                                                        modifier = Modifier.width(82.dp)
+                                                    )
+                                                    OutlinedTextField(
+                                                        value = newCustomAddr,
+                                                        onValueChange = { newCustomAddr = it },
+                                                        singleLine = true,
+                                                        placeholder = { Text(str("新增自訂導航地址 (${customShortcuts.size}/8)…", "新增自定义导航地址 (${customShortcuts.size}/8)…", "New address (${customShortcuts.size}/8)…", "新しい住所 (${customShortcuts.size}/8)…"), fontSize = 11.sp) },
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                    Button(
+                                                        onClick = {
+                                                            val addr = newCustomAddr.trim()
+                                                            if (addr.isNotBlank()) {
+                                                                val lbl = newCustomLabel.trim().ifBlank { addr.take(6) }
+                                                                newCustomLabel = ""
+                                                                newCustomAddr = ""
+                                                                triggerMapLocationConfirm(
+                                                                    slot = MapConfirmSlot.NEW_CUSTOM,
+                                                                    label = lbl,
+                                                                    rawAddress = addr
+                                                                )
+                                                            }
+                                                        },
+                                                        shape = RoundedCornerShape(10.dp)
+                                                    ) {
+                                                        Text(str("＋ 定位", "＋ 定位", "+ Pin", "+ 確認"), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                    }
                                                 }
+                                            } else {
+                                                Text(
+                                                    text = str("已達 8 組自訂快捷上限，刪除舊項目即可繼續新增", "已达 8 组自定义快捷上限，删除旧项目即可继续新增", "Reached 8 custom shortcuts limit. Delete one to add more.", "カスタム登録上限(8件)です。不要な項目を削除してください"),
+                                                    color = colors.secondaryText,
+                                                    fontSize = 11.sp
+                                                )
                                             }
 
                                             Row(
@@ -1296,6 +1327,28 @@ fun LiveMapCard(
                                 }
                                 if (builtInNavState.errorMessage.isNotBlank()) {
                                     Text(builtInNavState.errorMessage, color = Color(0xFFF59E0B), fontSize = 12.sp)
+                                }
+                                if (builtInQueryText.isNotBlank() && builtInNavState.searchResults.isEmpty() && !builtInNavState.isSearching) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            val q = builtInQueryText.trim()
+                                            showBuiltInSearchBox = false
+                                            onLaunchGoogleMapsApp(q)
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = str(
+                                                "🗺️ 改在 Google 地圖搜尋「${builtInQueryText.trim()}」",
+                                                "🗺️ 改在 Google 地图搜索「${builtInQueryText.trim()}」",
+                                                "🗺️ Search \"${builtInQueryText.trim()}\" in Google Maps",
+                                                "🗺️ Google マップで「${builtInQueryText.trim()}」を検索"
+                                            ),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
                                 }
                                 builtInNavState.searchResults.take(4).forEach { res ->
                                     Row(
@@ -1544,6 +1597,21 @@ fun LiveMapCard(
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SmallGlassCircleButton(
+                        icon = if (mapNorthUpMode) Icons.Rounded.Navigation else Icons.Rounded.Explore,
+                        contentDescription = if (mapNorthUpMode) {
+                            str("正北朝上（點一下切換車頭朝上）", "正北朝上（点一下切换车头朝上）", "North-Up (tap for Heading-Up)", "ノースアップ（タップでヘディングアップ）")
+                        } else {
+                            str("車頭朝上（點一下切換正北朝上）", "车头朝上（点一下切换正北朝上）", "Heading-Up (tap for North-Up)", "ヘディングアップ（タップでノースアップ）")
+                        },
+                        active = !mapNorthUpMode,
+                        onClick = {
+                            com.dxcar.launcher.DxCarApp.instance?.preferences?.update { cur ->
+                                cur.copy(mapNorthUpMode = !cur.mapNorthUpMode)
+                            }
+                            followVehicle = true
+                        }
+                    )
                     SmallGlassCircleButton(
                         icon = Icons.Rounded.Layers,
                         contentDescription = str("切換底圖圖層與即時路況", "切换底图图层与实时路况", "Map layers & live traffic", "地図レイヤーと交通状況"),
@@ -2072,6 +2140,47 @@ fun LiveMapCard(
                                     "🌏 国全体を保存（${detectedLoc.countryTitleZh}）"
                                 ),
                                 fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // One-tap Clear All & Clean Re-download All Offline Maps
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                com.dxcar.launcher.DxCarApp.instance?.offlineMapManager?.deleteAllOfflineRegions()
+                            },
+                            enabled = offlineState.downloadingRegionId == null,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                str("🗑️ 清空全部離線圖資", "🗑️ 清空全部离线图资", "🗑️ Clear All Maps", "🗑️ 全キャッシュ削除"),
+                                color = Color(0xFFEF4444),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                com.dxcar.launcher.DxCarApp.instance?.offlineMapManager?.clearAndRedownloadAll(
+                                    currentLat = location.latitude,
+                                    currentLon = location.longitude,
+                                    style = mapEngineStyle
+                                )
+                            },
+                            enabled = offlineState.downloadingRegionId == null,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                str("🔄 清空並重新全區下載", "🔄 清空并重新全区下载", "🔄 Reset & Redownload All", "🔄 削除して一括再保存"),
+                                color = colors.accent,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
