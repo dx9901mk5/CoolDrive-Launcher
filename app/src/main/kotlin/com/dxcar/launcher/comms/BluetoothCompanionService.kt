@@ -896,17 +896,62 @@ class BluetoothCompanionService : Service() {
                 if (isAiBox) {
                     val label = packet.sender.ifBlank { packet.text.ifBlank { "手機分享地點" } }
                     val addr = packet.text.ifBlank { label }
-                    app.notificationCenter.postSharedLocation(
-                        SharedLocationItem(
-                            id = packet.id.ifBlank { UUID.randomUUID().toString() },
-                            label = label,
-                            address = addr,
-                            latitude = packet.latitude,
-                            longitude = packet.longitude,
-                            timestampMs = packet.timestampMs
-                        )
+                    val item = SharedLocationItem(
+                        id = packet.id.ifBlank { UUID.randomUUID().toString() },
+                        label = label,
+                        address = addr,
+                        latitude = packet.latitude,
+                        longitude = packet.longitude,
+                        timestampMs = packet.timestampMs
                     )
-                    appendLog("📍 收到手機分享地址：$label")
+                    val triggerMode = app.preferences.config.value.sharedLocationNavTrigger
+                    when {
+                        triggerMode == "BUILTIN" -> {
+                            val curLoc = app.locationTracker.location.value
+                            val cfg = app.preferences.config.value
+                            val sLat = if (curLoc.latitude != 0.0) curLoc.latitude else cfg.lastKnownLat
+                            val sLon = if (curLoc.longitude != 0.0) curLoc.longitude else cfg.lastKnownLon
+                            app.builtInNavEngine.navigateByQuery(
+                                query = item.address.ifBlank { item.label },
+                                startLat = sLat,
+                                startLon = sLon,
+                                explicitDestLat = item.latitude.takeIf { it != 0.0 },
+                                explicitDestLon = item.longitude.takeIf { it != 0.0 }
+                            )
+                            val launchHome = Intent(this@BluetoothCompanionService, MainActivity::class.java).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                                putExtra(MainActivity.EXTRA_ACTION, MainActivity.EXTRA_GO_DASHBOARD)
+                            }
+                            runCatching { startActivity(launchHome) }
+                            appendLog("🧭 已自動以內建地圖導航：$label")
+                        }
+                        triggerMode == "GOOGLE_MAPS" -> {
+                            com.dxcar.launcher.map.SharedLocationResolver.openInGoogleMaps(
+                                this@BluetoothCompanionService,
+                                item.label,
+                                item.address,
+                                item.latitude,
+                                item.longitude
+                            )
+                            appendLog("🗺 已自動以 Google 地圖導航：$label")
+                        }
+                        triggerMode.startsWith("OTHER:") -> {
+                            val targetPkg = triggerMode.removePrefix("OTHER:").trim().ifBlank { null }
+                            com.dxcar.launcher.map.SharedLocationResolver.openInOtherMapChooser(
+                                this@BluetoothCompanionService,
+                                targetPkg,
+                                item.label,
+                                item.address,
+                                item.latitude,
+                                item.longitude
+                            )
+                            appendLog("📍 已自動以指定地圖導航：$label")
+                        }
+                        else -> {
+                            app.notificationCenter.postSharedLocation(item)
+                            appendLog("📍 收到手機分享地址（請選擇導航 App）：$label")
+                        }
+                    }
                 }
             }
             PacketType.DIAL_PHONE -> {

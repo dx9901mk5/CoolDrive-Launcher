@@ -15,9 +15,52 @@ import kotlinx.coroutines.launch
 
 object PlanBWindowEngine {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private const val MEDIA_SPLIT_COMPONENT = "com.dxcar.launcher/com.dxcar.launcher.SplitSidePanelActivity"
 
     @Volatile
     private var globalsInitialized = false
+
+    @Volatile
+    private var lastRightPanePkg: String = ""
+
+    @Volatile
+    private var cachedSafeTopBottom: Pair<Int, Int>? = null
+
+    /**
+     * Reads the display's real usable app vertical bounds (e.g. status bar top=36, taskbar bottom=990 on Android 14 Tablet;
+     * 0..screenH on frameless car head units) so Freeform windows NEVER clip off the bottom edge!
+     */
+    private suspend fun resolveSafeVerticalBounds(screenH: Int): Pair<Int, Int> {
+        cachedSafeTopBottom?.let { (t, b) ->
+            if (b in 320..screenH && t in 0 until (b - 240)) return t to b
+        }
+        val res = RootShell.execSu(
+            "dumpsys window displays | grep -oE 'mAppBounds=Rect\\([0-9]+, [0-9]+ - [0-9]+, [0-9]+\\)' | head -n 1; " +
+                "dumpsys window windows | grep -A 4 'ScreenDecorOverlay\\|StatusBar' | grep -oE 'frame=\\[0,0\\]\\[[0-9]+,[0-9]+\\]' | head -n 1",
+            3L
+        )
+        var safeTop = 0
+        var safeBottom = screenH
+        val appBoundsMatch = Regex("""mAppBounds=Rect\(\d+,\s*(\d+)\s*-\s*\d+,\s*(\d+)\)""").find(res.stdout)
+        if (appBoundsMatch != null) {
+            val t = appBoundsMatch.groupValues[1].toIntOrNull() ?: 0
+            val b = appBoundsMatch.groupValues[2].toIntOrNull() ?: screenH
+            if (b in 320..screenH) safeBottom = b
+            if (t in 0..160) safeTop = maxOf(safeTop, t)
+        }
+        val statusBarMatch = Regex("""frame=\[0,0\]\[\d+,(\d+)\]""").find(res.stdout)
+        if (statusBarMatch != null) {
+            val sbH = statusBarMatch.groupValues[1].toIntOrNull() ?: 0
+            if (sbH in 16..140) safeTop = maxOf(safeTop, sbH)
+        }
+        if (safeBottom - safeTop < 300) {
+            safeTop = 0
+            safeBottom = screenH
+        }
+        val pair = safeTop to safeBottom
+        cachedSafeTopBottom = pair
+        return pair
+    }
 
     fun dispatchFromProvider(context: Context, method: String, extras: Bundle?): Bundle {
         val out = Bundle()
@@ -53,6 +96,37 @@ object PlanBWindowEngine {
                     )
                 }
                 out.putBoolean("ok", true)
+            }
+            "launch_plan_b_right_pane" -> {
+                val b = extras ?: return out.apply { putBoolean("ok", false) }
+                val targetPkg = b.getString("packageName").orEmpty()
+                val screenW = b.getInt("screenWidth", 1920)
+                val screenH = b.getInt("screenHeight", 720)
+                val dockLeft = b.getInt("dockOffsetLeft", 0)
+                val dockRight = b.getInt("dockOffsetRight", 0)
+                val dockTop = b.getInt("dockOffsetTop", 0)
+                val dockBottom = b.getInt("dockOffsetBottom", 0)
+                val ui1Ratio = b.getFloat("ui1Ratio", 0.70f).coerceIn(0.25f, 0.75f)
+                val ui1Swapped = b.getBoolean("ui1Swapped", false)
+                if (targetPkg.isBlank()) {
+                    out.putBoolean("ok", false)
+                } else {
+                    scope.launch {
+                        launchPlanBRightPaneInternal(
+                            context = context.applicationContext,
+                            targetPkg = targetPkg,
+                            screenW = screenW,
+                            screenH = screenH,
+                            dockLeft = dockLeft,
+                            dockRight = dockRight,
+                            dockTop = dockTop,
+                            dockBottom = dockBottom,
+                            ui1Ratio = ui1Ratio,
+                            ui1Swapped = ui1Swapped
+                        )
+                    }
+                    out.putBoolean("ok", true)
+                }
             }
             "update_ui1_ratio" -> {
                 val ratio = extras?.getFloat("ratio", 0.70f)?.coerceIn(0.25f, 0.75f) ?: 0.70f
@@ -140,45 +214,52 @@ object PlanBWindowEngine {
     ) {
         val cfg = RootHelperConfigStore.load(context)
         ensureMultiWindowGlobals()
+        val (safeTop, safeBottom) = resolveSafeVerticalBounds(screenH)
 
         val effLeft = if (cfg.dockPinnedRightShift) dockLeft else 0
         val effRight = if (cfg.dockPinnedRightShift) dockRight else 0
-        val effTop = if (cfg.dockPinnedRightShift) dockTop else 0
-        val effBottom = if (cfg.dockPinnedRightShift) dockBottom else 0
+        val effTop = maxOf(safeTop, if (cfg.dockPinnedRightShift) dockTop else 0)
+        val effBottomEdge = minOf(safeBottom, screenH - if (cfg.dockPinnedRightShift) dockBottom else 0)
         val availW = (screenW - effLeft - effRight).coerceAtLeast(480)
-        val availH = (screenH - effTop - effBottom).coerceAtLeast(320)
+        val availH = (effBottomEdge - effTop).coerceAtLeast(320)
 
         when (page) {
             0 -> {
-                // Demote any Freeform tasks so Google Maps never floats on top of Page 0 Widgets!
                 parkPlanBWindowsInternal(context, screenW, screenH)
             }
             1 -> {
-                // UI 1: Like Plan A! One side is 70% Native Map App (default Google Maps);
-                // the other side is 30% DX-Car Media Control Card (with cover art, weather, 6 shortcuts, tap cover to swap!).
+                // UI 1 True Dual Split-App Architecture (ZERO Flicker!):
+                // Left 70% = Real Google Maps (or configured navPkg)
+                // Right 30% = DX-Car SplitSidePanelActivity (Media Player + Album Cover + Weather + 6 Shortcuts + Integrated Dock!)
+                // NEVER bring fullscreen MainActivity to front here so Google Maps never flickers!
                 val navPkg = cfg.ui1NavPackage.ifBlank { "com.google.android.apps.maps" }
-                // Demote any leftover UI 2 secondary freeform task first so the 30% Media Card side isn't covered
-                val otherPkgs = setOf(cfg.ui1RightPackage, cfg.ui2LeftPackage, cfg.ui2RightPackage)
-                    .filter { it.isNotBlank() && it != navPkg }
-                if (otherPkgs.isNotEmpty()) {
-                    demotePackagesFromFreeform(context, otherPkgs, screenW, screenH)
+                val strayPkgs = setOf(cfg.ui1RightPackage, cfg.ui2LeftPackage, cfg.ui2RightPackage, lastRightPanePkg)
+                    .filter { it.isNotBlank() && it != navPkg && it != "com.dxcar.launcher" }
+                if (strayPkgs.isNotEmpty()) {
+                    demotePackagesFromFreeform(context, strayPkgs, screenW, screenH)
                 }
-                // Ensure DX-Car MainActivity is right behind as the base layer
-                RootShell.execSu(
-                    "am start --user 0 --windowingMode 1 --activity-single-top --activity-reorder-to-front -n com.dxcar.launcher/com.dxcar.launcher.MainActivity >/dev/null 2>&1",
-                    3L
-                )
+
                 val navW = (availW * ui1Ratio).toInt().coerceIn(240, availW - 220)
                 val navRect = if (!ui1Swapped) {
                     Rect(effLeft, effTop, effLeft + navW, effTop + availH)
                 } else {
                     Rect(effLeft + (availW - navW), effTop, effLeft + availW, effTop + availH)
                 }
-                val freeformOk = launchAndResizeFreeform(context, navPkg, navRect, screenW)
-                if (!freeformOk) {
+                val mediaRect = if (!ui1Swapped) {
+                    Rect(effLeft + navW, effTop, effLeft + availW, effTop + availH)
+                } else {
+                    Rect(effLeft, effTop, effLeft + (availW - navW), effTop + availH)
+                }
+
+                val okNav = launchAndResizeFreeform(context, navPkg, navRect, screenW)
+                delay(180L)
+                val okMedia = launchSplitMediaPanelFreeform(context, navPkg, mediaRect, screenW)
+                lastRightPanePkg = "com.dxcar.launcher"
+
+                if (!okNav || !okMedia) {
                     triggerOemOrAospSplit(
-                        leftPkg = if (!ui1Swapped) navPkg else "com.dxcar.launcher/com.dxcar.launcher.SplitSidePanelActivity",
-                        rightComponentOrPkg = if (!ui1Swapped) "com.dxcar.launcher/com.dxcar.launcher.SplitSidePanelActivity" else navPkg,
+                        leftPkg = if (!ui1Swapped) navPkg else MEDIA_SPLIT_COMPONENT,
+                        rightComponentOrPkg = if (!ui1Swapped) MEDIA_SPLIT_COMPONENT else navPkg,
                         ratio = if (!ui1Swapped) ui1Ratio else (1f - ui1Ratio)
                     )
                 }
@@ -189,7 +270,7 @@ object PlanBWindowEngine {
                 val firstPkg = if (!ui2Swapped) rawLeft else rawRight
                 val secondPkg = if (!ui2Swapped) rawRight else rawLeft
 
-                val strayPkgs = setOf(cfg.ui1NavPackage, cfg.ui1RightPackage)
+                val strayPkgs = setOf(cfg.ui1NavPackage, cfg.ui1RightPackage, lastRightPanePkg)
                     .filter { it.isNotBlank() && it != firstPkg && it != secondPkg }
                 if (strayPkgs.isNotEmpty()) {
                     demotePackagesFromFreeform(context, strayPkgs, screenW, screenH)
@@ -201,8 +282,9 @@ object PlanBWindowEngine {
                 val rightRect = Rect(splitX, effTop, effLeft + availW, effTop + availH)
 
                 val okLeft = launchAndResizeFreeform(context, firstPkg, leftRect, screenW)
-                delay(220L)
+                delay(200L)
                 val okRight = launchAndResizeFreeform(context, secondPkg, rightRect, screenW)
+                lastRightPanePkg = secondPkg
                 if (!okLeft || !okRight) {
                     triggerOemOrAospSplit(
                         leftPkg = firstPkg,
@@ -215,9 +297,118 @@ object PlanBWindowEngine {
     }
 
     /**
-     * Switches any Freeform (windowingMode=5) tasks for the given packages back to Fullscreen (windowingMode=1)
-     * without killing or restarting their activities (so active Google Maps navigation never stops!).
+     * Plan B Dock Click Behavior:
+     * Directly opens [targetPkg] inside the Right 30% Split Window while keeping Left 70% Google Maps intact!
      */
+    private suspend fun launchPlanBRightPaneInternal(
+        context: Context,
+        targetPkg: String,
+        screenW: Int,
+        screenH: Int,
+        dockLeft: Int,
+        dockRight: Int,
+        dockTop: Int,
+        dockBottom: Int,
+        ui1Ratio: Float,
+        ui1Swapped: Boolean
+    ) {
+        val cfg = RootHelperConfigStore.load(context)
+        ensureMultiWindowGlobals()
+        val (safeTop, safeBottom) = resolveSafeVerticalBounds(screenH)
+
+        val effLeft = if (cfg.dockPinnedRightShift) dockLeft else 0
+        val effRight = if (cfg.dockPinnedRightShift) dockRight else 0
+        val effTop = maxOf(safeTop, if (cfg.dockPinnedRightShift) dockTop else 0)
+        val effBottomEdge = minOf(safeBottom, screenH - if (cfg.dockPinnedRightShift) dockBottom else 0)
+        val availW = (screenW - effLeft - effRight).coerceAtLeast(480)
+        val availH = (effBottomEdge - effTop).coerceAtLeast(320)
+
+        val navPkg = cfg.ui1NavPackage.ifBlank { "com.google.android.apps.maps" }
+        val navW = (availW * ui1Ratio).toInt().coerceIn(240, availW - 220)
+        val rightRect = if (!ui1Swapped) {
+            Rect(effLeft + navW, effTop, effLeft + availW, effTop + availH)
+        } else {
+            Rect(effLeft, effTop, effLeft + (availW - navW), effTop + availH)
+        }
+        val navRect = if (!ui1Swapped) {
+            Rect(effLeft, effTop, effLeft + navW, effTop + availH)
+        } else {
+            Rect(effLeft + (availW - navW), effTop, effLeft + availW, effTop + availH)
+        }
+
+        // Keep Google Maps anchored in Left 70% if user clicked a different app for Right 30%
+        if (targetPkg != navPkg) {
+            val prevRight = lastRightPanePkg
+            if (prevRight.isNotBlank() && prevRight != navPkg && prevRight != targetPkg && prevRight != "com.dxcar.launcher") {
+                demotePackagesFromFreeform(context, listOf(prevRight), screenW, screenH)
+            }
+            launchAndResizeFreeform(context, navPkg, navRect, screenW)
+            delay(120L)
+        }
+
+        val okRight = launchAndResizeFreeform(context, targetPkg, rightRect, screenW)
+        lastRightPanePkg = targetPkg
+        if (!okRight && targetPkg != navPkg) {
+            triggerOemOrAospSplit(
+                leftPkg = if (!ui1Swapped) navPkg else targetPkg,
+                rightComponentOrPkg = if (!ui1Swapped) targetPkg else navPkg,
+                ratio = if (!ui1Swapped) ui1Ratio else (1f - ui1Ratio)
+            )
+        }
+    }
+
+    private suspend fun launchSplitMediaPanelFreeform(
+        context: Context,
+        navPkg: String,
+        rect: Rect,
+        fullScreenW: Int
+    ): Boolean {
+        runCatching {
+            val intent = Intent().apply {
+                component = ComponentName("com.dxcar.launcher", "com.dxcar.launcher.SplitSidePanelActivity")
+                putExtra("extra_plan_b_mode", true)
+                putExtra("extra_auto_launch_maps", false)
+                putExtra("extra_nav_package", navPkg)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            }
+            val opts = ActivityOptions.makeBasic().apply {
+                launchDisplayId = Display.DEFAULT_DISPLAY
+                launchBounds = rect
+                runCatching {
+                    val m = ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
+                    m.invoke(this, 5)
+                }
+            }
+            context.startActivity(intent, opts.toBundle())
+        }
+
+        val script = """
+            am start --user 0 --windowingMode 5 --activity-reorder-to-front -n '$MEDIA_SPLIT_COMPONENT' --ez extra_plan_b_mode true --ez extra_auto_launch_maps false --es extra_nav_package '$navPkg' >/dev/null 2>&1
+            sleep 0.22
+            TID=${'$'}(dumpsys activity activities | grep -B 3 "SplitSidePanelActivity" | grep -oE "t[0-9]+" | head -n 1 | tr -d 't')
+            if [ -z "${'$'}TID" ]; then
+              TID=${'$'}(dumpsys activity containers | grep -B 2 "SplitSidePanelActivity" | grep -oE "Task=[0-9]+" | tail -n 1 | cut -d= -f2)
+            fi
+            if [ -n "${'$'}TID" ]; then
+              cmd activity task resizeable ${'$'}TID 2 >/dev/null 2>&1
+              cmd activity task resize ${'$'}TID ${rect.left} ${rect.top} ${rect.right} ${rect.bottom} >/dev/null 2>&1
+              am task resize ${'$'}TID ${rect.left} ${rect.top} ${rect.right} ${rect.bottom} >/dev/null 2>&1
+              sleep 0.12
+              am start --user 0 --windowingMode 5 --activity-reorder-to-front -n '$MEDIA_SPLIT_COMPONENT' --ez extra_plan_b_mode true --ez extra_auto_launch_maps false --es extra_nav_package '$navPkg' >/dev/null 2>&1
+            fi
+            dumpsys activity containers | grep -B 2 "SplitSidePanelActivity" | grep -oE "bounds=\[[0-9,]+\]\[[0-9,]+\]" | tail -n 1
+        """.trimIndent()
+
+        val res = RootShell.execSu(script, 6L)
+        val boundsLine = res.stdout.lines().lastOrNull { it.startsWith("bounds=") }.orEmpty()
+        if (boundsLine.isBlank()) return false
+        val expectedMaxW = (fullScreenW * 0.92f).toInt()
+        if (rect.width() < expectedMaxW && boundsLine.contains("[0,0][$fullScreenW,")) {
+            return false
+        }
+        return true
+    }
+
     private suspend fun demotePackagesFromFreeform(
         context: Context,
         packages: Collection<String>,
@@ -241,28 +432,25 @@ object PlanBWindowEngine {
         RootShell.execSu(script, 5L)
     }
 
-    /**
-     * Demotes all Plan B Freeform windows back to standard Fullscreen stack and brings DX-Car MainActivity to front
-     * (used when opening App Drawer, Settings, Notification Center, or Page 0 so Freeform Maps never covers them!).
-     */
     private suspend fun parkPlanBWindowsInternal(
         context: Context,
         screenW: Int,
         screenH: Int
     ) {
         val cfg = RootHelperConfigStore.load(context)
-        val allPlanBPkgs = listOf(cfg.ui1NavPackage, cfg.ui1RightPackage, cfg.ui2LeftPackage, cfg.ui2RightPackage)
+        val allPlanBPkgs = listOf(cfg.ui1NavPackage, cfg.ui1RightPackage, cfg.ui2LeftPackage, cfg.ui2RightPackage, lastRightPanePkg)
+            .filter { it.isNotBlank() && it != "com.dxcar.launcher" }
         demotePackagesFromFreeform(context, allPlanBPkgs, screenW, screenH)
-        RootShell.execSu(
-            "am start --user 0 --windowingMode 1 --activity-single-top --activity-reorder-to-front -n com.dxcar.launcher/com.dxcar.launcher.MainActivity >/dev/null 2>&1",
-            4L
-        )
+        // Also demote SplitSidePanelActivity task if present and bring MainActivity cleanly to front
+        val script = """
+            for TID in ${'$'}(dumpsys activity activities | grep -B 3 "SplitSidePanelActivity" | grep -oE "t[0-9]+" | tr -d 't' | uniq); do
+              cmd activity task resize ${'$'}TID 0 0 $screenW $screenH >/dev/null 2>&1
+            done
+            am start --user 0 --windowingMode 1 --activity-single-top --activity-reorder-to-front -n com.dxcar.launcher/com.dxcar.launcher.MainActivity >/dev/null 2>&1
+        """.trimIndent()
+        RootShell.execSu(script, 4L)
     }
 
-    /**
-     * Demotes all Plan B Freeform windows and launches/expands [targetPkg] into 100% Fullscreen (or shifted to avoid
-     * the permanently visible Dock when [cfg.dockPinnedRightShift] is enabled) without interrupting its running state.
-     */
     private suspend fun launchFullscreenAppInternal(
         context: Context,
         targetPkg: String,
@@ -275,8 +463,8 @@ object PlanBWindowEngine {
     ) {
         val cfg = RootHelperConfigStore.load(context)
         ensureMultiWindowGlobals()
-        val otherPlanBPkgs = listOf(cfg.ui1NavPackage, cfg.ui1RightPackage, cfg.ui2LeftPackage, cfg.ui2RightPackage)
-            .filter { it.isNotBlank() && it != targetPkg }
+        val otherPlanBPkgs = listOf(cfg.ui1NavPackage, cfg.ui1RightPackage, cfg.ui2LeftPackage, cfg.ui2RightPackage, lastRightPanePkg)
+            .filter { it.isNotBlank() && it != targetPkg && it != "com.dxcar.launcher" }
         demotePackagesFromFreeform(context, otherPlanBPkgs, screenW, screenH)
 
         val effLeft = if (cfg.dockPinnedRightShift) dockLeft else 0
@@ -335,7 +523,6 @@ object PlanBWindowEngine {
         val comp = resolveLaunchComponent(context, pkg)
         val compStr = comp?.flattenToShortString()
 
-        // 1. Try starting via ActivityOptions FREEFORM (mode 5) + exact launchBounds
         runCatching {
             val baseIntent = if (comp != null) {
                 Intent(Intent.ACTION_MAIN).apply {
@@ -362,22 +549,24 @@ object PlanBWindowEngine {
             }
         }
 
-        // 2. Enforce via Root `am start --windowingMode 5` + `cmd activity task resize`
         val startCmd = if (!compStr.isNullOrBlank()) {
-            "am start --user 0 --windowingMode 5 -n '$compStr' >/dev/null 2>&1; "
+            "am start --user 0 --windowingMode 5 --activity-reorder-to-front -n '$compStr' >/dev/null 2>&1; "
         } else {
             "monkey -p '$pkg' -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; "
         }
         val script = """
             $startCmd
-            sleep 0.18
-            TID=$(dumpsys activity activities | grep -B 3 -E "ActivityRecord\{[^}]* $pkg/" | grep -oE "t[0-9]+" | head -n 1 | tr -d 't')
+            sleep 0.22
+            TID=${'$'}(dumpsys activity activities | grep -B 3 -E "ActivityRecord\{[^}]* $pkg/" | grep -oE "t[0-9]+" | head -n 1 | tr -d 't')
             if [ -z "${'$'}TID" ]; then
-              TID=$(dumpsys activity containers | grep -B 2 "$pkg/" | grep -oE "Task=[0-9]+" | tail -n 1 | cut -d= -f2)
+              TID=${'$'}(dumpsys activity containers | grep -B 2 "$pkg/" | grep -oE "Task=[0-9]+" | tail -n 1 | cut -d= -f2)
             fi
             if [ -n "${'$'}TID" ]; then
+              cmd activity task resizeable ${'$'}TID 2 >/dev/null 2>&1
               cmd activity task resize ${'$'}TID ${rect.left} ${rect.top} ${rect.right} ${rect.bottom} >/dev/null 2>&1
               am task resize ${'$'}TID ${rect.left} ${rect.top} ${rect.right} ${rect.bottom} >/dev/null 2>&1
+              sleep 0.12
+              $startCmd
             fi
             dumpsys activity containers | grep -B 2 "$pkg/" | grep -oE "bounds=\[[0-9,]+\]\[[0-9,]+\]" | tail -n 1
         """.trimIndent()
@@ -385,7 +574,6 @@ object PlanBWindowEngine {
         val res = RootShell.execSu(script, 6L)
         val boundsLine = res.stdout.lines().lastOrNull { it.startsWith("bounds=") }.orEmpty()
         if (boundsLine.isBlank()) return false
-        // If bounds are still full width [0,0][1920,...] when rect width < 92% of screen, Freeform was ignored by ROM
         val expectedMaxW = (fullScreenW * 0.92f).toInt()
         if (rect.width() < expectedMaxW && boundsLine.contains("[0,0][$fullScreenW,")) {
             return false
@@ -407,7 +595,7 @@ object PlanBWindowEngine {
         }
         val rightPkgOnly = rightComponentOrPkg.substringBefore("/")
         val launchRightCmd = if (rightComponentOrPkg.contains("/")) {
-            "am start --user 0 -n '$rightComponentOrPkg' --ez extra_auto_launch_maps false --es extra_nav_package '$leftPkg'"
+            "am start --user 0 -n '$rightComponentOrPkg' --ez extra_plan_b_mode true --ez extra_auto_launch_maps false --es extra_nav_package '$leftPkg'"
         } else {
             "monkey -p '$rightPkgOnly' -c android.intent.category.LAUNCHER 1"
         }

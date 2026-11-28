@@ -306,6 +306,7 @@ data class LauncherConfig(
     val planAPage2Enabled: Boolean = true,
     val navFullscreenMediaHandleEnabled: Boolean = true,
     val navMediaHandlePositionPercent: Float = 0.24f,
+    val sharedLocationNavTrigger: String = "ASK", // "ASK", "BUILTIN", "GOOGLE_MAPS", or "OTHER:<pkg>"
     val phoneCallCaptureEnabled: Boolean = true,
     val ytHandoffAlwaysVisible: Boolean = false,
     val ytHandoffPosX: Int = 18,

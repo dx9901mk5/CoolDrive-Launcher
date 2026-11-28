@@ -48,21 +48,37 @@ object RootShell {
     private var workingSuPath: String? = null
 
     private fun runWithBinary(suBin: String, command: String, timeoutSec: Long): ShellResult {
-        return runCatching {
-            val process = ProcessBuilder(suBin, "-c", command)
-                .redirectErrorStream(false)
-                .start()
-            val finished = process.waitFor(timeoutSec, TimeUnit.SECONDS)
-            if (!finished) {
-                process.destroyForcibly()
-                return@runCatching ShellResult(-1, "", "Timeout after ${timeoutSec}s")
+        val attempts = listOf(
+            listOf(suBin, "-c", command),
+            listOf(suBin, "0", "sh", "-c", command)
+        )
+        var lastRes = ShellResult(-1, "", "su execution failed")
+        for (argv in attempts) {
+            val res = runCatching {
+                val process = ProcessBuilder(argv)
+                    .redirectErrorStream(false)
+                    .start()
+                val finished = process.waitFor(timeoutSec, TimeUnit.SECONDS)
+                if (!finished) {
+                    process.destroyForcibly()
+                    return@runCatching ShellResult(-1, "", "Timeout after ${timeoutSec}s")
+                }
+                val out = process.inputStream.bufferedReader().readText().trim()
+                val err = process.errorStream.bufferedReader().readText().trim()
+                ShellResult(process.exitValue(), out, err)
+            }.getOrElse { e ->
+                ShellResult(-1, "", e.message ?: "su execution failed")
             }
-            val out = process.inputStream.bufferedReader().readText().trim()
-            val err = process.errorStream.bufferedReader().readText().trim()
-            ShellResult(process.exitValue(), out, err)
-        }.getOrElse { e ->
-            ShellResult(-1, "", e.message ?: "su execution failed")
+            if (res.isSuccess) return res
+            lastRes = res
+            // If binary does not exist / permission denied immediately, skip second syntax
+            if (res.stderr.contains("No such file", ignoreCase = true) ||
+                res.stderr.contains("Permission denied", ignoreCase = true)
+            ) {
+                break
+            }
         }
+        return lastRes
     }
 
     suspend fun execSu(command: String, timeoutSec: Long = 15L): ShellResult = withContext(Dispatchers.IO) {

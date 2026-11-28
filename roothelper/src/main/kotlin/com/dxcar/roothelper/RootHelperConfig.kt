@@ -13,7 +13,7 @@ import kotlinx.serialization.json.Json
 @Serializable
 data class RootHelperConfig(
     val planBEnabled: Boolean = true,
-    val dockPinnedRightShift: Boolean = true,
+    val dockPinnedRightShift: Boolean = false,
     val ui1NavPackage: String = "com.google.android.apps.maps",
     val ui1RightPackage: String = "com.google.android.youtube",
     val ui1SplitRatio: Float = 0.70f,

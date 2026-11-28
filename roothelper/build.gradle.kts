@@ -12,8 +12,8 @@ android {
     applicationId = "com.dxcar.roothelper"
     minSdk = 28
     targetSdk = 36
-    versionCode = 12
-    versionName = "1.3.5"
+    versionCode = 13
+    versionName = "1.4.0"
   }
 
   signingConfigs {

@@ -208,22 +208,34 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIncomingIntent(intent: Intent?) {
-        if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
-            val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
-            val sharedSubject = intent.getStringExtra(Intent.EXTRA_SUBJECT)?.trim().orEmpty()
-            val combined = listOf(sharedSubject, sharedText)
-                .filter { it.isNotBlank() }
-                .distinct()
-                .joinToString(" ")
-                .trim()
+        val isShareText = intent?.action == Intent.ACTION_SEND && intent.type == "text/plain"
+        val isGeoView = intent?.action == Intent.ACTION_VIEW && intent.data?.scheme.equals("geo", ignoreCase = true)
+        if (isShareText || isGeoView) {
+            val combined = if (isShareText) {
+                val sharedText = intent?.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
+                val sharedSubject = intent?.getStringExtra(Intent.EXTRA_SUBJECT)?.trim().orEmpty()
+                listOf(sharedSubject, sharedText)
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                    .joinToString(" ")
+                    .trim()
+            } else {
+                val geoData = intent?.data
+                val qParam = geoData?.getQueryParameter("q")?.trim().orEmpty()
+                qParam.ifBlank { geoData?.schemeSpecificPart?.trim().orEmpty() }
+            }
             if (combined.isNotBlank()) {
                 val app = application as DxCarApp
                 val curLoc = app.locationTracker.location.value
                 val biasLat = if (curLoc.latitude != 0.0) curLoc.latitude else app.preferences.config.value.lastKnownLat
                 val biasLon = if (curLoc.longitude != 0.0) curLoc.longitude else app.preferences.config.value.lastKnownLon
+                val isPhoneRole = app.preferences.config.value.deviceRole == com.dxcar.launcher.data.DeviceRole.PHONE_COMPANION
+                if (isPhoneRole) {
+                    BluetoothCompanionService.startOrReconnect(this)
+                }
                 android.widget.Toast.makeText(
                     this,
-                    "📍 正在解析地址並傳送至車機…",
+                    "📍 正在解析地址並自動傳送至車機…",
                     android.widget.Toast.LENGTH_SHORT
                 ).show()
                 kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main.immediate).launch {
@@ -234,7 +246,7 @@ class MainActivity : ComponentActivity() {
                         biasLat = biasLat,
                         biasLon = biasLon
                     )
-                    if (app.preferences.config.value.deviceRole == com.dxcar.launcher.data.DeviceRole.PHONE_COMPANION) {
+                    if (isPhoneRole) {
                         val sent = BluetoothCompanionService.sendPacketFromPhone(
                             com.dxcar.launcher.comms.BridgePacket(
                                 type = com.dxcar.launcher.comms.PacketType.SHARED_LOCATION,
@@ -246,12 +258,15 @@ class MainActivity : ComponentActivity() {
                             )
                         )
                         val msg = if (sent) {
-                            "✓ 已傳送地點給車機：${resolved.label}"
+                            "✓ 已自動丟到車機導航：${resolved.label}"
                         } else {
-                            "📍 已排入傳送（連上車機自動送出）：${resolved.label}"
+                            "📍 已自動排入傳送（連上車機即觸發）：${resolved.label}"
                         }
                         android.widget.Toast.makeText(this@MainActivity, msg, android.widget.Toast.LENGTH_LONG).show()
                         externalHudToast.value = msg
+                        // Smoothly return user to Google Maps after auto-sending via Share Sheet!
+                        kotlinx.coroutines.delay(550L)
+                        runCatching { moveTaskToBack(true) }
                     } else {
                         app.notificationCenter.postSharedLocation(
                             com.dxcar.launcher.comms.SharedLocationItem(

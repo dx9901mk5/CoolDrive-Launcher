@@ -710,6 +710,70 @@ fun SettingsScreen(
                             }
                         }
 
+                        // Car Trigger Mode for Locations Auto-Shared from Phone Google Maps
+                        run {
+                            val otherMaps = remember { com.dxcar.launcher.map.SharedLocationResolver.findInstalledOtherNavApps(context) }
+                            Surface(
+                                color = colors.cardSurfaceElevated,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .border(1.dp, colors.cardBorder, RoundedCornerShape(16.dp))
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = str(
+                                            "📍 手機 Google 地圖分享地址 → 車機觸發導航方式",
+                                            "📍 手机 Google 地图分享地址 → 车机触发导航方式",
+                                            "📍 Phone Shared Address -> Car Nav App Trigger",
+                                            "📍 スマホ共有住所の車載ナビ起動方法"
+                                        ),
+                                        color = colors.primaryText,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = str(
+                                            "手機從 Google 地圖點「分享 → DX-Car」會自動丟地址至車機；可選擇跳通知挑選地圖，或直接自動啟動指定導航 App",
+                                            "手机从 Google 地图点「分享 → DX-Car」会自动发送地址至车机；可选择弹通知挑选地图，或直接自动启动指定导航 App",
+                                            "Sharing from Google Maps auto-sends the address to Car; choose to ask via banner or auto-launch your preferred nav app",
+                                            "スマホの Google マップから共有すると自動で車載機へ送信され、指定のナビアプリを起動します"
+                                        ),
+                                        color = colors.secondaryText,
+                                        fontSize = 11.sp
+                                    )
+                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        SelectablePill(
+                                            text = str("每次跳通知選擇（預設）", "每次弹通知选择（默认）", "Ask via Banner", "毎回通知で選択"),
+                                            selected = config.sharedLocationNavTrigger == "ASK",
+                                            onClick = { onUpdateConfig { it.copy(sharedLocationNavTrigger = "ASK") } }
+                                        )
+                                        SelectablePill(
+                                            text = str("自動開內建地圖", "自动开内置地图", "Auto: Built-in Map", "自動：内蔵マップ"),
+                                            selected = config.sharedLocationNavTrigger == "BUILTIN",
+                                            onClick = { onUpdateConfig { it.copy(sharedLocationNavTrigger = "BUILTIN") } }
+                                        )
+                                        SelectablePill(
+                                            text = str("自動開 Google 地圖", "自动开 Google 地图", "Auto: Google Maps", "自動：Google マップ"),
+                                            selected = config.sharedLocationNavTrigger == "GOOGLE_MAPS",
+                                            onClick = { onUpdateConfig { it.copy(sharedLocationNavTrigger = "GOOGLE_MAPS") } }
+                                        )
+                                        otherMaps.forEach { m ->
+                                            val key = "OTHER:${m.packageName}"
+                                            SelectablePill(
+                                                text = str("自動開 ${m.displayName}", "自动开 ${m.displayName}", "Auto: ${m.displayName}", "自動：${m.displayName}"),
+                                                selected = config.sharedLocationNavTrigger == key,
+                                                onClick = { onUpdateConfig { it.copy(sharedLocationNavTrigger = key) } }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         // Plan A Offline Map Download & Update Cycle Quick Controls ("依據所在區域，或是所在國家，可以全下載")
                         val detectedLoc = remember(config.lastKnownLat, config.lastKnownLon) {
                             OfflineMapManager.describeDetectedLocation(config.lastKnownLat, config.lastKnownLon)
