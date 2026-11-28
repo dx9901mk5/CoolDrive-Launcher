@@ -2932,6 +2932,12 @@ fun SettingsScreen(
                             "【② 第二界面：720p 默认与跨系统后台播放】默认以 720p 播放并支持方向盘媒体键；切去 Google 地图、浏览器、系统设置或退回原车机盒桌面均会持续后台播放声音，仅当其他音乐 App 开始播放时才自动暂停。",
                             "[② Second UI: 720p & Background Play] Streams at 720p by default with steering-wheel media key support; keeps audio playing across Google Maps, Browser, Settings, or Stock Launcher, pausing only when another music app plays.",
                             "【② 第2画面：標準 720p ＆ バックグラウンド再生】標準 720p 再生とステアリングリモコンに対応。Google マップやブラウザ、純正ホームへ移動しても音声再生を継続し、他音楽アプリの再生時のみ自動一時停止します。"
+                        ),
+                        str(
+                            "【媒體進度條滑動＆語音朗讀隨時取消】媒體播放器進度條可直接以手指「點擊或拖曳滑動」調整歌曲進度；當系統語音朗讀訊息時，畫面左上角會出現「🔊 正在朗讀 · 點此取消」脈動按鈕，手指輕點即可立刻停止發話！",
+                            "【媒体进度条滑动＆语音朗读随时取消】媒体播放器进度条可直接以手指「点击或拖拽滑动」调整歌曲进度；当系统语音朗读消息时，画面左上角会出现「🔊 正在朗读 · 点此取消」脉动按钮，手指轻点即可立刻停止播报！",
+                            "[Scrubbable Media Bar & Tap-to-Stop TTS] Drag or tap the media progress bar to seek playback position directly; while TTS is reading a message aloud, a pulsing top-left cancel pill lets you tap once to stop speech immediately!",
+                            "【シークバー操作＆読み上げ即停止】プレーヤーのシークバーをタップ／ドラッグして再生位置を調整可能。音声読み上げ中は画面左上にキャンセルボタンが表示され、ワンタップで即停止できます！"
                         )
                     ),
                     highlightNote = str(
@@ -2995,6 +3001,24 @@ fun SettingsScreen(
                             "【远程鼠标触控板】连接后手机画面可直接当作车机鼠标触控板使用；点手机上的「车机鼠标灵敏度设置」，车机画面就会自动弹出系统指针速度设置页！",
                             "[Remote Mouse Touchpad] Once connected, use your phone screen as a multi-touch Car touchpad; tap [Car Pointer Speed Settings] on your phone to pop up system pointer speed settings on the Car screen!",
                             "【リモートタッチパッド】接続後はスマホ画面で車載機のマウス操作が可能。スマホ側の「車載マウス感度設定」を押すと車載画面にポインター速度設定が開きます！"
+                        ),
+                        str(
+                            "【📞 車機呼叫電話 → 自動連動手機原始電話撥打】本 App 已內建車機端電話撥號能力！當您按下方向盤語音鍵或向車機 Gemini 說「打電話給某某某／09xx…」，系統會判定車機 App 可撥號並自動接手，即時傳遞給配對手機，由手機端呼叫原始系統電話 App 撥出（手機端模式會自動停用攔截，絕不影響日常通話）。",
+                            "【📞 车机呼叫电话 → 自动联动手机原始电话拨打】本 App 已内置车机端电话拨号能力！当您按下方向盘语音键或向车机 Gemini 说「打电话给某某某／09xx…」，系统会判定车机 App 可拨号并自动接手，实时传递给配对手机，由手机端调用原始系统电话 App 拨出（手机端模式自动停用拦截，绝不影响日常通话）。",
+                            "[📞 Car Voice Dialing -> Smartphone Native Phone App] DX-Car registers phone-call capability on the Car Box! When you press the steering-wheel voice button or ask Car Gemini to call someone, DX-Car intercepts the call seamlessly and forwards it to your paired Smartphone's original Phone App to dial (disabled automatically on phones so normal calls are never affected).",
+                            "【📞 車載音声発信 → スマホ標準電話アプリで発信】車載側で通話ハンドラー機能を搭載！ステアリング音声ボタンや車載 Gemini で「〇〇に電話」と話すと、DX-Car が自動で受け取りペアリング済みスマホへ転送し、スマホの標準電話アプリから発信します。"
+                        ),
+                        str(
+                            "【📍 手機分享地址 → 自動送車機啟動導航搜尋】在手機 Google 地圖、LINE 或任何 App 點「分享 → DX-Car」，若是地圖連結、座標或地址，手機端會直接解析並發送給車機啟動器立即啟動地圖搜尋（也可在橫幅一鍵改開 Google 地圖或其他導航）；若分享的不是地址（如貼文／聊天），則自動觸發 Gemini 判斷！",
+                            "【📍 手机分享地址 → 自动送车机启动导航搜索】在手机 Google 地图、微信或任意 App 点「分享 → DX-Car」，若是地图链接、坐标或地址，手机端直接解析并发送给车机启动器立即启动地图搜索（也可在横幅一键改开 Google 地图或其他导航）；若分享的不是地址（如帖子／聊天），则自动触发 Gemini 判断！",
+                            "[📍 Phone Share Address -> Auto Car Map Search] Tap Share → DX-Car from Google Maps, LINE, or any phone app: map links, coordinates, and street addresses are sent straight to the Car to launch map search immediately (with 1-tap switch to Google Maps/other nav apps). Non-address text automatically triggers Gemini to analyze!",
+                            "【📍 スマホから住所共有 → 車載ナビ自動検索】Google マップや LINE 等から「共有 → DX-Car」を選ぶと、地図リンクや住所は即座に車載機へ送信され地図検索を開始します。住所以外のテキストは自動で Gemini 判定を起動します！"
+                        ),
+                        str(
+                            "【🖼️ 手機分享圖片 → 自動傳遞至車機觸發 Gemini】在手機相簿、LINE、Instagram 或截圖畫面點「分享圖片 → DX-Car」，手機會自動壓縮並傳遞圖片給車機端，由車機自動喚起 Google Gemini 進行影像判讀（例如辨識截圖中的餐廳店名、地址或招牌資訊）！",
+                            "【🖼️ 手机分享图片 → 自动传递至车机触发 Gemini】在手机相册、微信、小红书或截图界面点「分享图片 → DX-Car」，手机会自动压缩并传递图片给车机端，由车机自动唤起 Google Gemini 进行图像判读（例如识别截图中的餐厅店名、地址或招牌信息）！",
+                            "[🖼️ Phone Share Image -> Auto Send to Car Gemini] Share any photo or screenshot (restaurant info, address card, street sign) to DX-Car on your phone — it automatically transfers the image to the Car Box and triggers Car Gemini to inspect and identify it!",
+                            "【🖼️ スマホから画像共有 → 車載 Gemini 自動起動】スマホの写真やスクリーンショットを「共有 → DX-Car」で送ると、自動で車載機へ転送され車載 Google Gemini を起動して店名・住所などの画像解析を行います！"
                         )
                     ),
                     highlightNote = str(

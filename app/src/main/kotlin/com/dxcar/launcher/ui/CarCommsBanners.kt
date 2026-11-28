@@ -2,8 +2,12 @@ package com.dxcar.launcher.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -84,6 +88,93 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
+
+/**
+ * Top-Left Active TTS Speaking Cancel Pill:
+ * Appears whenever message/navigation TTS read-aloud is actively speaking;
+ * a single finger tap immediately cancels TTS playback!
+ */
+@Composable
+fun TtsSpeakingCancelPill(
+    visible: Boolean,
+    label: String = "",
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalDxCarColors.current
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(tween(180)),
+        exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(tween(150)),
+        modifier = modifier
+    ) {
+        val pulseTransition = rememberInfiniteTransition(label = "ttsSpeakPulse")
+        val pulseAlpha by pulseTransition.animateFloat(
+            initialValue = 0.55f,
+            targetValue = 1.0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(520),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "ttsSpeakAlpha"
+        )
+        Surface(
+            color = colors.glassOverlay,
+            shape = RoundedCornerShape(999.dp),
+            shadowElevation = 14.dp,
+            modifier = Modifier
+                .border(2.dp, colors.accent.copy(alpha = pulseAlpha), RoundedCornerShape(999.dp))
+                .bouncyClickable(pressedScale = 0.90f, onClick = onCancel)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(colors.accent.copy(alpha = 0.24f * pulseAlpha + 0.12f))
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.VolumeUp,
+                        contentDescription = null,
+                        tint = colors.accent,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Text(
+                    text = buildString {
+                        append(label.ifBlank { str("語音朗讀中", "语音朗读中", "Speaking", "読み上げ中") })
+                        append(" · ")
+                        append(str("點此取消", "点此取消", "Tap to stop", "タップで停止"))
+                    },
+                    color = colors.primaryText,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(colors.callDeclineRed.copy(alpha = 0.22f))
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = str("取消朗讀", "取消朗读", "Cancel speech", "読み上げ停止"),
+                        tint = colors.callDeclineRed,
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
+            }
+        }
+    }
+}
 
 /**
  * Horizontal touch swipe-to-dismiss wrapper (allows swiping notification/call banners Left or Right to dismiss!).

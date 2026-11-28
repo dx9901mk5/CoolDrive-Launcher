@@ -4,9 +4,14 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.os.Handler
+import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import com.dxcar.launcher.i18n.DxCarI18n
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.util.Locale
 import java.util.UUID
 
@@ -14,9 +19,20 @@ class TtsAnnouncer(context: Context) {
 
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var tts: TextToSpeech? = null
     private var ready = false
     private var currentFocusRequest: AudioFocusRequest? = null
+
+    @Volatile
+    private var activeUtteranceId: String? = null
+    private var safetyClearRunnable: Runnable? = null
+
+    private val _isSpeaking = MutableStateFlow(false)
+    val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
+
+    private val _speakingLabel = MutableStateFlow("")
+    val speakingLabel: StateFlow<String> = _speakingLabel.asStateFlow()
 
     init {
         tts = TextToSpeech(appContext) { status ->
@@ -30,10 +46,30 @@ class TtsAnnouncer(context: Context) {
                 }
                 engine.setSpeechRate(1.05f)
                 engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) = Unit
-                    override fun onDone(utteranceId: String?) = abandonFocus()
+                    override fun onStart(utteranceId: String?) {
+                        if (utteranceId == null || utteranceId == activeUtteranceId) {
+                            _isSpeaking.value = true
+                        }
+                    }
+
+                    override fun onDone(utteranceId: String?) {
+                        if (utteranceId == null || utteranceId == activeUtteranceId) {
+                            clearSpeakingState()
+                        }
+                    }
+
+                    override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                        if (utteranceId == null || utteranceId == activeUtteranceId) {
+                            clearSpeakingState()
+                        }
+                    }
+
                     @Deprecated("Deprecated in Java")
-                    override fun onError(utteranceId: String?) = abandonFocus()
+                    override fun onError(utteranceId: String?) {
+                        if (utteranceId == null || utteranceId == activeUtteranceId) {
+                            clearSpeakingState()
+                        }
+                    }
                 })
                 ready = true
             }
@@ -48,10 +84,16 @@ class TtsAnnouncer(context: Context) {
             "New message from $sender on $appName: $cleaned",
             "$appName の $sender さんからのメッセージ：$cleaned"
         )
-        speak(spoken)
+        val label = DxCarI18n.tr(
+            "正在朗讀：$sender",
+            "正在朗读：$sender",
+            "Reading: $sender",
+            "読み上げ中：$sender"
+        )
+        speak(spoken, label)
     }
 
-    fun speak(text: String) {
+    fun speak(text: String, label: String = "") {
         if (!ready || text.isBlank()) return
         runCatching {
             val targetLocale = DxCarI18n.currentLocale()
@@ -62,14 +104,45 @@ class TtsAnnouncer(context: Context) {
                 }
             }
         }
+        val uid = UUID.randomUUID().toString()
+        activeUtteranceId = uid
+        _speakingLabel.value = label.ifBlank {
+            DxCarI18n.tr("語音朗讀中", "语音朗读中", "Speaking", "音声読み上げ中")
+        }
+        _isSpeaking.value = true
+        scheduleSafetyClear(uid, text.length)
         requestDuckFocus()
-        runCatching {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
+        val queued = runCatching {
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, uid) == TextToSpeech.SUCCESS
+        }.getOrDefault(false)
+        if (!queued) {
+            clearSpeakingState()
         }
     }
 
     fun stop() {
         runCatching { tts?.stop() }
+        clearSpeakingState()
+    }
+
+    private fun scheduleSafetyClear(uid: String, charCount: Int) {
+        safetyClearRunnable?.let { mainHandler.removeCallbacks(it) }
+        val timeoutMs = (charCount * 280L + 2_500L).coerceIn(4_500L, 45_000L)
+        val r = Runnable {
+            if (activeUtteranceId == uid) {
+                clearSpeakingState()
+            }
+        }
+        safetyClearRunnable = r
+        mainHandler.postDelayed(r, timeoutMs)
+    }
+
+    private fun clearSpeakingState() {
+        safetyClearRunnable?.let { mainHandler.removeCallbacks(it) }
+        safetyClearRunnable = null
+        activeUtteranceId = null
+        _isSpeaking.value = false
+        _speakingLabel.value = ""
         abandonFocus()
     }
 

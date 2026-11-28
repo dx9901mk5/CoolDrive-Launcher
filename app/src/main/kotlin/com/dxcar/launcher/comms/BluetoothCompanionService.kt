@@ -990,12 +990,39 @@ class BluetoothCompanionService : Service() {
                     }
                 }
             }
+            PacketType.SHARED_IMAGE_GEMINI -> {
+                if (isAiBox && packet.text.isNotBlank()) {
+                    handleIncomingSharedImageForGemini(packet.text, packet.sender)
+                }
+            }
             PacketType.DIAL_PHONE -> {
                 if (!isAiBox) {
                     handleRemoteDialPhoneOnPhone(packet.sender, packet.phoneNumber)
                 }
             }
         }
+    }
+
+    private fun handleIncomingSharedImageForGemini(base64Jpeg: String, caption: String) {
+        val ok = runCatching {
+            val bytes = android.util.Base64.decode(base64Jpeg, android.util.Base64.DEFAULT)
+            if (bytes.isEmpty()) return@runCatching false
+            val dir = File(cacheDir, "shared_gemini").apply { mkdirs() }
+            // Keep cache tidy (retain at most 5 recent images)
+            dir.listFiles()?.sortedByDescending { it.lastModified() }?.drop(4)?.forEach { runCatching { it.delete() } }
+            val outFile = File(dir, "car_gemini_${System.currentTimeMillis()}.jpg")
+            outFile.writeBytes(bytes)
+            val contentUri = androidx.core.content.FileProvider.getUriForFile(
+                this,
+                "$packageName.fileprovider",
+                outFile
+            )
+            launchCarGeminiWithImageUri(this, contentUri, caption)
+        }.getOrDefault(false)
+        appendLog(
+            if (ok) "🖼️ 收到手機分享圖片，已自動啟動車機 Gemini 判讀"
+            else "⚠️ 收到手機分享圖片，但車機尚未安裝可接收圖片的 Gemini App"
+        )
     }
 
     @SuppressLint("MissingPermission")
@@ -1073,7 +1100,8 @@ class BluetoothCompanionService : Service() {
         }
         if (packet.type == PacketType.MESSAGE ||
             packet.type == PacketType.CALL_STATE ||
-            packet.type == PacketType.SHARED_LOCATION
+            packet.type == PacketType.SHARED_LOCATION ||
+            packet.type == PacketType.SHARED_IMAGE_GEMINI
         ) {
             bufferImportantPacket(packet)
             ensureWorkersRunning()
@@ -1448,7 +1476,8 @@ class BluetoothCompanionService : Service() {
             if (svc == null) {
                 if (normalized.type == PacketType.MESSAGE ||
                     normalized.type == PacketType.CALL_STATE ||
-                    normalized.type == PacketType.SHARED_LOCATION
+                    normalized.type == PacketType.SHARED_LOCATION ||
+                    normalized.type == PacketType.SHARED_IMAGE_GEMINI
                 ) {
                     bufferStaticImportantPacket(normalized)
                 }
@@ -1463,6 +1492,32 @@ class BluetoothCompanionService : Service() {
             val svc = activeService ?: return false
             if (!svc.hasOpenTransport()) return false
             return svc.enqueueOutbound(normalized)
+        }
+
+        /**
+         * Launches Google Gemini App (or system image share chooser fallback) on the Car with a shared image URI.
+         */
+        fun launchCarGeminiWithImageUri(context: Context, imageUri: android.net.Uri, caption: String = ""): Boolean {
+            val prompt = caption.ifBlank { "請幫我辨識這張圖片中的地址、店名或重點資訊" }
+            val geminiPkg = "com.google.android.apps.bard"
+            val baseIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "image/jpeg"
+                putExtra(Intent.EXTRA_STREAM, imageUri)
+                putExtra(Intent.EXTRA_TEXT, prompt)
+                clipData = android.content.ClipData.newRawUri("shared_image", imageUri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val targeted = Intent(baseIntent).setPackage(geminiPkg)
+            runCatching {
+                context.grantUriPermission(geminiPkg, imageUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            if (runCatching { context.startActivity(targeted); true }.getOrDefault(false)) {
+                return true
+            }
+            val chooser = Intent.createChooser(baseIntent, "以 Gemini 判讀分享圖片").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            return runCatching { context.startActivity(chooser); true }.getOrDefault(false)
         }
 
         /**

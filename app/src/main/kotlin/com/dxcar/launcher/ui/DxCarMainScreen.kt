@@ -1208,6 +1208,7 @@ fun DxCarRootScreen(
                                         onMediaPlayPause = { app.mediaControlBridge.togglePlayPause() },
                                         onMediaNext = { app.mediaControlBridge.skipNext() },
                                         onMediaPrev = { app.mediaControlBridge.skipPrevious() },
+                                        onMediaSeekTo = { app.mediaControlBridge.seekTo(it) },
                                         onMediaToggleFavorite = {
                                             val (_, msg) = app.mediaControlBridge.toggleFavoriteOrLike()
                                             gestureHudText = msg
@@ -1830,6 +1831,8 @@ fun DxCarRootScreen(
                 14.dp
             }
             val useCarBoxAudio by app.notificationCenter.useCarBoxAudio.collectAsState()
+            val isTtsSpeaking by app.ttsAnnouncer.isSpeaking.collectAsState()
+            val ttsSpeakingLabel by app.ttsAnnouncer.speakingLabel.collectAsState()
             Column(
                 horizontalAlignment = Alignment.Start,
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -1837,6 +1840,11 @@ fun DxCarRootScreen(
                     .align(Alignment.TopStart)
                     .padding(top = bannerTopPad, start = bannerStartPad, end = 20.dp)
             ) {
+                TtsSpeakingCancelPill(
+                    visible = isTtsSpeaking,
+                    label = ttsSpeakingLabel,
+                    onCancel = { app.ttsAnnouncer.stop() }
+                )
                 IncomingCallBanner(
                     callState = activeCall,
                     scale = config.notificationBannerScale,
@@ -2629,6 +2637,7 @@ private fun CoolwalkSplitDashboard(
     onMediaPlayPause: () -> Unit,
     onMediaNext: () -> Unit,
     onMediaPrev: () -> Unit,
+    onMediaSeekTo: (Long) -> Unit = {},
     onMediaToggleFavorite: () -> Unit,
     onSelectMediaSession: (String) -> Unit,
     onOpenMediaApp: () -> Unit,
@@ -2725,6 +2734,7 @@ private fun CoolwalkSplitDashboard(
                 onPlayPause = onMediaPlayPause,
                 onNext = onMediaNext,
                 onPrevious = onMediaPrev,
+                onSeekTo = onMediaSeekTo,
                 onToggleFavorite = onMediaToggleFavorite,
                 onSelectSession = onSelectMediaSession,
                 onOpenMediaApp = onOpenMediaApp,

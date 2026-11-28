@@ -2005,6 +2005,18 @@ fun PhoneCompanionScreen(
                         "点击【启动全屏鼠标触控板】进入纯黑 OLED 防锁屏模式：支持「单指移动／轻点震动确定」、「双指捏合张开＝车机地图缩放」、「双指上下滑＝车机 Google 地图 3D 俯瞰」、「双指轻点＝返回」、「三指上滑＝多任务／下滑＝首页」！",
                         "Tap [Launch Fullscreen Touchpad] for Pure-Black OLED Keep-Awake mode: 1-finger move/tap with crisp haptic click, 2-finger pinch to zoom Car Maps, 2-finger vertical drag for 3D tilt, 2-finger tap for Back, and 3-finger swipe up/down for Recents/Home!",
                         "【全画面タッチパッドを起動】で純黒 OLED スリープ防止モードへ：1本指移動＆振動クリック、2本指ピンチで車載地図ズーム、2本指上下で 3D 視点切替、2本指タップで戻る、3本指上/下で履歴/ホームに対応！"
+                    ),
+                    str(
+                        "【📞 車機方向盤呼叫打電話 → 手機原始電話撥打】開啟手機端「撥打電話」權限後，在車機端按方向盤語音或呼叫 Gemini 打電話，車機會自動把電話指令傳回手機並用手機原始電話 App 撥出！",
+                        "【📞 车机方向盘呼叫打电话 → 手机原始电话拨打】开启手机端「拨打电话」权限后，在车机端按方向盘语音或呼叫 Gemini 打电话，车机会自动把电话指令传回手机并用手机原始电话 App 拨出！",
+                        "[📞 Car Voice Call -> Phone Native Dialer] Grant Phone permission on your smartphone so steering-wheel / Car Gemini voice calls automatically dial out through your phone's original Phone App!",
+                        "【📞 車載音声発信 → スマホ標準電話で発信】スマホで通話権限を許可しておくと、車載 Gemini からの発信指示が自動でスマホの標準電話アプリから発信されます！"
+                    ),
+                    str(
+                        "【📍 分享地址直啟導航 ＆ 🖼️ 分享圖片傳車機觸發 Gemini】手機任何 App 點「分享 → DX-Car」：地圖連結或地址直接送車機啟動搜尋；非地址文字交由 Gemini 判斷；分享圖片（如餐廳截圖／地址照片）則自動傳送到車機端觸發車機 Gemini 判讀！",
+                        "【📍 分享地址直启导航 ＆ 🖼️ 分享图片传车机触发 Gemini】手机任意 App 点「分享 → DX-Car」：地图链接或地址直接送车机启动搜索；非地址文字交由 Gemini 判断；分享图片（如餐厅截图／地址照片）则自动传送到车机端触发车机 Gemini 判读！",
+                        "[📍 Share Address to Car Map & 🖼️ Share Image to Car Gemini] Tap Share → DX-Car from any app: map links & addresses launch Car map search automatically, non-address text invokes Gemini, and shared images transfer straight to Car Gemini for visual analysis!",
+                        "【📍 住所共有で車載検索 ＆ 🖼️ 画像共有で車載 Gemini 起動】他アプリから「共有 → DX-Car」：地図・住所は車載機で即ナビ検索、住所外テキストは Gemini 判定、画像は自動で車載機へ転送し車載 Gemini を起動します！"
                     )
                 ),
                 highlightNote = str(

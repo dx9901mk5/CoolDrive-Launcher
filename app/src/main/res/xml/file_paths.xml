@@ -6,6 +6,9 @@
     <cache-path
         name="backups"
         path="backups/" />
+    <cache-path
+        name="shared_gemini"
+        path="shared_gemini/" />
     <external-cache-path
         name="ext_updates"
         path="updates/" />

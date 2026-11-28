@@ -114,11 +114,16 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Receive shared addresses, place keywords, or Google Maps links from any Phone app -> auto-send to Car -->
+            <!-- Receive shared addresses, place keywords, Google Maps links, or images -> auto-send to Car (Map or Gemini) -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
             </intent-filter>
             <!-- Also receive geo: navigation intents from Google Maps / third-party apps -->
             <intent-filter>

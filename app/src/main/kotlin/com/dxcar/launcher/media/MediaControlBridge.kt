@@ -614,7 +614,10 @@ class MediaControlBridge(
     }
 
     fun seekTo(positionMs: Long) {
-        selectedController?.transportControls?.seekTo(positionMs)
+        val dur = _mediaState.value.durationMs
+        val clamped = if (dur > 0L) positionMs.coerceIn(0L, dur) else positionMs.coerceAtLeast(0L)
+        selectedController?.transportControls?.seekTo(clamped)
+        _mediaState.value = _mediaState.value.copy(positionMs = clamped)
     }
 
     private fun sendMediaKeyFallback(keyCode: Int) {

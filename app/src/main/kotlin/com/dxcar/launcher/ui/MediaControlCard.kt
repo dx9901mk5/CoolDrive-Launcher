@@ -10,16 +10,20 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -47,7 +51,11 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -55,13 +63,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import kotlin.math.roundToInt
 import com.dxcar.launcher.data.SplitScreenShortcut
 import com.dxcar.launcher.i18n.DxCarI18n.str
 import com.dxcar.launcher.media.ActiveMediaState
@@ -94,6 +106,7 @@ fun MediaControlCard(
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
+    onSeekTo: (Long) -> Unit = {},
     onToggleFavorite: () -> Unit = {},
     onSelectSession: (String) -> Unit,
     onOpenMediaApp: () -> Unit,
@@ -287,24 +300,11 @@ fun MediaControlCard(
                 // PROGRESS + [APP ICON + LIKE] + TRANSPORT + INTEGRATED 6 SHORTCUTS
                 Column(verticalArrangement = Arrangement.spacedBy(if (tightHeight) 4.dp else 6.dp)) {
                     if (media.durationMs > 0L) {
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            LinearProgressIndicator(
-                                progress = { progress },
-                                color = colors.accent,
-                                trackColor = colors.cardBorder,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(4.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(formatMediaTime(media.positionMs), color = colors.secondaryText, fontSize = 10.sp)
-                                Text(formatMediaTime(media.durationMs), color = colors.secondaryText, fontSize = 10.sp)
-                            }
-                        }
+                        InteractiveMediaSeekBar(
+                            positionMs = media.positionMs,
+                            durationMs = media.durationMs,
+                            onSeekTo = onSeekTo
+                        )
                     }
 
                     val sideBtnSize = if (tightHeight) 36.dp else 40.dp
@@ -608,6 +608,111 @@ private fun TransportButton(
                     modifier = Modifier.size(if (large) 24.dp else 20.dp)
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun InteractiveMediaSeekBar(
+    positionMs: Long,
+    durationMs: Long,
+    onSeekTo: (Long) -> Unit
+) {
+    val colors = LocalDxCarColors.current
+    var isDragging by remember { mutableStateOf(false) }
+    var dragFraction by remember { mutableFloatStateOf(0f) }
+    var trackWidthPx by remember { mutableFloatStateOf(1f) }
+
+    val liveFraction = if (durationMs > 0L) {
+        (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    val displayFraction = if (isDragging) dragFraction else liveFraction
+    val displayPositionMs = if (isDragging) (dragFraction * durationMs).toLong().coerceIn(0L, durationMs) else positionMs
+
+    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        Box(
+            contentAlignment = Alignment.CenterStart,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(26.dp)
+                .onSizeChanged { size ->
+                    trackWidthPx = size.width.toFloat().coerceAtLeast(1f)
+                }
+                .pointerInput(durationMs) {
+                    detectTapGestures { offset ->
+                        val frac = (offset.x / trackWidthPx).coerceIn(0f, 1f)
+                        val targetMs = (frac * durationMs).toLong().coerceIn(0L, durationMs)
+                        onSeekTo(targetMs)
+                    }
+                }
+                .pointerInput(durationMs) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { startOffset ->
+                            isDragging = true
+                            dragFraction = (startOffset.x / trackWidthPx).coerceIn(0f, 1f)
+                        },
+                        onHorizontalDrag = { change, _ ->
+                            change.consume()
+                            dragFraction = (change.position.x / trackWidthPx).coerceIn(0f, 1f)
+                        },
+                        onDragEnd = {
+                            val targetMs = (dragFraction * durationMs).toLong().coerceIn(0L, durationMs)
+                            isDragging = false
+                            onSeekTo(targetMs)
+                        },
+                        onDragCancel = {
+                            isDragging = false
+                        }
+                    )
+                }
+        ) {
+            val trackH = if (isDragging) 7.dp else 5.dp
+            val thumbSize = if (isDragging) 16.dp else 12.dp
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(trackH)
+                    .clip(RoundedCornerShape(99.dp))
+                    .background(colors.cardBorder)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(displayFraction.coerceIn(0f, 1f))
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(99.dp))
+                        .background(colors.accent)
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .offset {
+                        val thumbPx = thumbSize.toPx()
+                        val xPx = (displayFraction * (trackWidthPx - thumbPx)).coerceIn(0f, (trackWidthPx - thumbPx).coerceAtLeast(0f))
+                        IntOffset(xPx.roundToInt(), 0)
+                    }
+                    .size(thumbSize)
+                    .clip(CircleShape)
+                    .background(Color.White)
+                    .border(2.dp, colors.accent, CircleShape)
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = formatMediaTime(displayPositionMs),
+                color = if (isDragging) colors.accent else colors.secondaryText,
+                fontSize = 10.sp,
+                fontWeight = if (isDragging) FontWeight.ExtraBold else FontWeight.Normal
+            )
+            Text(
+                text = formatMediaTime(durationMs),
+                color = colors.secondaryText,
+                fontSize = 10.sp
+            )
         }
     }
 }

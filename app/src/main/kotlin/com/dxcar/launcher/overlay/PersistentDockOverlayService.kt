@@ -929,11 +929,18 @@ class PersistentDockOverlayService :
                         12.dp
                     }
                     val useCarBoxAudio by app.notificationCenter.useCarBoxAudio.collectAsState()
+                    val isTtsSpeaking by app.ttsAnnouncer.isSpeaking.collectAsState()
+                    val ttsSpeakingLabel by app.ttsAnnouncer.speakingLabel.collectAsState()
                     Column(
                         horizontalAlignment = Alignment.Start,
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.padding(top = topPad, start = startPad, end = 16.dp)
                     ) {
+                        com.dxcar.launcher.ui.TtsSpeakingCancelPill(
+                            visible = isTtsSpeaking,
+                            label = ttsSpeakingLabel,
+                            onCancel = { app.ttsAnnouncer.stop() }
+                        )
                         IncomingCallBanner(
                             callState = callState,
                             scale = config.notificationBannerScale,
@@ -1128,6 +1135,7 @@ class PersistentDockOverlayService :
                                         onPlayPause = { app.mediaControlBridge.togglePlayPause() },
                                         onNext = { app.mediaControlBridge.skipNext() },
                                         onPrevious = { app.mediaControlBridge.skipPrevious() },
+                                        onSeekTo = { app.mediaControlBridge.seekTo(it) },
                                         onToggleFavorite = { app.mediaControlBridge.toggleFavoriteOrLike() },
                                         onSelectSession = { app.mediaControlBridge.selectSession(it) },
                                         onSwapRequested = {
@@ -1571,12 +1579,13 @@ class PersistentDockOverlayService :
                 ) {
                     val palette = LocalDxCarColors.current
                     if (collapsed) {
-                        val handleThicknessDp = config.overlayHandleThicknessDp.coerceIn(18, 40)
-                        val handleHeightDp = 92
+                        // Generously thick, unmistakably tappable edge pull-tab (just like Dock handle, min 34dp wide x 116dp tall!)
+                        val handleThicknessDp = maxOf(config.overlayHandleThicknessDp, 34).coerceIn(34, 48)
+                        val handleHeightDp = 116
                         val handleShape = if (onRightEdge) {
-                            RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp)
+                            RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp)
                         } else {
-                            RoundedCornerShape(topEnd = 14.dp, bottomEnd = 14.dp)
+                            RoundedCornerShape(topEnd = 16.dp, bottomEnd = 16.dp)
                         }
                         val haptic = LocalHapticFeedback.current
                         var isDraggingPos by remember { mutableStateOf(false) }
@@ -1588,12 +1597,12 @@ class PersistentDockOverlayService :
                                 .height(handleHeightDp.dp)
                                 .clip(handleShape)
                                 .background(
-                                    if (isDraggingPos) palette.accent.copy(alpha = 0.38f)
-                                    else palette.glassOverlay.copy(alpha = 0.80f)
+                                    if (isDraggingPos) palette.accent.copy(alpha = 0.45f)
+                                    else palette.glassOverlay.copy(alpha = 0.90f)
                                 )
                                 .border(
-                                    width = if (isDraggingPos) 2.dp else 1.2.dp,
-                                    color = palette.accent.copy(alpha = if (isDraggingPos) 0.95f else 0.70f),
+                                    width = if (isDraggingPos) 2.2.dp else 1.5.dp,
+                                    color = palette.accent.copy(alpha = if (isDraggingPos) 1.0f else 0.85f),
                                     shape = handleShape
                                 )
                                 .pointerInput(onRightEdge, metrics, config.navMediaHandlePositionPercent) {
@@ -1620,9 +1629,9 @@ class PersistentDockOverlayService :
 
                                             if (!draggingPos && !expandedBySwipe) {
                                                 val inwardTrigger = if (onRightEdge) {
-                                                    dx < -20f && abs(dx) > abs(dy)
+                                                    dx < -18f && abs(dx) > abs(dy)
                                                 } else {
-                                                    dx > 20f && abs(dx) > abs(dy)
+                                                    dx > 18f && abs(dx) > abs(dy)
                                                 }
                                                 if (inwardTrigger) {
                                                     expandedBySwipe = true
@@ -1631,7 +1640,7 @@ class PersistentDockOverlayService :
                                                     change.consume()
                                                     break
                                                 }
-                                                if (elapsed >= 340L || abs(dy) > 24f) {
+                                                if (elapsed >= 520L || abs(dy) > 30f) {
                                                     draggingPos = true
                                                     isDraggingPos = true
                                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -1652,7 +1661,8 @@ class PersistentDockOverlayService :
                                         isDraggingPos = false
                                         if (draggingPos && moved) {
                                             app.preferences.update { it.copy(navMediaHandlePositionPercent = latestPercent) }
-                                        } else if (!expandedBySwipe && !draggingPos) {
+                                        } else if (!expandedBySwipe) {
+                                            // Any normal tap (even if finger hovered slightly) cleanly wakes the media panel!
                                             navMediaCollapsed.value = false
                                             navMediaInteractionTick.value++
                                         }
@@ -1661,20 +1671,20 @@ class PersistentDockOverlayService :
                         ) {
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                verticalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.MusicNote,
-                                    contentDescription = "音樂快控",
+                                    contentDescription = "喚醒音樂播放器",
                                     tint = palette.accent,
-                                    modifier = Modifier.size(14.dp)
+                                    modifier = Modifier.size(19.dp)
                                 )
                                 Box(
                                     modifier = Modifier
-                                        .width((handleThicknessDp * 0.22f).coerceIn(4f, 6f).dp)
-                                        .height(34.dp)
+                                        .width((handleThicknessDp * 0.22f).coerceIn(5f, 7f).dp)
+                                        .height(44.dp)
                                         .clip(CircleShape)
-                                        .background(palette.accent.copy(alpha = 0.92f))
+                                        .background(palette.accent.copy(alpha = 0.95f))
                                 )
                             }
                         }
@@ -1766,6 +1776,10 @@ class PersistentDockOverlayService :
                                             onPrevious = {
                                                 navMediaInteractionTick.value++
                                                 app.mediaControlBridge.skipPrevious()
+                                            },
+                                            onSeekTo = { pos ->
+                                                navMediaInteractionTick.value++
+                                                app.mediaControlBridge.seekTo(pos)
                                             },
                                             onToggleFavorite = {
                                                 navMediaInteractionTick.value++
@@ -2099,6 +2113,39 @@ class PersistentDockOverlayService :
             }
         }
 
+        // Instant reactive layout sync whenever navMediaCollapsed changes (no 450ms delay or touch interruption!)
+        lifecycleScope.launch {
+            combine(navMediaCollapsed, metricsFlow, app.preferences.config) { col, m, cfg ->
+                Triple(col, m, cfg)
+            }.collect { (col, metrics, cfg) ->
+                val navV = navMediaView ?: return@collect
+                val navP = navMediaParams ?: return@collect
+                if (navV.visibility != View.VISIBLE) return@collect
+                val spec = CoolwalkLayoutEngine.compute(
+                    metrics = metrics,
+                    dockMode = cfg.dockPositionMode,
+                    rightHandDrive = cfg.rightHandDrive,
+                    customPrimaryRatio = cfg.primarySplitRatio
+                )
+                val onRightEdge = spec.dockPlacement != ResolvedDockPlacement.RIGHT
+                if (col) {
+                    updateNavMediaHandlePosition(
+                        onRightEdge = onRightEdge,
+                        metrics = metrics,
+                        handleHeightDp = 116,
+                        percent = cfg.navMediaHandlePositionPercent
+                    )
+                } else {
+                    navP.gravity = (if (onRightEdge) Gravity.END else Gravity.START) or Gravity.CENTER_VERTICAL
+                    navP.x = 0
+                    navP.y = 0
+                    navP.width = WindowManager.LayoutParams.WRAP_CONTENT
+                    navP.height = WindowManager.LayoutParams.WRAP_CONTENT
+                    runCatching { windowManager.updateViewLayout(navV, navP) }
+                }
+            }
+        }
+
         // Observe YouTube App Foreground (strictly YouTube only!) & Plan A Fullscreen Nav Right-Edge Media Handle
         lifecycleScope.launch {
             var lastShown = false
@@ -2133,7 +2180,7 @@ class PersistentDockOverlayService :
                     lastShown = showYtHandoff
                 }
 
-                // 2. Plan A Fullscreen Nav Right-Edge Collapsible Media Handle (hides at upper-right above Maps compass, 1.5s auto-retract)
+                // 2. Plan A Fullscreen Nav Right-Edge Collapsible Media Handle (only update layout on visibility transition so touches are never interrupted!)
                 val showNavMedia = !isHomeFg &&
                     !sensitiveFg &&
                     cfg.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
@@ -2150,7 +2197,7 @@ class PersistentDockOverlayService :
                             navMediaCollapsed.value = true
                         }
                     }
-                    if (showNavMedia) {
+                    if (showNavMedia && !lastNavShown) {
                         val metrics = metricsFlow.value
                         val spec = CoolwalkLayoutEngine.compute(
                             metrics = metrics,
@@ -2159,21 +2206,12 @@ class PersistentDockOverlayService :
                             customPrimaryRatio = cfg.primarySplitRatio
                         )
                         val onRightEdge = spec.dockPlacement != ResolvedDockPlacement.RIGHT
-                        if (navMediaCollapsed.value) {
-                            updateNavMediaHandlePosition(
-                                onRightEdge = onRightEdge,
-                                metrics = metrics,
-                                handleHeightDp = 92,
-                                percent = cfg.navMediaHandlePositionPercent
-                            )
-                        } else {
-                            navP.gravity = (if (onRightEdge) Gravity.END else Gravity.START) or Gravity.CENTER_VERTICAL
-                            navP.x = 0
-                            navP.y = 0
-                            navP.width = WindowManager.LayoutParams.WRAP_CONTENT
-                            navP.height = WindowManager.LayoutParams.WRAP_CONTENT
-                            runCatching { windowManager.updateViewLayout(navV, navP) }
-                        }
+                        updateNavMediaHandlePosition(
+                            onRightEdge = onRightEdge,
+                            metrics = metrics,
+                            handleHeightDp = 116,
+                            percent = cfg.navMediaHandlePositionPercent
+                        )
                     }
                     lastNavShown = showNavMedia
                 }
@@ -2187,12 +2225,14 @@ class PersistentDockOverlayService :
                 app.isLauncherForeground,
                 app.notificationCenter.activeCall,
                 app.notificationCenter.popupMessage,
-                app.notificationCenter.sharedLocation
-            ) { config, isHomeFg, call, msg, sharedLoc ->
+                combine(app.notificationCenter.sharedLocation, app.ttsAnnouncer.isSpeaking) { loc, speaking ->
+                    loc to speaking
+                }
+            ) { config, isHomeFg, call, msg, (sharedLoc, isTtsSpeaking) ->
                 config.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
-                    config.globalCallMessageBannerEnabled &&
                     !isHomeFg &&
-                    (call.status != CallStatus.IDLE || msg != null || sharedLoc != null)
+                    (isTtsSpeaking || (config.globalCallMessageBannerEnabled &&
+                        (call.status != CallStatus.IDLE || msg != null || sharedLoc != null)))
             }.collect { showBanner ->
                 bannerView?.visibility = if (showBanner) View.VISIBLE else View.GONE
             }

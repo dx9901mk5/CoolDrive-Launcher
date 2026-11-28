@@ -323,6 +323,7 @@ class SplitSidePanelActivity : ComponentActivity() {
                                 onPlayPause = { app.mediaControlBridge.togglePlayPause() },
                                 onNext = { app.mediaControlBridge.skipNext() },
                                 onPrevious = { app.mediaControlBridge.skipPrevious() },
+                                onSeekTo = { app.mediaControlBridge.seekTo(it) },
                                 onToggleFavorite = { app.mediaControlBridge.toggleFavoriteOrLike() },
                                 onSelectSession = { app.mediaControlBridge.selectSession(it) },
                                 onOpenMediaApp = {
@@ -476,13 +477,20 @@ class SplitSidePanelActivity : ComponentActivity() {
                         }
                     }
 
-                    // Floating Call / Message / Shared Location Banners inside split panel
+                    // Floating Call / Message / Shared Location / TTS Cancel Banners inside split panel
                     val otherNavApps = remember { SharedLocationResolver.findInstalledOtherNavApps(this@SplitSidePanelActivity) }
+                    val isTtsSpeaking by app.ttsAnnouncer.isSpeaking.collectAsState()
+                    val ttsSpeakingLabel by app.ttsAnnouncer.speakingLabel.collectAsState()
                     Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
+                        horizontalAlignment = Alignment.Start,
                         verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.align(Alignment.TopCenter)
+                        modifier = Modifier.align(Alignment.TopStart)
                     ) {
+                        com.dxcar.launcher.ui.TtsSpeakingCancelPill(
+                            visible = isTtsSpeaking,
+                            label = ttsSpeakingLabel,
+                            onCancel = { app.ttsAnnouncer.stop() }
+                        )
                         IncomingCallBanner(
                             callState = activeCall,
                             scale = config.notificationBannerScale,

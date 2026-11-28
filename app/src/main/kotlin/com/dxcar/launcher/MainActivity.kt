@@ -212,6 +212,61 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIncomingIntent(intent: Intent?) {
+        val isShareImage = intent?.action == Intent.ACTION_SEND && intent.type?.startsWith("image/") == true
+        if (isShareImage) {
+            val imageUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent?.getParcelableExtra(Intent.EXTRA_STREAM, android.net.Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent?.getParcelableExtra(Intent.EXTRA_STREAM)
+            }
+            val caption = listOf(
+                intent?.getStringExtra(Intent.EXTRA_SUBJECT)?.trim().orEmpty(),
+                intent?.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
+            ).filter { it.isNotBlank() }.distinct().joinToString(" ").trim()
+            if (imageUri != null) {
+                val app = application as DxCarApp
+                val isPhoneRole = app.preferences.config.value.deviceRole == com.dxcar.launcher.data.DeviceRole.PHONE_COMPANION
+                if (isPhoneRole) {
+                    BluetoothCompanionService.startOrReconnect(this)
+                    android.widget.Toast.makeText(
+                        this,
+                        "🖼️ 正在傳送圖片至車機並觸發 Gemini 判讀…",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main.immediate).launch {
+                        val b64 = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            encodeSharedImageToBase64Jpeg(imageUri)
+                        }
+                        if (!b64.isNullOrBlank()) {
+                            val sent = BluetoothCompanionService.sendPacketFromPhone(
+                                com.dxcar.launcher.comms.BridgePacket(
+                                    type = com.dxcar.launcher.comms.PacketType.SHARED_IMAGE_GEMINI,
+                                    id = UUID.randomUUID().toString(),
+                                    sender = caption,
+                                    text = b64
+                                )
+                            )
+                            val msg = if (sent) {
+                                "✓ 已傳送圖片至車機並觸發 Gemini！"
+                            } else {
+                                "🖼️ 已排入傳送（連上車機立即觸發 Gemini）"
+                            }
+                            android.widget.Toast.makeText(this@MainActivity, msg, android.widget.Toast.LENGTH_LONG).show()
+                            externalHudToast.value = msg
+                            kotlinx.coroutines.delay(500L)
+                            runCatching { moveTaskToBack(true) }
+                        } else {
+                            android.widget.Toast.makeText(this@MainActivity, "⚠️ 無法讀取分享的圖片", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } else {
+                    // Already on Car -> hand image directly to Gemini on Car!
+                    BluetoothCompanionService.launchCarGeminiWithImageUri(this, imageUri, caption)
+                }
+            }
+            return
+        }
         val isShareText = intent?.action == Intent.ACTION_SEND && intent.type == "text/plain"
         val isGeoView = intent?.action == Intent.ACTION_VIEW && intent.data?.scheme.equals("geo", ignoreCase = true)
         if (isShareText || isGeoView) {
@@ -410,6 +465,37 @@ class MainActivity : ComponentActivity() {
                 externalNavCommand.value = action
             }
         }
+    }
+
+    private fun encodeSharedImageToBase64Jpeg(uri: android.net.Uri): String? {
+        return runCatching {
+            val rawBytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+            val optsBounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, optsBounds)
+            val maxSide = maxOf(optsBounds.outWidth, optsBounds.outHeight).coerceAtLeast(1)
+            var sample = 1
+            while (maxSide / sample > 1280) {
+                sample *= 2
+            }
+            val decodeOpts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+            val decoded = android.graphics.BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, decodeOpts)
+                ?: return null
+            val scale = (1024f / maxOf(decoded.width, decoded.height).coerceAtLeast(1)).coerceAtMost(1f)
+            val finalBmp = if (scale < 0.99f) {
+                android.graphics.Bitmap.createScaledBitmap(
+                    decoded,
+                    (decoded.width * scale).toInt().coerceAtLeast(1),
+                    (decoded.height * scale).toInt().coerceAtLeast(1),
+                    true
+                ).also { if (it !== decoded) decoded.recycle() }
+            } else {
+                decoded
+            }
+            val baos = java.io.ByteArrayOutputStream()
+            finalBmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 78, baos)
+            finalBmp.recycle()
+            android.util.Base64.encodeToString(baos.toByteArray(), android.util.Base64.NO_WRAP)
+        }.getOrNull()
     }
 
     private fun requestNeededRuntimePermissions() {

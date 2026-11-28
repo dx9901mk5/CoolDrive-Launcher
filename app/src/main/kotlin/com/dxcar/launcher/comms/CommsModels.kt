@@ -11,6 +11,7 @@ enum class PacketType {
     CALL_COMMAND,
     TOUCHPAD_EVENT,
     SHARED_LOCATION,
+    SHARED_IMAGE_GEMINI,
     DIAL_PHONE,
     DEVICE_INFO,
     PING,
