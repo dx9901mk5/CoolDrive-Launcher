@@ -139,6 +139,7 @@ class PersistentDockOverlayService :
     private var remoteMouseView: ComposeView? = null
     private var ytHandoffView: ComposeView? = null
     private var planBSeamView: ComposeView? = null
+    private var navMediaView: View? = null
 
     private var dockParams: WindowManager.LayoutParams? = null
     private var bannerParams: WindowManager.LayoutParams? = null
@@ -147,13 +148,21 @@ class PersistentDockOverlayService :
     private var remoteMouseParams: WindowManager.LayoutParams? = null
     private var ytHandoffParams: WindowManager.LayoutParams? = null
     private var planBSeamParams: WindowManager.LayoutParams? = null
+    private var navMediaParams: WindowManager.LayoutParams? = null
 
     private val isCollapsed = MutableStateFlow(true)
     private val isPinnedOpen = MutableStateFlow(false)
     private val planCPanelMinimized = MutableStateFlow(false)
+    private val navMediaCollapsed = MutableStateFlow(true)
+    private val navMediaInteractionTick = MutableStateFlow(0L)
     private val interactionTick = MutableStateFlow(0L)
     private val metricsFlow = MutableStateFlow(ScreenMetrics(1280, 720, 240))
     private var lastHomeForeground = true
+
+    @Volatile
+    private var navMediaLastRawX = 0f
+    @Volatile
+    private var navMediaLastRawY = 0f
 
     @Volatile
     private var lastRawX = 0f
@@ -204,6 +213,7 @@ class PersistentDockOverlayService :
         setupRemoteMouseWindow(app)
         setupYoutubeHandoffWindow(app)
         setupPlanBSeamWindow(app)
+        setupNavFullscreenMediaWindow(app)
         observeVisibilityAndLayout(app)
     }
 
@@ -245,6 +255,7 @@ class PersistentDockOverlayService :
         removeOverlaySafe(remoteMouseView)
         removeOverlaySafe(ytHandoffView)
         removeOverlaySafe(planBSeamView)
+        removeOverlaySafe(navMediaView)
         dockView = null
         bannerView = null
         planCPanelView = null
@@ -252,6 +263,7 @@ class PersistentDockOverlayService :
         remoteMouseView = null
         ytHandoffView = null
         planBSeamView = null
+        navMediaView = null
         _is3DWindowAttached.value = false
         viewModelStore.clear()
     }
@@ -493,7 +505,7 @@ class PersistentDockOverlayService :
                                         slot.packageName == "ACTION_DIAL" -> app.installedAppsRepository.launchDialer()
                                         !slot.packageName.isNullOrBlank() -> {
                                             if (isPlanB) {
-                                                launchFullscreenFromOverlay(app, slot.packageName)
+                                                launchPlanBRightPaneFromOverlay(app, slot.packageName)
                                             } else {
                                                 val ok = app.installedAppsRepository.launchAppSmart(
                                                     packageName = slot.packageName,
@@ -510,7 +522,7 @@ class PersistentDockOverlayService :
                                             val yt = app.installedAppsRepository.findBestYoutubePackage()
                                             if (yt != null) {
                                                 if (isPlanB) {
-                                                    launchFullscreenFromOverlay(app, yt)
+                                                    launchPlanBRightPaneFromOverlay(app, yt)
                                                 } else {
                                                     app.installedAppsRepository.launchAppSmart(
                                                         packageName = yt,
@@ -883,6 +895,7 @@ class PersistentDockOverlayService :
                 val sysStatus by app.systemStatusMonitor.status.collectAsState()
                 val callState by app.notificationCenter.activeCall.collectAsState()
                 val popupMessage by app.notificationCenter.popupMessage.collectAsState()
+                val sharedLocation by app.notificationCenter.sharedLocation.collectAsState()
 
                 val isNight = DayNightEngine.isNightNow(
                     config = config,
@@ -935,11 +948,48 @@ class PersistentDockOverlayService :
                             quickReplies = config.quickReplies,
                             scale = config.notificationBannerScale,
                             scaleFactorOverride = config.notificationBannerScaleFloat,
+                            rightHandDrive = config.rightHandDrive,
                             onExpandQuickReplies = { app.notificationCenter.pausePopupDismiss() },
                             onReadAloud = { app.notificationCenter.readMessageAloud(it) },
                             onQuickReply = { item, reply -> app.notificationCenter.sendQuickReply(item, reply) },
                             onMarkRead = { app.notificationCenter.markMessageRead(it) },
                             onDismiss = { app.notificationCenter.dismissPopupMessage() }
+                        )
+                        val otherNavApps = remember {
+                            com.dxcar.launcher.map.SharedLocationResolver.findInstalledOtherNavApps(this@PersistentDockOverlayService)
+                        }
+                        com.dxcar.launcher.ui.SharedLocationBanner(
+                            locationItem = sharedLocation,
+                            scale = config.notificationBannerScale,
+                            scaleFactorOverride = config.notificationBannerScaleFloat,
+                            otherNavApps = otherNavApps,
+                            onOpenBuiltInMap = { loc ->
+                                app.notificationCenter.dismissSharedLocation()
+                                val curLoc = app.locationTracker.location.value
+                                val sLat = if (curLoc.latitude != 0.0) curLoc.latitude else config.lastKnownLat
+                                val sLon = if (curLoc.longitude != 0.0) curLoc.longitude else config.lastKnownLon
+                                app.builtInNavEngine.navigateByQuery(
+                                    query = loc.address.ifBlank { loc.label },
+                                    startLat = sLat,
+                                    startLon = sLon,
+                                    explicitDestLat = loc.latitude.takeIf { it != 0.0 },
+                                    explicitDestLon = loc.longitude.takeIf { it != 0.0 }
+                                )
+                                bringDxCarToFront(MainActivity.EXTRA_GO_DASHBOARD)
+                            },
+                            onOpenGoogleMaps = { loc ->
+                                app.notificationCenter.dismissSharedLocation()
+                                com.dxcar.launcher.map.SharedLocationResolver.openInGoogleMaps(
+                                    this@PersistentDockOverlayService, loc.label, loc.address, loc.latitude, loc.longitude
+                                )
+                            },
+                            onOpenOtherMap = { loc, pkg ->
+                                app.notificationCenter.dismissSharedLocation()
+                                com.dxcar.launcher.map.SharedLocationResolver.openInOtherMapChooser(
+                                    this@PersistentDockOverlayService, pkg, loc.label, loc.address, loc.latitude, loc.longitude
+                                )
+                            },
+                            onDismiss = { app.notificationCenter.dismissSharedLocation() }
                         )
                     }
                 }
@@ -1201,6 +1251,41 @@ class PersistentDockOverlayService :
         runCatching { windowManager.addView(view, params) }
     }
 
+    private fun launchPlanBRightPaneFromOverlay(app: DxCarApp, pkg: String) {
+        if (pkg.isBlank()) return
+        planBInFullscreenApp.value = false
+        val cfg = app.preferences.config.value
+        val helperCfg = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(this)
+        val permanentDock = helperCfg.dockPinnedRightShift || cfg.launchAppsAvoidDockFreeform
+        isPinnedOpen.value = permanentDock
+        if (!permanentDock) isCollapsed.value = true
+        val m = metricsFlow.value
+        val spec = CoolwalkLayoutEngine.compute(
+            metrics = m,
+            dockMode = cfg.dockPositionMode,
+            rightHandDrive = cfg.rightHandDrive,
+            customPrimaryRatio = cfg.primarySplitRatio
+        )
+        val dockPx = (spec.dockThicknessDp * m.density).toInt().coerceAtLeast(0)
+        val ok = com.dxcar.launcher.system.RootHelperBridge.launchPlanBRightPaneApp(
+            context = this,
+            packageName = pkg,
+            screenWidth = m.widthPx,
+            screenHeight = m.heightPx,
+            dockOffsetLeft = if (spec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0,
+            dockOffsetRight = if (spec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
+            dockOffsetTop = if (spec.dockPlacement == ResolvedDockPlacement.TOP) dockPx else 0,
+            dockOffsetBottom = if (spec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0,
+            ui1Ratio = if (helperCfg.planBEnabled) helperCfg.ui1SplitRatio else cfg.primarySplitRatio,
+            ui1Swapped = cfg.page1Swapped
+        )
+        if (ok) {
+            app.installedAppsRepository.recordRecent(pkg)
+        } else {
+            launchFullscreenFromOverlay(app, pkg)
+        }
+    }
+
     private fun launchFullscreenFromOverlay(app: DxCarApp, pkg: String) {
         if (pkg.isBlank()) return
         planBInFullscreenApp.value = true
@@ -1447,21 +1532,345 @@ class PersistentDockOverlayService :
         runCatching { windowManager.addView(view, params) }
     }
 
-    private fun isYoutubeAppInForeground(): Boolean {
-        val acc = DxCarAccessibilityService.instance
-        if (acc?.isPackageInForegroundWindow("com.google.android.youtube") == true) {
-            return true
+    private fun setupNavFullscreenMediaWindow(app: DxCarApp) {
+        val composeView = ComposeView(this).apply {
+            setContent {
+                val config by app.preferences.config.collectAsState()
+                val sysStatus by app.systemStatusMonitor.status.collectAsState()
+                val media by app.mediaControlBridge.mediaState.collectAsState()
+                val weather by app.weatherRepository.weather.collectAsState()
+                val collapsed by navMediaCollapsed.collectAsState()
+                val tick by navMediaInteractionTick.collectAsState()
+                val metrics by metricsFlow.collectAsState()
+
+                // Auto-retract back to right-edge hidden tab 1.5s after opening / last interaction!
+                LaunchedEffect(collapsed, tick) {
+                    if (!collapsed) {
+                        delay(1_500L)
+                        navMediaCollapsed.value = true
+                    }
+                }
+
+                val isNight = DayNightEngine.isNightNow(
+                    config = config,
+                    now = sysStatus.now,
+                    systemIsDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+                )
+                val spec = CoolwalkLayoutEngine.compute(
+                    metrics = metrics,
+                    dockMode = config.dockPositionMode,
+                    rightHandDrive = config.rightHandDrive,
+                    customPrimaryRatio = config.primarySplitRatio
+                )
+                val onRightEdge = spec.dockPlacement != ResolvedDockPlacement.RIGHT
+
+                DxCarTheme(
+                    isNight = isNight,
+                    accentIndex = config.accentColorIndex,
+                    stylePreset = config.stylePreset
+                ) {
+                    val palette = LocalDxCarColors.current
+                    if (collapsed) {
+                        val handleThicknessDp = config.overlayHandleThicknessDp.coerceIn(18, 40)
+                        val handleHeightDp = 92
+                        val handleShape = if (onRightEdge) {
+                            RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp)
+                        } else {
+                            RoundedCornerShape(topEnd = 14.dp, bottomEnd = 14.dp)
+                        }
+                        val haptic = LocalHapticFeedback.current
+                        var isDraggingPos by remember { mutableStateOf(false) }
+
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .width(handleThicknessDp.dp)
+                                .height(handleHeightDp.dp)
+                                .clip(handleShape)
+                                .background(
+                                    if (isDraggingPos) palette.accent.copy(alpha = 0.38f)
+                                    else palette.glassOverlay.copy(alpha = 0.80f)
+                                )
+                                .border(
+                                    width = if (isDraggingPos) 2.dp else 1.2.dp,
+                                    color = palette.accent.copy(alpha = if (isDraggingPos) 0.95f else 0.70f),
+                                    shape = handleShape
+                                )
+                                .pointerInput(onRightEdge, metrics, config.navMediaHandlePositionPercent) {
+                                    val handleLenPx = handleHeightDp * metrics.density
+                                    val maxTravelPx = (metrics.heightPx - handleLenPx).coerceAtLeast(1f)
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        val downTime = System.currentTimeMillis()
+                                        val downRawX = navMediaLastRawX
+                                        val downRawY = navMediaLastRawY
+                                        val startPercent = config.navMediaHandlePositionPercent.coerceIn(0.06f, 0.88f)
+                                        var draggingPos = false
+                                        var expandedBySwipe = false
+                                        var moved = false
+                                        var latestPercent = startPercent
+
+                                        while (true) {
+                                            val event = awaitPointerEvent(PointerEventPass.Main)
+                                            val change = event.changes.firstOrNull { it.id == down.id } ?: event.changes.firstOrNull()
+                                            if (change == null) break
+                                            val dx = navMediaLastRawX - downRawX
+                                            val dy = navMediaLastRawY - downRawY
+                                            val elapsed = System.currentTimeMillis() - downTime
+
+                                            if (!draggingPos && !expandedBySwipe) {
+                                                val inwardTrigger = if (onRightEdge) {
+                                                    dx < -20f && abs(dx) > abs(dy)
+                                                } else {
+                                                    dx > 20f && abs(dx) > abs(dy)
+                                                }
+                                                if (inwardTrigger) {
+                                                    expandedBySwipe = true
+                                                    navMediaCollapsed.value = false
+                                                    navMediaInteractionTick.value++
+                                                    change.consume()
+                                                    break
+                                                }
+                                                if (elapsed >= 340L || abs(dy) > 24f) {
+                                                    draggingPos = true
+                                                    isDraggingPos = true
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                }
+                                            }
+
+                                            if (draggingPos) {
+                                                moved = true
+                                                latestPercent = (startPercent + dy / maxTravelPx).coerceIn(0.06f, 0.88f)
+                                                updateNavMediaHandlePosition(onRightEdge, metrics, handleHeightDp, latestPercent)
+                                                change.consume()
+                                            }
+                                            if (change.changedToUpIgnoreConsumed()) {
+                                                change.consume()
+                                                break
+                                            }
+                                        }
+                                        isDraggingPos = false
+                                        if (draggingPos && moved) {
+                                            app.preferences.update { it.copy(navMediaHandlePositionPercent = latestPercent) }
+                                        } else if (!expandedBySwipe && !draggingPos) {
+                                            navMediaCollapsed.value = false
+                                            navMediaInteractionTick.value++
+                                        }
+                                    }
+                                }
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.MusicNote,
+                                    contentDescription = "音樂快控",
+                                    tint = palette.accent,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .width((handleThicknessDp * 0.22f).coerceIn(4f, 6f).dp)
+                                        .height(34.dp)
+                                        .clip(CircleShape)
+                                        .background(palette.accent.copy(alpha = 0.92f))
+                                )
+                            }
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .width(310.dp)
+                                .height(340.dp)
+                                .pointerInput(Unit) {
+                                    awaitPointerEventScope {
+                                        while (true) {
+                                            awaitPointerEvent(PointerEventPass.Initial)
+                                            navMediaInteractionTick.value++
+                                        }
+                                    }
+                                }
+                        ) {
+                            Surface(
+                                color = palette.cardSurface.copy(alpha = 0.96f),
+                                shape = RoundedCornerShape(22.dp),
+                                shadowElevation = 14.dp,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(6.dp)
+                                    .border(1.5.dp, palette.accent.copy(alpha = 0.75f), RoundedCornerShape(22.dp))
+                            ) {
+                                Column(modifier = Modifier.fillMaxSize()) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(palette.cardSurfaceElevated)
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Surface(
+                                            color = palette.accent,
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.bouncyClickable {
+                                                navMediaCollapsed.value = true
+                                                bringDxCarToFront(MainActivity.EXTRA_GO_DASHBOARD)
+                                            }
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(Icons.Rounded.Home, contentDescription = null, tint = palette.onAccent, modifier = Modifier.size(14.dp))
+                                                Spacer(Modifier.width(4.dp))
+                                                Text("回首頁", color = palette.onAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                        Surface(
+                                            color = palette.cardSurface,
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.bouncyClickable { navMediaCollapsed.value = true }
+                                        ) {
+                                            Text(
+                                                text = "收合",
+                                                color = palette.secondaryText,
+                                                fontSize = 11.sp,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                    }
+                                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                        MediaControlCard(
+                                            media = media,
+                                            weather = weather,
+                                            isPrimary = false,
+                                            pureMusicMode = true,
+                                            showSwapButton = false,
+                                            showSixShortcuts = false,
+                                            onWeatherClick = {
+                                                navMediaCollapsed.value = true
+                                                app.weatherRepository.openGoogleWeatherApp(
+                                                    this@PersistentDockOverlayService,
+                                                    config.weatherAppPackage
+                                                )
+                                            },
+                                            onPlayPause = {
+                                                navMediaInteractionTick.value++
+                                                app.mediaControlBridge.togglePlayPause()
+                                            },
+                                            onNext = {
+                                                navMediaInteractionTick.value++
+                                                app.mediaControlBridge.skipNext()
+                                            },
+                                            onPrevious = {
+                                                navMediaInteractionTick.value++
+                                                app.mediaControlBridge.skipPrevious()
+                                            },
+                                            onToggleFavorite = {
+                                                navMediaInteractionTick.value++
+                                                app.mediaControlBridge.toggleFavoriteOrLike()
+                                            },
+                                            onSelectSession = {
+                                                navMediaInteractionTick.value++
+                                                app.mediaControlBridge.selectSession(it)
+                                            },
+                                            onOpenMediaApp = {
+                                                navMediaCollapsed.value = true
+                                                if (media.packageName.isNotBlank()) {
+                                                    app.installedAppsRepository.launchAppFullscreen(media.packageName)
+                                                }
+                                            },
+                                            onSwapRequested = {}
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
-        val fgAcc = DxCarAccessibilityService.foregroundPackage.value
-        if (fgAcc.startsWith("com.google.android.youtube")) {
-            return true
+
+        val container = object : FrameLayout(this) {
+            override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
+                if (ev != null) {
+                    navMediaLastRawX = ev.rawX
+                    navMediaLastRawY = ev.rawY
+                }
+                return super.dispatchTouchEvent(ev)
+            }
+        }.apply {
+            setViewTreeLifecycleOwner(this@PersistentDockOverlayService)
+            setViewTreeSavedStateRegistryOwner(this@PersistentDockOverlayService)
+            setViewTreeViewModelStoreOwner(this@PersistentDockOverlayService)
+            addView(composeView)
         }
-        // Fallback via UsageStatsManager when Accessibility Service is not active or missed an event
+
+        val params = createOverlayParams(
+            width = WindowManager.LayoutParams.WRAP_CONTENT,
+            height = WindowManager.LayoutParams.WRAP_CONTENT,
+            gravity = Gravity.END or Gravity.TOP
+        )
+        navMediaView = container
+        navMediaParams = params
+        container.visibility = View.GONE
+        runCatching { windowManager.addView(container, params) }
+    }
+
+    private fun updateNavMediaHandlePosition(
+        onRightEdge: Boolean,
+        metrics: ScreenMetrics,
+        handleHeightDp: Int,
+        percent: Float
+    ) {
+        val view = navMediaView ?: return
+        val params = navMediaParams ?: return
+        val handleLenPx = (handleHeightDp * metrics.density).toInt()
+        val maxY = (metrics.heightPx - handleLenPx).coerceAtLeast(0)
+        params.gravity = (if (onRightEdge) Gravity.END else Gravity.START) or Gravity.TOP
+        params.x = 0
+        params.y = (maxY * percent.coerceIn(0.06f, 0.88f)).toInt()
+        params.width = WindowManager.LayoutParams.WRAP_CONTENT
+        params.height = WindowManager.LayoutParams.WRAP_CONTENT
+        runCatching { windowManager.updateViewLayout(view, params) }
+    }
+
+    private fun isNavAppInForeground(): Boolean {
+        val navPkgs = setOf(
+            "com.google.android.apps.maps",
+            "com.kingwaytek.naviking3d",
+            "com.kingwaytek.naviking",
+            "com.kingwaytek.naviking.n5",
+            "com.papago.s1OBU",
+            "com.papago.M11_Taiwan",
+            "com.waze",
+            "com.sygic.aura",
+            "com.here.app.maps",
+            "net.osmand",
+            "net.osmand.plus",
+            "com.autonavi.minimap",
+            "com.baidu.BaiduMap",
+            "com.polstar.polnav.mobile"
+        )
+        val fgPkg = resolveStrictForegroundPackage()
+        if (fgPkg.isBlank()) return false
+        return navPkgs.contains(fgPkg) ||
+            fgPkg.contains("naviking", ignoreCase = true) ||
+            fgPkg.contains("papago", ignoreCase = true) ||
+            fgPkg.contains("garmin", ignoreCase = true)
+    }
+
+    private fun resolveStrictForegroundPackage(): String {
+        val fgAcc = DxCarAccessibilityService.foregroundPackage.value.trim()
+        if (DxCarAccessibilityService.isConnected.value && fgAcc.isNotBlank() && fgAcc != "com.android.systemui") {
+            return fgAcc
+        }
         return runCatching {
-            val usm = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return@runCatching false
+            val usm = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return@runCatching fgAcc
             val end = System.currentTimeMillis()
-            val begin = end - 30_000L
-            val events = usm.queryEvents(begin, end) ?: return@runCatching false
+            val begin = end - 12_000L
+            val events = usm.queryEvents(begin, end) ?: return@runCatching fgAcc
             val evt = UsageEvents.Event()
             var latestPkg = ""
             var latestTs = 0L
@@ -1470,13 +1879,22 @@ class PersistentDockOverlayService :
                 @Suppress("DEPRECATION")
                 val isResumed = evt.eventType == UsageEvents.Event.ACTIVITY_RESUMED ||
                     evt.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND
-                if (isResumed && evt.timeStamp >= latestTs && !evt.packageName.isNullOrBlank()) {
+                if (isResumed && evt.timeStamp >= latestTs && !evt.packageName.isNullOrBlank() && evt.packageName != "com.android.systemui") {
                     latestTs = evt.timeStamp
                     latestPkg = evt.packageName
                 }
             }
-            latestPkg.startsWith("com.google.android.youtube")
-        }.getOrDefault(false)
+            latestPkg.ifBlank { fgAcc }
+        }.getOrDefault(fgAcc)
+    }
+
+    private fun isYoutubeAppInForeground(): Boolean {
+        val fg = resolveStrictForegroundPackage()
+        if (fg.isBlank()) return false
+        // Strictly match ONLY the YouTube video app (never Google Maps, YouTube Music, or any other fullscreen app!)
+        return fg == "com.google.android.youtube" ||
+            fg == "com.google.android.youtube.tv" ||
+            fg == "app.revanced.android.youtube"
     }
 
     private fun handoffFromYoutubeAppToPage2() {
@@ -1553,7 +1971,7 @@ class PersistentDockOverlayService :
                     com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(this@PersistentDockOverlayService)
                 } else null
                 val keepPlanBDockPermanent = isPlanBMode && (helperCfgForDock?.dockPinnedRightShift == true || config.launchAppsAvoidDockFreeform)
-                if (isPlanBMode && (!planBInFullscreenApp.value || keepPlanBDockPermanent)) {
+                if (keepPlanBDockPermanent) {
                     isPinnedOpen.value = true
                     isCollapsed.value = false
                 } else if (lastHomeForeground && !isHomeFg) {
@@ -1681,9 +2099,10 @@ class PersistentDockOverlayService :
             }
         }
 
-        // Observe YouTube App Foreground -> keep tiny top-left YouTube handoff button reliably visible
+        // Observe YouTube App Foreground (strictly YouTube only!) & Plan A Fullscreen Nav Right-Edge Media Handle
         lifecycleScope.launch {
             var lastShown = false
+            var lastNavShown = false
             while (true) {
                 val cfg = app.preferences.config.value
                 val isHomeFg = app.isLauncherForeground.value
@@ -1691,11 +2110,15 @@ class PersistentDockOverlayService :
                 val sensitiveFg = curFg == "com.topjohnwu.magisk" ||
                     curFg.contains("packageinstaller", ignoreCase = true) ||
                     curFg.contains("permissioncontroller", ignoreCase = true)
+                val isPlanA = cfg.homeExperimentMode != HomeExperimentMode.PLAN_D_ROOT_RESERVED
+
+                // 1. YouTube Handoff button -> STRICTLY only inside YouTube App when Plan A Page 2 is enabled!
                 val showYtHandoff = !isHomeFg &&
                     !sensitiveFg &&
                     cfg.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
-                    cfg.homeExperimentMode != HomeExperimentMode.PLAN_D_ROOT_RESERVED &&
-                    (cfg.ytHandoffAlwaysVisible || isYoutubeAppInForeground())
+                    isPlanA &&
+                    cfg.planAPage2Enabled &&
+                    isYoutubeAppInForeground()
                 val view = ytHandoffView
                 if (view != null) {
                     val targetVis = if (showYtHandoff) View.VISIBLE else View.GONE
@@ -1709,7 +2132,52 @@ class PersistentDockOverlayService :
                     }
                     lastShown = showYtHandoff
                 }
-                delay(650L)
+
+                // 2. Plan A Fullscreen Nav Right-Edge Collapsible Media Handle (hides at upper-right above Maps compass, 1.5s auto-retract)
+                val showNavMedia = !isHomeFg &&
+                    !sensitiveFg &&
+                    cfg.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
+                    isPlanA &&
+                    cfg.navFullscreenMediaHandleEnabled &&
+                    isNavAppInForeground()
+                val navV = navMediaView
+                val navP = navMediaParams
+                if (navV != null && navP != null) {
+                    val targetNavVis = if (showNavMedia) View.VISIBLE else View.GONE
+                    if (navV.visibility != targetNavVis) {
+                        navV.visibility = targetNavVis
+                        if (!showNavMedia) {
+                            navMediaCollapsed.value = true
+                        }
+                    }
+                    if (showNavMedia) {
+                        val metrics = metricsFlow.value
+                        val spec = CoolwalkLayoutEngine.compute(
+                            metrics = metrics,
+                            dockMode = cfg.dockPositionMode,
+                            rightHandDrive = cfg.rightHandDrive,
+                            customPrimaryRatio = cfg.primarySplitRatio
+                        )
+                        val onRightEdge = spec.dockPlacement != ResolvedDockPlacement.RIGHT
+                        if (navMediaCollapsed.value) {
+                            updateNavMediaHandlePosition(
+                                onRightEdge = onRightEdge,
+                                metrics = metrics,
+                                handleHeightDp = 92,
+                                percent = cfg.navMediaHandlePositionPercent
+                            )
+                        } else {
+                            navP.gravity = (if (onRightEdge) Gravity.END else Gravity.START) or Gravity.CENTER_VERTICAL
+                            navP.x = 0
+                            navP.y = 0
+                            navP.width = WindowManager.LayoutParams.WRAP_CONTENT
+                            navP.height = WindowManager.LayoutParams.WRAP_CONTENT
+                            runCatching { windowManager.updateViewLayout(navV, navP) }
+                        }
+                    }
+                    lastNavShown = showNavMedia
+                }
+                delay(450L)
             }
         }
 
@@ -1718,12 +2186,13 @@ class PersistentDockOverlayService :
                 app.preferences.config,
                 app.isLauncherForeground,
                 app.notificationCenter.activeCall,
-                app.notificationCenter.popupMessage
-            ) { config, isHomeFg, call, msg ->
+                app.notificationCenter.popupMessage,
+                app.notificationCenter.sharedLocation
+            ) { config, isHomeFg, call, msg, sharedLoc ->
                 config.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
                     config.globalCallMessageBannerEnabled &&
                     !isHomeFg &&
-                    (call.status != CallStatus.IDLE || msg != null)
+                    (call.status != CallStatus.IDLE || msg != null || sharedLoc != null)
             }.collect { showBanner ->
                 bannerView?.visibility = if (showBanner) View.VISIBLE else View.GONE
             }
@@ -1750,13 +2219,13 @@ class PersistentDockOverlayService :
                     fgPkg.contains("packageinstaller", ignoreCase = true) ||
                     fgPkg.contains("permissioncontroller", ignoreCase = true)
                 val isPlanB = config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED
+                // In Plan B, UI 1 Right 30% is now a genuine Split App Activity (SplitSidePanelActivity) —
+                // never draw a conflicting floating planCPanelView overlay over it!
                 val showPlanCPanel = !isHomeFg &&
                     !sensitiveFg &&
+                    !isPlanB &&
                     config.deviceRole == DeviceRole.AI_BOX_LAUNCHER &&
-                    (
-                        (requested && config.homeExperimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA && config.planCOverlayMusicPanelEnabled) ||
-                            (isPlanB && !inPlanBFullscreen && activePlanBPage == 1)
-                        )
+                    requested && config.homeExperimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA && config.planCOverlayMusicPanelEnabled
 
                 val spec = CoolwalkLayoutEngine.compute(
                     metrics = metrics,

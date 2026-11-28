@@ -30,7 +30,12 @@ class CarNotificationCenter(
     private val _activeNavigation = MutableStateFlow<ActiveNavBanner?>(null)
     val activeNavigation: StateFlow<ActiveNavBanner?> = _activeNavigation.asStateFlow()
 
+    private val _sharedLocation = MutableStateFlow<SharedLocationItem?>(null)
+    val sharedLocation: StateFlow<SharedLocationItem?> = _sharedLocation.asStateFlow()
+
     private var popupDismissJob: Job? = null
+    private var sharedLocationDismissJob: Job? = null
+    private var ringingWatchdogJob: Job? = null
 
     /** Callback set by BluetoothCompanionService / BoxNotificationListenerService for remote replies */
     var onReplyDispatch: ((CarMessageItem, String) -> Boolean)? = null
@@ -144,8 +149,20 @@ class CarNotificationCenter(
     fun updateCallState(state: CarCallState) {
         val current = _activeCall.value
         if (state.status == CallStatus.IDLE) {
+            ringingWatchdogJob?.cancel()
             _activeCall.value = CarCallState(status = CallStatus.IDLE)
             return
+        }
+        if (state.status == CallStatus.RINGING) {
+            ringingWatchdogJob?.cancel()
+            ringingWatchdogJob = scope.launch {
+                delay(45_000L)
+                if (_activeCall.value.status == CallStatus.RINGING) {
+                    _activeCall.value = CarCallState(status = CallStatus.IDLE)
+                }
+            }
+        } else {
+            ringingWatchdogJob?.cancel()
         }
         val startedAt = when {
             state.status == CallStatus.ACTIVE && current.status != CallStatus.ACTIVE ->
@@ -246,6 +263,29 @@ class CarNotificationCenter(
 
     fun updateActiveNavigation(banner: ActiveNavBanner?) {
         _activeNavigation.value = banner
+    }
+
+    fun clearPhoneBridgeCall() {
+        if (_activeCall.value.fromPhoneBridge && _activeCall.value.status != CallStatus.IDLE) {
+            ringingWatchdogJob?.cancel()
+            _activeCall.value = CarCallState(status = CallStatus.IDLE)
+        }
+    }
+
+    fun postSharedLocation(item: SharedLocationItem) {
+        _sharedLocation.value = item
+        sharedLocationDismissJob?.cancel()
+        sharedLocationDismissJob = scope.launch {
+            delay(30_000L)
+            if (_sharedLocation.value?.id == item.id) {
+                _sharedLocation.value = null
+            }
+        }
+    }
+
+    fun dismissSharedLocation() {
+        sharedLocationDismissJob?.cancel()
+        _sharedLocation.value = null
     }
 
     fun triggerSimulatedCall() {

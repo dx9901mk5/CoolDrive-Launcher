@@ -10,6 +10,8 @@ enum class PacketType {
     MARK_READ_COMMAND,
     CALL_COMMAND,
     TOUCHPAD_EVENT,
+    SHARED_LOCATION,
+    DIAL_PHONE,
     DEVICE_INFO,
     PING,
     PONG
@@ -67,7 +69,18 @@ data class BridgePacket(
     val touchDy: Float = 0f,
     val canReply: Boolean = false,
     val timestampMs: Long = System.currentTimeMillis(),
-    val deviceName: String = ""
+    val deviceName: String = "",
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0
+)
+
+data class SharedLocationItem(
+    val id: String,
+    val label: String,
+    val address: String,
+    val latitude: Double,
+    val longitude: Double,
+    val timestampMs: Long = System.currentTimeMillis()
 )
 
 data class CarMessageItem(

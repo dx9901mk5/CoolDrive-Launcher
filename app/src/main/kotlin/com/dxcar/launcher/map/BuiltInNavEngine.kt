@@ -35,14 +35,24 @@ data class NavRoutePoint(
     val longitude: Double
 )
 
+data class NavLaneGuide(
+    val indications: List<String>,
+    val valid: Boolean
+)
+
 data class NavRouteStep(
     val instructionZh: String,
     val roadName: String,
     val maneuverLat: Double,
     val maneuverLon: Double,
     val distanceMeters: Double,
+    val durationSeconds: Double = 0.0,
     val maneuverType: String,
-    val modifier: String
+    val modifier: String,
+    val lanes: List<NavLaneGuide> = emptyList(),
+    val destinations: String = "",
+    val exits: String = "",
+    val isHighwayManeuver: Boolean = false
 )
 
 data class BuiltInNavState(
@@ -58,6 +68,12 @@ data class BuiltInNavState(
     val steps: List<NavRouteStep> = emptyList(),
     val currentStepIndex: Int = 0,
     val currentInstructionZh: String = "",
+    val nextStepInstructionZh: String = "",
+    val upcomingLanes: List<NavLaneGuide> = emptyList(),
+    val upcomingExitLabel: String = "",
+    val isHighwayEarlyAlert: Boolean = false,
+    val avoidEcoDetourFastest: Boolean = true,
+    val preferShortestDistance: Boolean = false,
     val distanceToNextTurnMeters: Int = 0,
     val remainingDistanceMeters: Int = 0,
     val remainingDurationSeconds: Int = 0
@@ -510,6 +526,49 @@ class BuiltInNavEngine(
         return out
     }
 
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun resolveFreshestStartCoords(fallbackLat: Double, fallbackLon: Double): Pair<Double, Double> {
+        // 1. Live LocationTracker real fix takes highest priority
+        val live = com.dxcar.launcher.DxCarApp.instance?.locationTracker?.location?.value
+        if (live != null && live.hasRealFix && live.latitude != 0.0 && live.longitude != 0.0) {
+            return live.latitude to live.longitude
+        }
+        // 2. Direct Android LocationManager last known fix across GPS / Network / Passive
+        val ctx = appContext ?: com.dxcar.launcher.DxCarApp.instance
+        if (ctx != null) {
+            val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
+            if (lm != null) {
+                var best: Location? = null
+                for (p in listOf(
+                    android.location.LocationManager.GPS_PROVIDER,
+                    android.location.LocationManager.NETWORK_PROVIDER,
+                    android.location.LocationManager.PASSIVE_PROVIDER
+                )) {
+                    val loc = runCatching { lm.getLastKnownLocation(p) }.getOrNull()
+                    if (loc != null && (best == null || loc.time > best.time)) {
+                        best = loc
+                    }
+                }
+                if (best != null && best.latitude != 0.0 && best.longitude != 0.0) {
+                    return best.latitude to best.longitude
+                }
+            }
+        }
+        return fallbackLat to fallbackLon
+    }
+
+    fun toggleRoutePreferenceAndReroute(preferShortest: Boolean) {
+        val cur = _state.value
+        _state.value = cur.copy(
+            preferShortestDistance = preferShortest,
+            avoidEcoDetourFastest = !preferShortest
+        )
+        if (cur.isNavigating && cur.destinationLat != 0.0 && cur.destinationLon != 0.0) {
+            val (lat, lon) = resolveFreshestStartCoords(25.0330, 121.5654)
+            startNavigation(lat, lon, cur.destinationName, cur.destinationLat, cur.destinationLon)
+        }
+    }
+
     fun startNavigation(
         startLat: Double,
         startLon: Double,
@@ -518,20 +577,22 @@ class BuiltInNavEngine(
         destLon: Double
     ) {
         scope.launch {
+            val (effStartLat, effStartLon) = resolveFreshestStartCoords(startLat, startLon)
+            val preferShortest = _state.value.preferShortestDistance
             _state.value = _state.value.copy(isRouting = true, errorMessage = "")
             val routeResult = withContext(Dispatchers.IO) {
                 runCatching {
                     val url = "https://router.project-osrm.org/route/v1/driving/" +
-                        "$startLon,$startLat;$destLon,$destLat" +
-                        "?overview=full&geometries=geojson&steps=true"
+                        "$effStartLon,$effStartLat;$destLon,$destLat" +
+                        "?overview=full&geometries=geojson&steps=true&alternatives=true"
                     val req = Request.Builder()
                         .url(url)
-                        .header("User-Agent", "DX-Car-Launcher/1.4")
+                        .header("User-Agent", "DX-Car-Launcher/1.9")
                         .build()
                     httpClient.newCall(req).execute().use { resp ->
                         if (!resp.isSuccessful) error("HTTP ${resp.code}")
                         val body = resp.body?.string().orEmpty()
-                        parseOsrmRoute(body, destName)
+                        parseOsrmRoute(body, destName, preferShortest = preferShortest)
                     }
                 }
             }
@@ -539,8 +600,12 @@ class BuiltInNavEngine(
             routeResult.onSuccess { parsed ->
                 lastAnnouncedStepKey = ""
                 val firstStep = parsed.steps.firstOrNull()
-                val totalDist = parsed.totalDistanceMeters.roundToInt()
-                val totalDur = parsed.totalDurationSeconds.roundToInt()
+                val upcomingStep = parsed.steps.getOrNull(1) ?: firstStep
+                val afterStep = parsed.steps.getOrNull(2)
+                val totalDist = parsed.totalDistanceMeters.roundToInt().coerceAtLeast(1)
+                val totalDur = parsed.totalDurationSeconds.roundToInt().coerceAtLeast(30)
+                val initDistToTurn = firstStep?.distanceMeters?.roundToInt() ?: totalDist
+                val initExitLabel = buildExitLabel(upcomingStep)
                 _state.value = _state.value.copy(
                     isRouting = false,
                     isNavigating = true,
@@ -551,13 +616,18 @@ class BuiltInNavEngine(
                     routePoints = parsed.points,
                     steps = parsed.steps,
                     currentStepIndex = 0,
-                    currentInstructionZh = firstStep?.instructionZh ?: "前往 $destName",
-                    distanceToNextTurnMeters = firstStep?.distanceMeters?.roundToInt() ?: totalDist,
+                    currentInstructionZh = upcomingStep?.instructionZh ?: "前往 $destName",
+                    nextStepInstructionZh = afterStep?.instructionZh.orEmpty(),
+                    upcomingLanes = upcomingStep?.lanes.orEmpty(),
+                    upcomingExitLabel = initExitLabel,
+                    isHighwayEarlyAlert = upcomingStep?.isHighwayManeuver == true && initDistToTurn <= 2200,
+                    distanceToNextTurnMeters = initDistToTurn,
                     remainingDistanceMeters = totalDist,
                     remainingDurationSeconds = totalDur
                 )
                 val minText = (totalDur / 60).coerceAtLeast(1)
-                ttsAnnouncer?.speak("開始導航前往 $destName，全程約 ${formatDistanceSpeech(totalDist)}，預計 $minText 分鐘")
+                val modeTag = if (preferShortest) "最短距離" else "最快路線"
+                ttsAnnouncer?.speak("已為您規劃$modeTag 前往 $destName，全程約 ${formatDistanceSpeech(totalDist)}，預計 $minText 分鐘")
             }.onFailure { err ->
                 _state.value = _state.value.copy(
                     isRouting = false,
@@ -569,7 +639,10 @@ class BuiltInNavEngine(
 
     fun stopNavigation() {
         lastAnnouncedStepKey = ""
-        _state.value = BuiltInNavState()
+        _state.value = BuiltInNavState(
+            avoidEcoDetourFastest = _state.value.avoidEcoDetourFastest,
+            preferShortestDistance = _state.value.preferShortestDistance
+        )
     }
 
     fun clearSearchError() {
@@ -581,70 +654,160 @@ class BuiltInNavEngine(
         if (!current.isNavigating || current.steps.isEmpty()) return
 
         val destDist = distanceMeters(lat, lon, current.destinationLat, current.destinationLon)
-        if (destDist < 35.0) {
+        if (destDist < 38.0) {
             ttsAnnouncer?.speak("已抵達目的地，${current.destinationName}")
             stopNavigation()
             return
         }
 
-        // Advance step index when vehicle approaches the upcoming maneuver point
+        // Advance step index robustly (even if vehicle passed an intermediate turn slightly fast)
         var idx = current.currentStepIndex.coerceIn(0, current.steps.lastIndex)
         while (idx < current.steps.lastIndex) {
             val nextManeuver = current.steps[idx + 1]
             val dNext = distanceMeters(lat, lon, nextManeuver.maneuverLat, nextManeuver.maneuverLon)
-            if (dNext < 28.0) {
+            if (dNext < 35.0) {
                 idx++
+            } else if (idx + 2 <= current.steps.lastIndex) {
+                val afterManeuver = current.steps[idx + 2]
+                val dAfter = distanceMeters(lat, lon, afterManeuver.maneuverLat, afterManeuver.maneuverLon)
+                if (dAfter < dNext && dAfter < 90.0) {
+                    idx++
+                } else {
+                    break
+                }
             } else {
                 break
             }
         }
 
+        val currentLegStep = current.steps[idx]
         val targetStep = if (idx + 1 <= current.steps.lastIndex) current.steps[idx + 1] else current.steps[idx]
+        val afterTargetStep = if (idx + 2 <= current.steps.lastIndex) current.steps[idx + 2] else null
         val distToTurn = distanceMeters(lat, lon, targetStep.maneuverLat, targetStep.maneuverLon).roundToInt()
 
-        var remainDist = distToTurn
-        for (i in (idx + 1)..current.steps.lastIndex) {
-            remainDist += current.steps[i].distanceMeters.roundToInt()
-        }
-        val ratio = if (current.remainingDistanceMeters > 0) {
-            (remainDist.toFloat() / current.remainingDistanceMeters.toFloat()).coerceIn(0.1f, 1.5f)
-        } else 1f
-        val remainSec = (current.remainingDurationSeconds * ratio).roundToInt().coerceAtLeast(30)
+        // Deterministic distance & ETA computation directly from step durations (ZERO compounding drift!)
+        val segTotalDist = currentLegStep.distanceMeters.coerceAtLeast(1.0)
+        val segTotalDur = currentLegStep.durationSeconds.coerceAtLeast(1.0)
+        val clampedCurDist = distToTurn.toDouble().coerceAtMost(segTotalDist * 1.15)
+        val curSegRemainDur = (clampedCurDist / segTotalDist).coerceIn(0.0, 1.2) * segTotalDur
 
-        // Voice announcements at 250m and 50m before next maneuver
-        val voiceBand = when {
-            distToTurn in 180..270 -> "250"
-            distToTurn in 15..65 -> "50"
-            else -> ""
+        var remainDistD = clampedCurDist
+        var remainDurD = curSegRemainDur
+        for (i in (idx + 1)..current.steps.lastIndex) {
+            remainDistD += current.steps[i].distanceMeters
+            remainDurD += current.steps[i].durationSeconds
+        }
+        val remainDist = remainDistD.roundToInt().coerceAtLeast(distToTurn)
+        val remainSec = remainDurD.roundToInt().coerceAtLeast(20)
+
+        val isHighwayTarget = targetStep.isHighwayManeuver || currentLegStep.isHighwayManeuver
+        val showHighwayEarlyAlert = isHighwayTarget && distToTurn <= 2200
+
+        // Early highway interchange / exit voice prompts (2km, 1km, 500m, 150m) + city prompts (300m, 60m)
+        val voiceBand = if (isHighwayTarget) {
+            when {
+                distToTurn in 1800..2150 -> "2000"
+                distToTurn in 880..1120 -> "1000"
+                distToTurn in 420..580 -> "500"
+                distToTurn in 80..180 -> "150"
+                else -> ""
+            }
+        } else {
+            when {
+                distToTurn in 230..330 -> "300"
+                distToTurn in 20..75 -> "60"
+                else -> ""
+            }
         }
         if (voiceBand.isNotEmpty()) {
             val key = "${idx}_$voiceBand"
             if (key != lastAnnouncedStepKey) {
                 lastAnnouncedStepKey = key
-                val spokenDist = if (voiceBand == "250") "前方兩百公尺" else "前方五十公尺"
-                ttsAnnouncer?.speak("$spokenDist，${targetStep.instructionZh}")
+                val spokenDist = when (voiceBand) {
+                    "2000" -> "前方兩公里請留意車道"
+                    "1000" -> "前方一公里請提前變換車道"
+                    "500" -> "前方五百公尺準備"
+                    "300" -> "前方三百公尺"
+                    "150" -> "前方一百五十公尺"
+                    else -> "前方五十公尺"
+                }
+                val laneHint = buildSpokenLaneHint(targetStep)
+                ttsAnnouncer?.speak("$spokenDist，${targetStep.instructionZh}$laneHint")
             }
         }
 
-        // Off-route check against nearest route point (> 110m off-route -> reroute, throttled to 18s)
+        // Off-route check against nearest route point (> 110m off-route -> reroute from current GPS, throttled 15s)
         val minRouteDist = current.routePoints.minOfOrNull { pt ->
             distanceMeters(lat, lon, pt.latitude, pt.longitude)
         } ?: 0.0
         val now = System.currentTimeMillis()
-        if (minRouteDist > 110.0 && now - lastRerouteTimeMs > 18_000L && !current.isRouting) {
+        if (minRouteDist > 110.0 && now - lastRerouteTimeMs > 15_000L && !current.isRouting) {
             lastRerouteTimeMs = now
-            ttsAnnouncer?.speak("已偏離路線，正在重新規劃")
+            ttsAnnouncer?.speak("已偏離路線，正在依目前位置重新規劃最短路線")
             startNavigation(lat, lon, current.destinationName, current.destinationLat, current.destinationLon)
             return
+        }
+
+        val showLanesNow = if (isHighwayTarget) distToTurn <= 2200 else distToTurn <= 650
+        val effectiveLanes = if (showLanesNow) {
+            targetStep.lanes.ifEmpty { synthesizeFallbackLanes(targetStep.maneuverType, targetStep.modifier) }
+        } else {
+            emptyList()
         }
 
         _state.value = current.copy(
             currentStepIndex = idx,
             currentInstructionZh = targetStep.instructionZh,
+            nextStepInstructionZh = afterTargetStep?.instructionZh.orEmpty(),
+            upcomingLanes = effectiveLanes,
+            upcomingExitLabel = buildExitLabel(targetStep),
+            isHighwayEarlyAlert = showHighwayEarlyAlert,
             distanceToNextTurnMeters = distToTurn,
             remainingDistanceMeters = remainDist,
             remainingDurationSeconds = remainSec
         )
+    }
+
+    private fun buildExitLabel(step: NavRouteStep?): String {
+        if (step == null) return ""
+        val parts = mutableListOf<String>()
+        if (step.exits.isNotBlank()) parts += "出口 ${step.exits}"
+        if (step.destinations.isNotBlank()) parts += step.destinations
+        return parts.joinToString(" · ").take(36)
+    }
+
+    private fun buildSpokenLaneHint(step: NavRouteStep): String {
+        val valid = step.lanes.filter { it.valid }
+        if (valid.isEmpty()) return ""
+        val dirs = valid.flatMap { it.indications }.distinct()
+        return when {
+            dirs.any { it.contains("right") } && step.isHighwayManeuver -> "，請靠右側車道行駛"
+            dirs.any { it.contains("left") } && step.isHighwayManeuver -> "，請靠左側車道行駛"
+            else -> ""
+        }
+    }
+
+    private fun synthesizeFallbackLanes(maneuverType: String, modifier: String): List<NavLaneGuide> {
+        val m = modifier.lowercase()
+        val isExitOrTurn = maneuverType in setOf("off ramp", "fork", "merge", "on ramp", "turn", "end of road")
+        if (!isExitOrTurn) return emptyList()
+        return when {
+            m.contains("right") -> listOf(
+                NavLaneGuide(listOf("straight"), valid = false),
+                NavLaneGuide(listOf("straight"), valid = false),
+                NavLaneGuide(listOf(if (m.contains("slight")) "slight right" else "right"), valid = true)
+            )
+            m.contains("left") -> listOf(
+                NavLaneGuide(listOf(if (m.contains("slight")) "slight left" else "left"), valid = true),
+                NavLaneGuide(listOf("straight"), valid = false),
+                NavLaneGuide(listOf("straight"), valid = false)
+            )
+            m == "uturn" -> listOf(
+                NavLaneGuide(listOf("uturn"), valid = true),
+                NavLaneGuide(listOf("straight"), valid = false)
+            )
+            else -> emptyList()
+        }
     }
 
     private fun parsePhotonResults(jsonStr: String): List<NavSearchResult> {
@@ -686,11 +849,30 @@ class BuiltInNavEngine(
         val totalDurationSeconds: Double
     )
 
-    private fun parseOsrmRoute(jsonStr: String, destName: String): ParsedOsrmRoute {
+    private fun parseOsrmRoute(jsonStr: String, destName: String, preferShortest: Boolean = false): ParsedOsrmRoute {
         val root = JSONObject(jsonStr)
         val routes = root.optJSONArray("routes") ?: error("無可用路線")
         if (routes.length() == 0) error("無可用路線")
-        val route = routes.getJSONObject(0)
+
+        // Compare all candidate routes from alternatives=true and select strictly fastest (avoid eco-detour) or shortest distance!
+        var bestRoute = routes.getJSONObject(0)
+        for (rIdx in 1 until routes.length()) {
+            val cand = routes.getJSONObject(rIdx)
+            val bestDist = bestRoute.optDouble("distance", Double.MAX_VALUE)
+            val bestDur = bestRoute.optDouble("duration", Double.MAX_VALUE)
+            val candDist = cand.optDouble("distance", Double.MAX_VALUE)
+            val candDur = cand.optDouble("duration", Double.MAX_VALUE)
+            val isBetter = if (preferShortest) {
+                candDist < bestDist
+            } else {
+                candDur < bestDur * 0.98 || (candDur <= bestDur * 1.03 && candDist < bestDist)
+            }
+            if (isBetter) {
+                bestRoute = cand
+            }
+        }
+
+        val route = bestRoute
         val totalDist = route.optDouble("distance", 0.0)
         val totalDur = route.optDouble("duration", 0.0)
 
@@ -710,21 +892,67 @@ class BuiltInNavEngine(
                 for (i in 0 until legSteps.length()) {
                     val st = legSteps.getJSONObject(i)
                     val road = st.optString("name").orEmpty()
+                    val ref = st.optString("ref").orEmpty()
+                    val destinations = st.optString("destinations").orEmpty()
+                    val exits = st.optString("exits").orEmpty()
                     val dist = st.optDouble("distance", 0.0)
+                    val dur = st.optDouble("duration", 0.0)
                     val maneuver = st.optJSONObject("maneuver") ?: continue
                     val loc = maneuver.optJSONArray("location") ?: continue
                     val mLon = loc.optDouble(0)
                     val mLat = loc.optDouble(1)
                     val mType = maneuver.optString("type")
                     val modifier = maneuver.optString("modifier")
+
+                    // Parse real OSRM lane guidance from intersections
+                    val parsedLanes = mutableListOf<NavLaneGuide>()
+                    val intersections = st.optJSONArray("intersections")
+                    if (intersections != null) {
+                        for (intIdx in 0 until intersections.length()) {
+                            val inter = intersections.optJSONObject(intIdx) ?: continue
+                            val lanesArr = inter.optJSONArray("lanes") ?: continue
+                            if (lanesArr.length() > 0) {
+                                parsedLanes.clear()
+                                for (lIdx in 0 until lanesArr.length()) {
+                                    val laneObj = lanesArr.optJSONObject(lIdx) ?: continue
+                                    val valid = laneObj.optBoolean("valid", false)
+                                    val indArr = laneObj.optJSONArray("indications")
+                                    val inds = mutableListOf<String>()
+                                    if (indArr != null) {
+                                        for (k in 0 until indArr.length()) {
+                                            indArr.optString(k)?.takeIf { it.isNotBlank() }?.let { inds += it }
+                                        }
+                                    }
+                                    if (inds.isEmpty()) inds += "straight"
+                                    parsedLanes += NavLaneGuide(inds, valid)
+                                }
+                                break
+                            }
+                        }
+                    }
+
+                    val roadWithRef = listOf(ref, road).filter { it.isNotBlank() }.distinct().joinToString(" ")
+                    val highwayRegex = Regex("(國道|高速|快速|台61|台64|台66|台74|台86|台88|交流道|系統|高架|Expressway|Highway|Freeway|Motorway)", RegexOption.IGNORE_CASE)
+                    val isHighway = mType in setOf("off ramp", "on ramp", "fork", "merge") ||
+                        exits.isNotBlank() ||
+                        destinations.isNotBlank() ||
+                        highwayRegex.containsMatchIn(roadWithRef)
+
+                    val finalLanes = if (parsedLanes.isNotEmpty()) parsedLanes else synthesizeFallbackLanes(mType, modifier)
+
                     steps += NavRouteStep(
-                        instructionZh = translateManeuverZh(mType, modifier, road, destName),
-                        roadName = road,
+                        instructionZh = translateManeuverZh(mType, modifier, roadWithRef.ifBlank { road }, destName, destinations, exits),
+                        roadName = roadWithRef.ifBlank { road },
                         maneuverLat = mLat,
                         maneuverLon = mLon,
                         distanceMeters = dist,
+                        durationSeconds = dur,
                         maneuverType = mType,
-                        modifier = modifier
+                        modifier = modifier,
+                        lanes = finalLanes,
+                        destinations = destinations,
+                        exits = exits,
+                        isHighwayManeuver = isHighway
                     )
                 }
             }
@@ -732,8 +960,17 @@ class BuiltInNavEngine(
         return ParsedOsrmRoute(points, steps, totalDist, totalDur)
     }
 
-    private fun translateManeuverZh(type: String, modifier: String, road: String, destName: String): String {
-        val roadSuffix = if (road.isNotBlank()) "進入 $road" else ""
+    private fun translateManeuverZh(
+        type: String,
+        modifier: String,
+        road: String,
+        destName: String,
+        destinations: String = "",
+        exits: String = ""
+    ): String {
+        val targetTag = destinations.ifBlank { road }
+        val exitPrefix = if (exits.isNotBlank()) "由 $exits 號出口" else ""
+        val roadSuffix = if (targetTag.isNotBlank()) "進入 $targetTag" else ""
         val dir = when (modifier) {
             "left" -> "左轉"
             "sharp left" -> "左急轉"
@@ -749,7 +986,8 @@ class BuiltInNavEngine(
             "arrive" -> "抵達目的地 $destName"
             "roundabout", "rotary" -> "進入圓環後駛出$roadSuffix"
             "merge" -> "匯入車道$roadSuffix"
-            "on ramp", "off ramp" -> "$dir 上/下匝道$roadSuffix"
+            "off ramp" -> "${exitPrefix}靠${if (modifier.contains("left")) "左" else "右"}下交流道$roadSuffix"
+            "on ramp" -> "$dir 上匝道$roadSuffix"
             "fork" -> "${if (modifier.contains("left")) "靠左" else "靠右"}行駛$roadSuffix"
             else -> "$dir$roadSuffix"
         }

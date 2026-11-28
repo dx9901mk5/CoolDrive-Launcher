@@ -132,6 +132,38 @@ object GeminiVoiceNavController {
         if (spoken.isBlank()) return
         val app = DxCarApp.instance ?: return
         val cfg = app.preferences.config.value
+
+        // Car Voice -> Phone Dialing ("打電話給王小明" / "打給0912..." / "Call Mom")
+        val callTarget = extractPhoneCallTarget(spoken)
+        if (!callTarget.isNullOrBlank()) {
+            val digitsOnly = callTarget.filter { it.isDigit() || it == '+' }
+            val pureNum = callTarget.replace(Regex("[\\s+\\-().#*0-9]"), "").isEmpty() && digitsOnly.count { it.isDigit() } >= 3
+            val sentToPhone = com.dxcar.launcher.comms.BluetoothCompanionService.sendPacketFromCar(
+                com.dxcar.launcher.comms.BridgePacket(
+                    type = com.dxcar.launcher.comms.PacketType.DIAL_PHONE,
+                    id = java.util.UUID.randomUUID().toString(),
+                    sender = callTarget,
+                    phoneNumber = if (pureNum) digitsOnly else ""
+                )
+            )
+            if (sentToPhone) {
+                app.ttsAnnouncer.speak("正在透過手機撥打給$callTarget")
+                onStatusHud("📞 已連動手機撥打給：$callTarget")
+            } else if (pureNum) {
+                runCatching {
+                    val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(digitsOnly)}")).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(dialIntent)
+                }
+                onStatusHud("📞 手機未連線，已開啟車機撥號：$digitsOnly")
+            } else {
+                app.installedAppsRepository.launchDialer()
+                onStatusHud("⚠️ 手機尚未連線同步，請先連上手機端以語音撥號給「$callTarget」")
+            }
+            return
+        }
+
         val curLoc = app.locationTracker.location.value
         val startLat = if (curLoc.latitude != 0.0) curLoc.latitude else cfg.lastKnownLat
         val startLon = if (curLoc.longitude != 0.0) curLoc.longitude else cfg.lastKnownLon
@@ -215,6 +247,38 @@ object GeminiVoiceNavController {
                 )
             }
         }
+    }
+
+    internal fun extractPhoneCallTarget(raw: String): String? {
+        val text = raw.trim()
+        if (text.isBlank()) return null
+        val lower = text.lowercase()
+        val prefixes = listOf(
+            "請幫我打電話給", "幫我打電話給", "請打電話給", "打電話給", "打電話找",
+            "請幫我打給", "幫我打給", "請打給", "打給",
+            "請幫我撥打電話給", "幫我撥打給", "撥打電話給", "撥打給", "撥打",
+            "請幫我撥號給", "撥號給", "語音撥號給", "打電話", "撥電話給",
+            "please call ", "call ", "dial ", "phone "
+        )
+        for (p in prefixes) {
+            if (lower.startsWith(p)) {
+                val target = text.substring(p.length)
+                    .trim(' ', '，', ',', '。', '、', '：', ':', '的', '手', '機')
+                    .removeSuffix("的手機")
+                    .removeSuffix("的電話")
+                    .removeSuffix("手機")
+                    .removeSuffix("電話")
+                    .trim()
+                if (target.isNotBlank()) return target
+            }
+        }
+        // Japanese pattern: "XXに電話" / "XXへ電話"
+        val jpMatch = Regex("""^(.+?)(?:に|へ)(?:電話|でんわ)(?:して|をかけて|かける)?$""").find(text)
+        if (jpMatch != null) {
+            val target = jpMatch.groupValues[1].trim()
+            if (target.isNotBlank()) return target
+        }
+        return null
     }
 
     internal fun extractDestinationFromMandarin(raw: String): String {

@@ -303,8 +303,11 @@ data class LauncherConfig(
     val workShortcutLabel: String = "",
     val customNavShortcuts: List<NavAddressShortcut> = emptyList(),
     val pageZeroWidgets: List<PageZeroWidgetItem> = emptyList(),
-    val phoneCallCaptureEnabled: Boolean = false,
-    val ytHandoffAlwaysVisible: Boolean = true,
+    val planAPage2Enabled: Boolean = true,
+    val navFullscreenMediaHandleEnabled: Boolean = true,
+    val navMediaHandlePositionPercent: Float = 0.24f,
+    val phoneCallCaptureEnabled: Boolean = true,
+    val ytHandoffAlwaysVisible: Boolean = false,
     val ytHandoffPosX: Int = 18,
     val ytHandoffPosY: Int = 36,
     val companionTargetDeviceAddress: String = "",
@@ -424,6 +427,7 @@ class LauncherPreferences(context: Context) {
                 .putBoolean(KEY_MIGRATED_V140, true)
                 .putBoolean(KEY_MIGRATED_V150, true)
                 .putBoolean(KEY_MIGRATED_V152, true)
+                .putBoolean(KEY_MIGRATED_V191, true)
                 .apply()
             return LauncherConfig()
         }
@@ -477,6 +481,16 @@ class LauncherPreferences(context: Context) {
                 .putBoolean(KEY_MIGRATED_V152, true)
                 .apply()
         }
+        if (!prefs.getBoolean(KEY_MIGRATED_V191, false)) {
+            decoded = decoded.copy(
+                phoneCallCaptureEnabled = true,
+                ytHandoffAlwaysVisible = false
+            )
+            prefs.edit()
+                .putString(KEY_CONFIG_JSON, json.encodeToString(decoded))
+                .putBoolean(KEY_MIGRATED_V191, true)
+                .apply()
+        }
         if (decoded.mapEngineStyle == MapEngineStyle.OPENFREEMAP_VECTOR_3D ||
             decoded.mapEngineStyle == MapEngineStyle.OPENFREEMAP_DARK
         ) {
@@ -490,6 +504,14 @@ class LauncherPreferences(context: Context) {
         _config.value = next
         com.dxcar.launcher.i18n.DxCarI18n.setConfiguredLanguage(next.appLanguage)
         prefs.edit().putString(KEY_CONFIG_JSON, json.encodeToString(next)).apply()
+    }
+
+    @android.annotation.SuppressLint("ApplySharedPref")
+    fun updateSync(transform: (LauncherConfig) -> LauncherConfig) {
+        val next = transform(_config.value)
+        _config.value = next
+        com.dxcar.launcher.i18n.DxCarI18n.setConfiguredLanguage(next.appLanguage)
+        prefs.edit().putString(KEY_CONFIG_JSON, json.encodeToString(next)).commit()
     }
 
     fun resetToDefaults() {
@@ -649,5 +671,6 @@ class LauncherPreferences(context: Context) {
         private const val KEY_MIGRATED_V140 = "migrated_v140_defaults"
         private const val KEY_MIGRATED_V150 = "migrated_v150_defaults"
         private const val KEY_MIGRATED_V152 = "migrated_v152_defaults"
+        private const val KEY_MIGRATED_V191 = "migrated_v191_defaults"
     }
 }

@@ -499,29 +499,32 @@ fun SettingsScreen(
                             )
                         }
                         fun switchExperimentModeAndSyncDock(targetMode: HomeExperimentMode) {
-                            if (targetMode == HomeExperimentMode.PLAN_A_MULTI_LAYER) {
-                                // Switching to Plan A defaults to canceling permanent Dock shift in both main app & helper!
-                                if (hasRootHelper) {
-                                    com.dxcar.launcher.system.RootHelperBridge.setDockPinnedRightShift(context, false)
-                                    planBConfig = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(context)
-                                }
-                                onUpdateConfig {
-                                    it.copy(
-                                        homeExperimentMode = HomeExperimentMode.PLAN_A_MULTI_LAYER,
-                                        launchAppsAvoidDockFreeform = false,
-                                        overlayAutoCollapseEnabled = true
-                                    )
-                                }
-                            } else {
-                                val helperShift = planBConfig?.dockPinnedRightShift ?: false
-                                onUpdateConfig {
-                                    it.copy(
-                                        homeExperimentMode = targetMode,
-                                        launchAppsAvoidDockFreeform = helperShift,
-                                        overlayAutoCollapseEnabled = !helperShift
-                                    )
-                                }
+                            if (config.homeExperimentMode == targetMode) return
+                            val dm = context.resources.displayMetrics
+                            // Always cancel permanent Dock shift on A/B switch (Helper can re-enable on Plan B launch)
+                            if (hasRootHelper) {
+                                com.dxcar.launcher.system.RootHelperBridge.setDockPinnedRightShift(context, false)
+                                com.dxcar.launcher.system.RootHelperBridge.parkPlanBWindows(
+                                    context = context,
+                                    screenWidth = dm.widthPixels,
+                                    screenHeight = dm.heightPixels
+                                )
+                                planBConfig = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(context)
                             }
+                            com.dxcar.launcher.DxCarApp.instance?.preferences?.updateSync {
+                                it.copy(
+                                    homeExperimentMode = targetMode,
+                                    launchAppsAvoidDockFreeform = false,
+                                    overlayAutoCollapseEnabled = true
+                                )
+                            } ?: onUpdateConfig {
+                                it.copy(
+                                    homeExperimentMode = targetMode,
+                                    launchAppsAvoidDockFreeform = false,
+                                    overlayAutoCollapseEnabled = true
+                                )
+                            }
+                            com.dxcar.launcher.MainActivity.restartLauncherCleanly(context)
                         }
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             HomeExperimentMode.visibleEntries.forEach { mode ->
@@ -650,6 +653,59 @@ fun SettingsScreen(
                                             )
                                         }
                                     }
+                                }
+                            }
+                        }
+
+                        // Plan A Second UI (Map + YouTube) Toggle & Fullscreen Nav Edge Media Handle Toggle
+                        if (config.homeExperimentMode == HomeExperimentMode.PLAN_A_MULTI_LAYER) {
+                            Surface(
+                                color = colors.cardSurfaceElevated,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .border(1.dp, colors.cardBorder, RoundedCornerShape(16.dp))
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    SettingsToggleRow(
+                                        title = str(
+                                            "啟用方案 A 第二介面（1:1 內建地圖 ＋ YouTube 視窗）",
+                                            "启用方案 A 第二界面（1:1 内置地图 ＋ YouTube 窗口）",
+                                            "Enable Plan A Page 2 (1:1 Map + YouTube Window)",
+                                            "プラン A 第2画面（1:1 地図＋YouTube）を有効にする"
+                                        ),
+                                        subtitle = str(
+                                            "關閉後，啟動器中的第二介面與內嵌 YouTube App 將完全隱藏，僅保留第 0 與第 1 介面",
+                                            "关闭后，启动器中的第二界面与内嵌 YouTube App 将完全隐藏，仅保留第 0 与第 1 界面",
+                                            "When turned OFF, Page 2 and embedded YouTube inside the launcher are completely hidden",
+                                            "オフにすると、ランチャー内の第2画面と内蔵 YouTube は完全に非表示になります"
+                                        ),
+                                        checked = config.planAPage2Enabled,
+                                        onCheckedChange = { enabled ->
+                                            onUpdateConfig { it.copy(planAPage2Enabled = enabled) }
+                                        }
+                                    )
+                                    SettingsToggleRow(
+                                        title = str(
+                                            "導航全螢幕時右側隱藏式音樂控盤（點開 1.5 秒自動收回）",
+                                            "导航全屏时右侧隐藏式音乐控盘（点开 1.5 秒自动收回）",
+                                            "Fullscreen Nav Edge Media Handle (Auto-retract 1.5s)",
+                                            "全画面ナビ時の右端メディアタブ（1.5秒で自動収納）"
+                                        ),
+                                        subtitle = str(
+                                            "於 Google 地圖或其他導航 App 全螢幕時，像 Dock 一樣收合在右側上方不擋視野；點開控制後 1.5 秒自動隱藏",
+                                            "在 Google 地图或其他导航 App 全屏时，像 Dock 一样收合在右侧上方不挡视野；点开控制后 1.5 秒自动隐藏",
+                                            "Hides neatly on the upper-right edge during fullscreen Google Maps / nav apps and auto-hides 1.5s after tapping",
+                                            "Google マップ等の全画面ナビ中に右上端へ収納され、操作後1.5秒で自動的に閉じます"
+                                        ),
+                                        checked = config.navFullscreenMediaHandleEnabled,
+                                        onCheckedChange = { enabled ->
+                                            onUpdateConfig { it.copy(navFullscreenMediaHandleEnabled = enabled) }
+                                        }
+                                    )
                                 }
                             }
                         }

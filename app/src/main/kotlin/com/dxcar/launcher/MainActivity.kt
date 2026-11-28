@@ -30,6 +30,7 @@ import com.dxcar.launcher.system.SystemStatusMonitor
 import com.dxcar.launcher.ui.DxCarRootScreen
 import com.dxcar.launcher.ui.EmbeddedYoutubeBridge
 import com.dxcar.launcher.voice.GeminiVoiceNavController
+import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.UUID
 
@@ -207,6 +208,65 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIncomingIntent(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+            val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
+            val sharedSubject = intent.getStringExtra(Intent.EXTRA_SUBJECT)?.trim().orEmpty()
+            val combined = listOf(sharedSubject, sharedText)
+                .filter { it.isNotBlank() }
+                .distinct()
+                .joinToString(" ")
+                .trim()
+            if (combined.isNotBlank()) {
+                val app = application as DxCarApp
+                val curLoc = app.locationTracker.location.value
+                val biasLat = if (curLoc.latitude != 0.0) curLoc.latitude else app.preferences.config.value.lastKnownLat
+                val biasLon = if (curLoc.longitude != 0.0) curLoc.longitude else app.preferences.config.value.lastKnownLon
+                android.widget.Toast.makeText(
+                    this,
+                    "📍 正在解析地址並傳送至車機…",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main.immediate).launch {
+                    val resolved = com.dxcar.launcher.map.SharedLocationResolver.resolveSharedText(
+                        context = this@MainActivity,
+                        navEngine = app.builtInNavEngine,
+                        rawText = combined,
+                        biasLat = biasLat,
+                        biasLon = biasLon
+                    )
+                    if (app.preferences.config.value.deviceRole == com.dxcar.launcher.data.DeviceRole.PHONE_COMPANION) {
+                        val sent = BluetoothCompanionService.sendPacketFromPhone(
+                            com.dxcar.launcher.comms.BridgePacket(
+                                type = com.dxcar.launcher.comms.PacketType.SHARED_LOCATION,
+                                id = UUID.randomUUID().toString(),
+                                sender = resolved.label,
+                                text = resolved.address,
+                                latitude = resolved.latitude,
+                                longitude = resolved.longitude
+                            )
+                        )
+                        val msg = if (sent) {
+                            "✓ 已傳送地點給車機：${resolved.label}"
+                        } else {
+                            "📍 已排入傳送（連上車機自動送出）：${resolved.label}"
+                        }
+                        android.widget.Toast.makeText(this@MainActivity, msg, android.widget.Toast.LENGTH_LONG).show()
+                        externalHudToast.value = msg
+                    } else {
+                        app.notificationCenter.postSharedLocation(
+                            com.dxcar.launcher.comms.SharedLocationItem(
+                                id = UUID.randomUUID().toString(),
+                                label = resolved.label,
+                                address = resolved.address,
+                                latitude = resolved.latitude,
+                                longitude = resolved.longitude
+                            )
+                        )
+                    }
+                }
+            }
+            return
+        }
         if (intent?.action == ACTION_TRIGGER_BT_RECONNECT) {
             BluetoothCompanionService.forceReconnect(this)
             val targetName = (application as DxCarApp).preferences.config.value.companionTargetDeviceName
@@ -364,5 +424,23 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_OPEN_NOTIFICATIONS = "open_notifications"
         const val EXTRA_OPEN_SETTINGS = "open_settings"
         const val EXTRA_START_VOICE_NAV = "start_voice_nav"
+
+        /**
+         * Cleanly restarts DX-Car Launcher after switching Plan A <-> Plan B so all overlay/split states
+         * boot fresh with zero map flickering or leftover permanent Dock shift.
+         */
+        fun restartLauncherCleanly(context: android.content.Context) {
+            val appCtx = context.applicationContext
+            com.dxcar.launcher.overlay.PersistentDockOverlayService.stop(appCtx)
+            val restartIntent = Intent.makeRestartActivityTask(
+                android.content.ComponentName(appCtx, MainActivity::class.java)
+            ).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            }
+            runCatching { appCtx.startActivity(restartIntent) }
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                android.os.Process.killProcess(android.os.Process.myPid())
+            }, 220L)
+        }
     }
 }

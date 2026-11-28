@@ -222,4 +222,58 @@ object ContactNameResolver {
         }
         return results.distinct()
     }
+
+    /**
+     * Searches phone contacts by display name for Car Voice -> Phone Dialing ("打電話給王小明").
+     * Returns (matchedDisplayName to phoneNumber) or null if not found.
+     */
+    fun findPhoneNumberByContactName(context: Context, queryName: String): Pair<String, String>? {
+        val raw = queryName.trim()
+        if (raw.isEmpty()) return null
+
+        // If user spoke a direct phone number (e.g. "0912345678"), return immediately without needing contacts
+        val digitsOnly = raw.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
+        val nonPhoneChars = raw.replace(Regex("[\\s+\\-().#*0-9]"), "")
+        if (nonPhoneChars.isEmpty() && digitsOnly.count { it.isDigit() } >= 3) {
+            return raw to digitsOnly
+        }
+
+        val hasPerm = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.READ_CONTACTS
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!hasPerm) return null
+
+        val normalizedQuery = raw.lowercase().replace(Regex("\\s+"), "")
+        return runCatching {
+            var bestExact: Pair<String, String>? = null
+            var bestPartial: Pair<String, String>? = null
+            context.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER
+                ),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                val nameIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                val numIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                while (cursor.moveToNext()) {
+                    val name = if (nameIdx >= 0) cursor.getString(nameIdx)?.trim().orEmpty() else ""
+                    val num = if (numIdx >= 0) cursor.getString(numIdx)?.trim().orEmpty() else ""
+                    if (name.isBlank() || num.isBlank()) continue
+                    val normName = name.lowercase().replace(Regex("\\s+"), "")
+                    if (normName == normalizedQuery) {
+                        bestExact = name to num
+                        break
+                    } else if (bestPartial == null && (normName.contains(normalizedQuery) || normalizedQuery.contains(normName))) {
+                        bestPartial = name to num
+                    }
+                }
+            }
+            bestExact ?: bestPartial
+        }.getOrNull()
+    }
 }

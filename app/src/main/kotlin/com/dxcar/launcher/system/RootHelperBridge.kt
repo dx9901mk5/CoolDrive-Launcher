@@ -169,4 +169,34 @@ object RootHelperBridge {
             res?.getBoolean("ok", false) == true
         }.getOrDefault(false)
     }
+
+    fun launchPlanBRightPaneApp(
+        context: Context,
+        packageName: String,
+        screenWidth: Int,
+        screenHeight: Int,
+        dockOffsetLeft: Int = 0,
+        dockOffsetRight: Int = 0,
+        dockOffsetTop: Int = 0,
+        dockOffsetBottom: Int = 0,
+        ui1Ratio: Float = 0.70f,
+        ui1Swapped: Boolean = false
+    ): Boolean {
+        if (!isRootHelperInstalled(context) || packageName.isBlank()) return false
+        return runCatching {
+            val extras = android.os.Bundle().apply {
+                putString("packageName", packageName)
+                putInt("screenWidth", screenWidth)
+                putInt("screenHeight", screenHeight)
+                putInt("dockOffsetLeft", dockOffsetLeft)
+                putInt("dockOffsetRight", dockOffsetRight)
+                putInt("dockOffsetTop", dockOffsetTop)
+                putInt("dockOffsetBottom", dockOffsetBottom)
+                putFloat("ui1Ratio", ui1Ratio.coerceIn(0.25f, 0.75f))
+                putBoolean("ui1Swapped", ui1Swapped)
+            }
+            val res = context.contentResolver.call(PROVIDER_URI, "launch_plan_b_right_pane", null, extras)
+            res?.getBoolean("ok", false) == true
+        }.getOrDefault(false)
+    }
 }

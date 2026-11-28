@@ -892,7 +892,70 @@ class BluetoothCompanionService : Service() {
                     handleRemoteCallCommandOnPhone(packet.callCommand)
                 }
             }
+            PacketType.SHARED_LOCATION -> {
+                if (isAiBox) {
+                    val label = packet.sender.ifBlank { packet.text.ifBlank { "手機分享地點" } }
+                    val addr = packet.text.ifBlank { label }
+                    app.notificationCenter.postSharedLocation(
+                        SharedLocationItem(
+                            id = packet.id.ifBlank { UUID.randomUUID().toString() },
+                            label = label,
+                            address = addr,
+                            latitude = packet.latitude,
+                            longitude = packet.longitude,
+                            timestampMs = packet.timestampMs
+                        )
+                    )
+                    appendLog("📍 收到手機分享地址：$label")
+                }
+            }
+            PacketType.DIAL_PHONE -> {
+                if (!isAiBox) {
+                    handleRemoteDialPhoneOnPhone(packet.sender, packet.phoneNumber)
+                }
+            }
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun handleRemoteDialPhoneOnPhone(targetNameOrQuery: String, explicitNumber: String) {
+        val directNum = explicitNumber.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
+        val resolved = if (directNum.count { it.isDigit() } >= 3) {
+            targetNameOrQuery.ifBlank { directNum } to directNum
+        } else {
+            ContactNameResolver.findPhoneNumberByContactName(this, targetNameOrQuery)
+        }
+
+        if (resolved == null) {
+            appendLog("⚠️ 找不到聯絡人「$targetNameOrQuery」，已開啟手機撥號盤")
+            runCatching {
+                val dialFallback = Intent(Intent.ACTION_DIAL).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(dialFallback)
+            }
+            return
+        }
+
+        val (matchedName, rawPhone) = resolved
+        val cleanPhone = rawPhone.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
+        val telUri = android.net.Uri.parse("tel:${android.net.Uri.encode(cleanPhone)}")
+        val hasCallPerm = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.CALL_PHONE
+        ) == PackageManager.PERMISSION_GRANTED
+        val action = if (hasCallPerm) Intent.ACTION_CALL else Intent.ACTION_DIAL
+        val ok = runCatching {
+            val intent = Intent(action, telUri).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            true
+        }.getOrDefault(false)
+        appendLog(
+            if (ok) "📞 已透過手機${if (hasCallPerm) "直接撥打" else "開啟撥號"}：$matchedName ($cleanPhone)"
+            else "⚠️ 無法啟動撥號：$matchedName ($cleanPhone)"
+        )
     }
 
     @SuppressLint("MissingPermission")
@@ -935,7 +998,10 @@ class BluetoothCompanionService : Service() {
             outboundChannel.trySend(packet)
             return true
         }
-        if (packet.type == PacketType.MESSAGE || packet.type == PacketType.CALL_STATE) {
+        if (packet.type == PacketType.MESSAGE ||
+            packet.type == PacketType.CALL_STATE ||
+            packet.type == PacketType.SHARED_LOCATION
+        ) {
             bufferImportantPacket(packet)
             ensureWorkersRunning()
         }
@@ -1037,6 +1103,9 @@ class BluetoothCompanionService : Service() {
         val lanConnected = lanSocket?.let { it.isConnected && !it.isClosed } == true && lanWriter != null
         val app = DxCarApp.instance
         val role = app?.preferences?.config?.value?.deviceRole ?: DeviceRole.AI_BOX_LAUNCHER
+        if (!btConnected && !lanConnected && role == DeviceRole.AI_BOX_LAUNCHER) {
+            app?.notificationCenter?.clearPhoneBridgeCall()
+        }
 
         val transport = when {
             btConnected && lanConnected -> "藍牙 SPP ＋ Wi-Fi 熱點"
@@ -1304,12 +1373,22 @@ class BluetoothCompanionService : Service() {
             val normalized = if (packet.id.isBlank()) packet.copy(id = UUID.randomUUID().toString()) else packet
             val svc = activeService
             if (svc == null) {
-                if (normalized.type == PacketType.MESSAGE || normalized.type == PacketType.CALL_STATE) {
+                if (normalized.type == PacketType.MESSAGE ||
+                    normalized.type == PacketType.CALL_STATE ||
+                    normalized.type == PacketType.SHARED_LOCATION
+                ) {
                     bufferStaticImportantPacket(normalized)
                 }
                 DxCarApp.instance?.let { startOrReconnect(it) }
                 return false
             }
+            return svc.enqueueOutbound(normalized)
+        }
+
+        fun sendPacketFromCar(packet: BridgePacket): Boolean {
+            val normalized = if (packet.id.isBlank()) packet.copy(id = UUID.randomUUID().toString()) else packet
+            val svc = activeService ?: return false
+            if (!svc.hasOpenTransport()) return false
             return svc.enqueueOutbound(normalized)
         }
     }

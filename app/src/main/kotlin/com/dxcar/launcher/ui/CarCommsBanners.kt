@@ -76,6 +76,7 @@ import androidx.compose.ui.unit.sp
 import com.dxcar.launcher.comms.CallStatus
 import com.dxcar.launcher.comms.CarCallState
 import com.dxcar.launcher.comms.CarMessageItem
+import com.dxcar.launcher.comms.SharedLocationItem
 import com.dxcar.launcher.data.NotificationBannerScale
 import com.dxcar.launcher.i18n.DxCarI18n.str
 import com.dxcar.launcher.theme.LocalDxCarColors
@@ -343,6 +344,7 @@ fun IncomingMessageBanner(
     quickReplies: List<String>,
     scale: NotificationBannerScale = NotificationBannerScale.SCALE_1_0X,
     scaleFactorOverride: Float? = null,
+    rightHandDrive: Boolean = false,
     onExpandQuickReplies: () -> Unit = {},
     onReadAloud: (CarMessageItem) -> Unit,
     onQuickReply: (CarMessageItem, String) -> Unit,
@@ -409,10 +411,37 @@ fun IncomingMessageBanner(
                         .padding(horizontal = padH, vertical = padV),
                     verticalArrangement = Arrangement.spacedBy((6f * s).coerceIn(4f, 11f).dp)
                 ) {
+                    val driverReadAloudBtn: @Composable () -> Unit = {
+                        Surface(
+                            color = colors.accent.copy(alpha = 0.22f),
+                            shape = CircleShape,
+                            modifier = Modifier
+                                .padding(top = 2.dp)
+                                .size((44f * s).coerceIn(32f, 66f).dp)
+                                .border(1.5.dp, colors.accent, CircleShape)
+                                .bouncyClickable(pressedScale = 0.86f) {
+                                    onReadAloud(item)
+                                }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.VolumeUp,
+                                    contentDescription = str("語音朗讀", "语音朗读", "Read aloud", "音声読み上げ"),
+                                    tint = colors.accent,
+                                    modifier = Modifier.size((24f * s).coerceIn(17f, 36f).dp)
+                                )
+                            }
+                        }
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.Top
                     ) {
+                        if (!rightHandDrive) {
+                            driverReadAloudBtn()
+                            Spacer(Modifier.width((10f * s).coerceIn(7f, 15f).dp))
+                        }
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
@@ -473,12 +502,6 @@ fun IncomingMessageBanner(
                         }
 
                         Row(horizontalArrangement = Arrangement.spacedBy((2f * s).coerceIn(1f, 4f).dp)) {
-                            IconButton(
-                                onClick = { onReadAloud(item) },
-                                modifier = Modifier.size(actionBtnDp)
-                            ) {
-                                Icon(Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = str("語音朗讀", "语音朗读", "Read aloud", "音声読み上げ"), tint = colors.accent, modifier = Modifier.size(actionIconDp))
-                            }
                             if (onVoiceReply != null && item.canReply) {
                                 IconButton(
                                     onClick = { onVoiceReply(item) },
@@ -499,6 +522,10 @@ fun IncomingMessageBanner(
                             ) {
                                 Icon(Icons.Rounded.Close, contentDescription = str("關閉", "关闭", "Dismiss", "閉じる"), tint = colors.secondaryText, modifier = Modifier.size(actionIconDp))
                             }
+                        }
+                        if (rightHandDrive) {
+                            Spacer(Modifier.width((10f * s).coerceIn(7f, 15f).dp))
+                            driverReadAloudBtn()
                         }
                     }
 
@@ -831,6 +858,186 @@ fun NotificationCenterSheet(
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SharedLocationBanner(
+    locationItem: SharedLocationItem?,
+    scale: NotificationBannerScale = NotificationBannerScale.SCALE_1_0X,
+    scaleFactorOverride: Float? = null,
+    otherNavApps: List<com.dxcar.launcher.map.ExternalNavAppOption> = emptyList(),
+    onOpenBuiltInMap: (SharedLocationItem) -> Unit,
+    onOpenGoogleMaps: (SharedLocationItem) -> Unit,
+    onOpenOtherMap: (SharedLocationItem, String?) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalDxCarColors.current
+    val s = (scaleFactorOverride ?: scale.factor).coerceIn(0.6f, 2.0f)
+
+    AnimatedVisibility(
+        visible = locationItem != null,
+        enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+        exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+        modifier = modifier
+    ) {
+        val item = locationItem ?: return@AnimatedVisibility
+        var showOtherApps by remember(item.id) { mutableStateOf(false) }
+        val maxCardW = (500f * s).coerceIn(300f, 900f).dp
+        val cornerDp = (18f * s).coerceIn(12f, 26f).dp
+
+        SwipeHorizontalToDismissBox(
+            resetKey = item.id,
+            thresholdDp = (75f * s).coerceIn(48f, 110f),
+            onDismissed = onDismiss
+        ) {
+            Surface(
+                color = colors.glassOverlay,
+                shape = RoundedCornerShape(cornerDp),
+                shadowElevation = 16.dp,
+                modifier = Modifier
+                    .widthIn(max = maxCardW)
+                    .fillMaxWidth()
+                    .border(1.8.dp, Color(0xFF38BDF8), RoundedCornerShape(cornerDp))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = (14f * s).coerceIn(10f, 22f).dp, vertical = (11f * s).coerceIn(8f, 18f).dp),
+                    verticalArrangement = Arrangement.spacedBy((8f * s).coerceIn(6f, 12f).dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = str(
+                                    "📍 手機分享地點：${item.label}",
+                                    "📍 手机分享地点：${item.label}",
+                                    "📍 Shared Location: ${item.label}",
+                                    "📍 スマホ共有地点：${item.label}"
+                                ),
+                                color = colors.primaryText,
+                                fontSize = (18f * s).coerceIn(13f, 30f).sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (item.address.isNotBlank() && item.address != item.label) {
+                                Text(
+                                    text = item.address,
+                                    color = colors.secondaryText,
+                                    fontSize = (13.5f * s).coerceIn(11f, 22f).sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        IconButton(onClick = onDismiss, modifier = Modifier.size((32f * s).coerceIn(26f, 44f).dp)) {
+                            Icon(Icons.Rounded.Close, contentDescription = "關閉", tint = colors.secondaryText)
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            color = colors.accent,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.bouncyClickable { onOpenBuiltInMap(item) }
+                        ) {
+                            Text(
+                                text = str("🧭 內建地圖導航", "🧭 内置地图导航", "🧭 Built-in Map", "🧭 内蔵マップ"),
+                                color = colors.onAccent,
+                                fontSize = (13.5f * s).coerceIn(11f, 22f).sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
+                        Surface(
+                            color = Color(0xFF10B981),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.bouncyClickable { onOpenGoogleMaps(item) }
+                        ) {
+                            Text(
+                                text = str("🗺 Google 地圖", "🗺 Google 地图", "🗺 Google Maps", "🗺 Google マップ"),
+                                color = Color.White,
+                                fontSize = (13.5f * s).coerceIn(11f, 22f).sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
+                        Surface(
+                            color = colors.cardSurfaceElevated,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .border(1.dp, colors.cardBorder, RoundedCornerShape(12.dp))
+                                .bouncyClickable {
+                                    if (otherNavApps.isEmpty()) {
+                                        onOpenOtherMap(item, null)
+                                    } else {
+                                        showOtherApps = !showOtherApps
+                                    }
+                                }
+                        ) {
+                            Text(
+                                text = str("📍 其他地圖", "📍 其他地图", "📍 Other Maps", "📍 他の地図"),
+                                color = colors.primaryText,
+                                fontSize = (13.5f * s).coerceIn(11f, 22f).sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+
+                    AnimatedVisibility(visible = showOtherApps && otherNavApps.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            otherNavApps.forEach { navApp ->
+                                Surface(
+                                    color = colors.cardSurface,
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .border(1.dp, colors.accent.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+                                        .bouncyClickable { onOpenOtherMap(item, navApp.packageName) }
+                                ) {
+                                    Text(
+                                        text = navApp.displayName,
+                                        color = colors.primaryText,
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+                            Surface(
+                                color = colors.cardSurface,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .border(1.dp, colors.cardBorder, RoundedCornerShape(10.dp))
+                                    .bouncyClickable { onOpenOtherMap(item, null) }
+                            ) {
+                                Text(
+                                    text = str("系統選擇器…", "系统选择器…", "System Chooser…", "アプリ選択…"),
+                                    color = colors.secondaryText,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
                             }
                         }
                     }

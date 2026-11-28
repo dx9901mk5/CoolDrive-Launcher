@@ -114,13 +114,19 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Receive shared addresses, place keywords, or Google Maps links from any Phone app -> send to Car -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
 
-        <!-- Dedicated Resizable Activity for True Native Split-Screen alongside Real Google Maps -->
+        <!-- Dedicated Resizable Activity for True Native Split-Screen & Plan B Right 30% Media Split Window -->
         <activity
             android:name=".SplitSidePanelActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode"
-            android:exported="false"
+            android:exported="true"
             android:launchMode="singleTask"
             android:resizeableActivity="true"
             android:taskAffinity="com.dxcar.launcher.splitpanel"

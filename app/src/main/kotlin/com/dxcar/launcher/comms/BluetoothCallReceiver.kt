@@ -17,6 +17,11 @@ import java.util.UUID
 
 class BluetoothCallReceiver : BroadcastReceiver() {
 
+    companion object {
+        @Volatile
+        var lastPhoneTelephonyStatus: CallStatus = CallStatus.IDLE
+    }
+
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
         val app = DxCarApp.instance
@@ -129,11 +134,27 @@ class BluetoothCallReceiver : BroadcastReceiver() {
                 if (role == DeviceRole.PHONE_COMPANION) {
                     val callCaptureOn = app.preferences.config.value.phoneCallCaptureEnabled
                     if (status != CallStatus.IDLE && !callCaptureOn) return
+                    lastPhoneTelephonyStatus = status
                     dispatchPhoneCallSnapshot(rawExtraNum)
+                    if (status == CallStatus.IDLE) {
+                        // Send a second delayed IDLE so late OEM dialer / missed-call notifications can never re-stick the Car banner!
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            if (lastPhoneTelephonyStatus == CallStatus.IDLE) {
+                                BluetoothCompanionService.sendPacketFromPhone(
+                                    BridgePacket(
+                                        type = PacketType.CALL_STATE,
+                                        id = UUID.randomUUID().toString(),
+                                        callStatus = CallStatus.IDLE
+                                    )
+                                )
+                            }
+                        }, 650L)
+                    }
                     // If Android's first broadcast arrived before EXTRA_INCOMING_NUMBER / CallLog write, re-probe after 650ms!
                     if (status == CallStatus.RINGING && rawExtraNum.isBlank()) {
                         val appCtx = context.applicationContext
                         Handler(Looper.getMainLooper()).postDelayed({
+                            if (lastPhoneTelephonyStatus != CallStatus.RINGING) return@postDelayed
                             val recentLog = ContactNameResolver.queryRecentCallLogCaller(appCtx)
                             if (recentLog != null) {
                                 BluetoothCompanionService.sendPacketFromPhone(

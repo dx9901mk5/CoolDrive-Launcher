@@ -168,6 +168,7 @@ fun DxCarRootScreen(
     val homeLaunchers by app.installedAppsRepository.homeLaunchers.collectAsState()
     val activeCall by app.notificationCenter.activeCall.collectAsState()
     val popupMessage by app.notificationCenter.popupMessage.collectAsState()
+    val sharedLocation by app.notificationCenter.sharedLocation.collectAsState()
     val messages by app.notificationCenter.messages.collectAsState()
     val activeNav by app.notificationCenter.activeNavigation.collectAsState()
     val builtInNavState by app.builtInNavEngine.state.collectAsState()
@@ -342,7 +343,7 @@ fun DxCarRootScreen(
             }
             com.dxcar.launcher.MainActivity.EXTRA_OPEN_YOUTUBE_HANDOFF -> {
                 destination = LauncherDestination.DASHBOARD_SPLIT
-                currentDashboardPage = 2
+                currentDashboardPage = if (config.planAPage2Enabled || config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED) 2 else 1
                 onExternalNavConsumed()
             }
             com.dxcar.launcher.MainActivity.EXTRA_OPEN_QUICK_PANEL -> {
@@ -410,10 +411,18 @@ fun DxCarRootScreen(
         )
     }
 
+    LaunchedEffect(config.planAPage2Enabled, config.homeExperimentMode) {
+        if (config.homeExperimentMode == HomeExperimentMode.PLAN_A_MULTI_LAYER &&
+            !config.planAPage2Enabled &&
+            currentDashboardPage == 2
+        ) {
+            currentDashboardPage = 1
+        }
+    }
+
     LaunchedEffect(remoteSelectPlan) {
         val pair = remoteSelectPlan ?: return@LaunchedEffect
         val targetPlan = pair.second
-        val dockPx = (layoutSpec.dockThicknessDp * screenMetrics.density).toInt().coerceAtLeast(0)
         if (targetPlan == "PLAN_A") {
             com.dxcar.launcher.system.RootHelperBridge.setDockPinnedRightShift(context, false)
             com.dxcar.launcher.system.RootHelperBridge.parkPlanBWindows(
@@ -421,20 +430,14 @@ fun DxCarRootScreen(
                 screenWidth = screenMetrics.widthPx,
                 screenHeight = screenMetrics.heightPx
             )
-            app.preferences.update {
+            app.preferences.updateSync {
                 it.copy(
                     homeExperimentMode = HomeExperimentMode.PLAN_A_MULTI_LAYER,
                     launchAppsAvoidDockFreeform = false,
                     overlayAutoCollapseEnabled = true
                 )
             }
-            destination = LauncherDestination.DASHBOARD_SPLIT
-            gestureHudText = DxCarI18n.tr(
-                "📱 已由手機遙控切換至「方案 A」（已預設取消永久顯示 Dock 讓位）",
-                "📱 已由手机遥控切换至「方案 A」（已默认取消永久显示 Dock 让位）",
-                "📱 Remotely switched to Plan A (Permanent Dock shift auto-cleared)",
-                "📱 スマホからプラン A に切り替えました（常時ドックシフトを自動解除）"
-            )
+            com.dxcar.launcher.MainActivity.restartLauncherCleanly(context)
         } else if (targetPlan == "PLAN_B") {
             val hasHelper = com.dxcar.launcher.system.RootHelperBridge.isRootHelperInstalled(context)
             if (!hasHelper) {
@@ -445,35 +448,21 @@ fun DxCarRootScreen(
                     "⚠️ 車載機に拡張補助 APK が未インストールのためプラン B に切替できません"
                 )
             } else {
-                val helperCfg = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(context)
-                app.preferences.update {
+                // Cancel permanent Dock shift on A/B switch; Helper can re-enable when Plan B starts
+                com.dxcar.launcher.system.RootHelperBridge.setDockPinnedRightShift(context, false)
+                com.dxcar.launcher.system.RootHelperBridge.parkPlanBWindows(
+                    context = context,
+                    screenWidth = screenMetrics.widthPx,
+                    screenHeight = screenMetrics.heightPx
+                )
+                app.preferences.updateSync {
                     it.copy(
                         homeExperimentMode = HomeExperimentMode.PLAN_D_ROOT_RESERVED,
-                        launchAppsAvoidDockFreeform = helperCfg.dockPinnedRightShift,
-                        overlayAutoCollapseEnabled = !helperCfg.dockPinnedRightShift
+                        launchAppsAvoidDockFreeform = false,
+                        overlayAutoCollapseEnabled = true
                     )
                 }
-                destination = LauncherDestination.DASHBOARD_SPLIT
-                com.dxcar.launcher.system.RootHelperBridge.applyPlanBPage(
-                    context = context,
-                    page = currentDashboardPage.coerceIn(0, 2),
-                    screenWidth = screenMetrics.widthPx,
-                    screenHeight = screenMetrics.heightPx,
-                    dockOffsetLeft = if (layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0,
-                    dockOffsetRight = if (layoutSpec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
-                    dockOffsetTop = if (layoutSpec.dockPlacement == ResolvedDockPlacement.TOP) dockPx else 0,
-                    dockOffsetBottom = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0,
-                    ui1Ratio = if (helperCfg.planBEnabled) helperCfg.ui1SplitRatio else config.primarySplitRatio,
-                    ui1Swapped = config.page1Swapped,
-                    ui2Ratio = if (helperCfg.planBEnabled) helperCfg.ui2SplitRatio else config.page2SplitRatio,
-                    ui2Swapped = config.page2Swapped
-                )
-                gestureHudText = DxCarI18n.tr(
-                    "📱 已由手機遙控切換至「方案 B 進階雙窗模式」",
-                    "📱 已由手机遥控切换至「方案 B 进阶双窗模式」",
-                    "📱 Remotely switched to Plan B Dual-Window Mode",
-                    "📱 スマホからプラン B（拡張2画面モード）に切り替えました"
-                )
+                com.dxcar.launcher.MainActivity.restartLauncherCleanly(context)
             }
         }
     }
@@ -487,9 +476,18 @@ fun DxCarRootScreen(
         }
     }
 
-    fun dispatchPlanBWindowLayout(targetPage: Int) {
+    var lastPlanBDispatchMs by remember { mutableStateOf(0L) }
+    var lastPlanBDispatchedPage by remember { mutableIntStateOf(-1) }
+
+    fun dispatchPlanBWindowLayout(targetPage: Int, force: Boolean = false) {
         if (!com.dxcar.launcher.system.RootHelperBridge.isRootHelperInstalled(context)) return
         val coerced = targetPage.coerceIn(0, 2)
+        val now = System.currentTimeMillis()
+        if (!force && coerced == lastPlanBDispatchedPage && (now - lastPlanBDispatchMs) < 1_800L) {
+            return
+        }
+        lastPlanBDispatchMs = now
+        lastPlanBDispatchedPage = coerced
         PersistentDockOverlayService.planBInFullscreenApp.value = false
         PersistentDockOverlayService.planBActivePage.value = coerced
         PersistentDockOverlayService.start(context)
@@ -519,22 +517,21 @@ fun DxCarRootScreen(
             com.dxcar.launcher.system.RootHelperBridge.isRootHelperInstalled(context)
         ) {
             if (destination != LauncherDestination.DASHBOARD_SPLIT || showNotificationCenter || currentDashboardPage == 0) {
-                // Demote Freeform maps immediately when opening App Drawer, Settings, Notifications, or Page 0!
+                lastPlanBDispatchedPage = 0
                 com.dxcar.launcher.system.RootHelperBridge.parkPlanBWindows(
                     context = context,
                     screenWidth = screenMetrics.widthPx,
                     screenHeight = screenMetrics.heightPx
                 )
-            } else if (isLauncherFg) {
+            } else if (isLauncherFg && (currentDashboardPage == 1 || currentDashboardPage == 2)) {
                 PersistentDockOverlayService.planBActivePage.value = currentDashboardPage
-                if (currentDashboardPage == 1 || currentDashboardPage == 2) {
-                    delay(240L)
-                    if (destination == LauncherDestination.DASHBOARD_SPLIT &&
-                        !showNotificationCenter &&
-                        config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED
-                    ) {
-                        dispatchPlanBWindowLayout(currentDashboardPage)
-                    }
+                delay(320L)
+                if (isLauncherFg &&
+                    destination == LauncherDestination.DASHBOARD_SPLIT &&
+                    !showNotificationCenter &&
+                    config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED
+                ) {
+                    dispatchPlanBWindowLayout(currentDashboardPage, force = false)
                 }
             }
         }
@@ -583,23 +580,40 @@ fun DxCarRootScreen(
         )
     }
 
-    fun launchAppRespectingOptions(packageName: String): Boolean {
+    fun launchAppRespectingOptions(packageName: String, preferPlanBRightPane: Boolean = false): Boolean {
         if (config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED &&
             com.dxcar.launcher.system.RootHelperBridge.isRootHelperInstalled(context)
         ) {
-            PersistentDockOverlayService.planBInFullscreenApp.value = true
             PersistentDockOverlayService.start(context)
             val dockPx = (layoutSpec.dockThicknessDp * screenMetrics.density).toInt().coerceAtLeast(0)
-            val ok = com.dxcar.launcher.system.RootHelperBridge.launchFullscreenApp(
-                context = context,
-                packageName = packageName,
-                screenWidth = screenMetrics.widthPx,
-                screenHeight = screenMetrics.heightPx,
-                dockOffsetLeft = if (layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0,
-                dockOffsetRight = if (layoutSpec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
-                dockOffsetTop = if (layoutSpec.dockPlacement == ResolvedDockPlacement.TOP) dockPx else 0,
-                dockOffsetBottom = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0
-            )
+            val helperCfg = com.dxcar.launcher.system.RootHelperBridge.readPlanBConfig(context)
+            val ok = if (preferPlanBRightPane) {
+                PersistentDockOverlayService.planBInFullscreenApp.value = false
+                com.dxcar.launcher.system.RootHelperBridge.launchPlanBRightPaneApp(
+                    context = context,
+                    packageName = packageName,
+                    screenWidth = screenMetrics.widthPx,
+                    screenHeight = screenMetrics.heightPx,
+                    dockOffsetLeft = if (layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0,
+                    dockOffsetRight = if (layoutSpec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
+                    dockOffsetTop = if (layoutSpec.dockPlacement == ResolvedDockPlacement.TOP) dockPx else 0,
+                    dockOffsetBottom = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0,
+                    ui1Ratio = if (helperCfg.planBEnabled) helperCfg.ui1SplitRatio else config.primarySplitRatio,
+                    ui1Swapped = config.page1Swapped
+                )
+            } else {
+                PersistentDockOverlayService.planBInFullscreenApp.value = true
+                com.dxcar.launcher.system.RootHelperBridge.launchFullscreenApp(
+                    context = context,
+                    packageName = packageName,
+                    screenWidth = screenMetrics.widthPx,
+                    screenHeight = screenMetrics.heightPx,
+                    dockOffsetLeft = if (layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0,
+                    dockOffsetRight = if (layoutSpec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
+                    dockOffsetTop = if (layoutSpec.dockPlacement == ResolvedDockPlacement.TOP) dockPx else 0,
+                    dockOffsetBottom = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0
+                )
+            }
             if (ok) {
                 app.installedAppsRepository.recordRecent(packageName)
                 return true
@@ -866,10 +880,15 @@ fun DxCarRootScreen(
                     },
                     onGoDashboard = { destination = LauncherDestination.DASHBOARD_SPLIT },
                     onSlotClick = { slot ->
+                        val isPlanB = config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED
                         when {
-                            slot.id == "youtube" -> launchYoutubeBest()
+                            slot.id == "youtube" -> {
+                                val yt = app.installedAppsRepository.findBestYoutubePackage()
+                                if (yt != null) launchAppRespectingOptions(yt, preferPlanBRightPane = isPlanB)
+                                else destination = LauncherDestination.FULLSCREEN_YOUTUBE_WEB
+                            }
                             slot.packageName == "ACTION_DIAL" -> app.installedAppsRepository.launchDialer()
-                            !slot.packageName.isNullOrBlank() -> launchAppRespectingOptions(slot.packageName)
+                            !slot.packageName.isNullOrBlank() -> launchAppRespectingOptions(slot.packageName, preferPlanBRightPane = isPlanB)
                             else -> destination = LauncherDestination.APP_DRAWER
                         }
                     },
@@ -933,8 +952,12 @@ fun DxCarRootScreen(
                         val startLatFallback = if (location.latitude != 0.0) location.latitude else config.lastKnownLat
                         val startLonFallback = if (location.longitude != 0.0) location.longitude else config.lastKnownLon
 
+                        val allowPageTwo = config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED ||
+                            config.planAPage2Enabled
+
                         InfiniteLoopTwoPageDashboard(
-                                currentPage = currentDashboardPage,
+                                currentPage = if (!allowPageTwo && currentDashboardPage == 2) 1 else currentDashboardPage,
+                                allowPageTwo = allowPageTwo,
                                 onPageChanged = { nextPage ->
                                     currentDashboardPage = nextPage
                                     if (config.showUiSwitchHint) {
@@ -1835,6 +1858,7 @@ fun DxCarRootScreen(
                     quickReplies = config.quickReplies,
                     scale = config.notificationBannerScale,
                     scaleFactorOverride = config.notificationBannerScaleFloat,
+                    rightHandDrive = config.rightHandDrive,
                     onExpandQuickReplies = { app.notificationCenter.pausePopupDismiss() },
                     onReadAloud = { app.notificationCenter.readMessageAloud(it) },
                     onQuickReply = { item, reply ->
@@ -1852,6 +1876,41 @@ fun DxCarRootScreen(
                     },
                     onMarkRead = { app.notificationCenter.markMessageRead(it) },
                     onDismiss = { app.notificationCenter.dismissPopupMessage() }
+                )
+                val otherNavApps = remember { com.dxcar.launcher.map.SharedLocationResolver.findInstalledOtherNavApps(context) }
+                SharedLocationBanner(
+                    locationItem = sharedLocation,
+                    scale = config.notificationBannerScale,
+                    scaleFactorOverride = config.notificationBannerScaleFloat,
+                    otherNavApps = otherNavApps,
+                    onOpenBuiltInMap = { loc ->
+                        app.notificationCenter.dismissSharedLocation()
+                        destination = LauncherDestination.DASHBOARD_SPLIT
+                        currentDashboardPage = 1
+                        val sLat = if (location.latitude != 0.0) location.latitude else config.lastKnownLat
+                        val sLon = if (location.longitude != 0.0) location.longitude else config.lastKnownLon
+                        app.builtInNavEngine.navigateByQuery(
+                            query = loc.address.ifBlank { loc.label },
+                            startLat = sLat,
+                            startLon = sLon,
+                            explicitDestLat = loc.latitude.takeIf { it != 0.0 },
+                            explicitDestLon = loc.longitude.takeIf { it != 0.0 },
+                            onStatus = { msg -> gestureHudText = msg }
+                        )
+                    },
+                    onOpenGoogleMaps = { loc ->
+                        app.notificationCenter.dismissSharedLocation()
+                        com.dxcar.launcher.map.SharedLocationResolver.openInGoogleMaps(
+                            context, loc.label, loc.address, loc.latitude, loc.longitude
+                        )
+                    },
+                    onOpenOtherMap = { loc, pkg ->
+                        app.notificationCenter.dismissSharedLocation()
+                        com.dxcar.launcher.map.SharedLocationResolver.openInOtherMapChooser(
+                            context, pkg, loc.label, loc.address, loc.latitude, loc.longitude
+                        )
+                    },
+                    onDismiss = { app.notificationCenter.dismissSharedLocation() }
                 )
             }
 
@@ -1999,6 +2058,7 @@ fun DxCarRootScreen(
 @Composable
 private fun InfiniteLoopTwoPageDashboard(
     currentPage: Int,
+    allowPageTwo: Boolean = true,
     onPageChanged: (Int) -> Unit,
     pageZeroContent: @Composable (onSeamDragDelta: (Float) -> Unit, onSeamDragEnd: () -> Unit) -> Unit,
     pageOneContent: @Composable (onSeamDragDelta: (Float) -> Unit, onSeamDragEnd: () -> Unit) -> Unit,
@@ -2019,7 +2079,7 @@ private fun InfiniteLoopTwoPageDashboard(
             scope.launch {
                 val next = when (currentPage) {
                     0 -> (dragPx.value + delta).coerceIn(-widthPx * 0.95f, 0f)
-                    1 -> (dragPx.value + delta).coerceIn(-widthPx * 0.95f, widthPx * 0.95f)
+                    1 -> (dragPx.value + delta).coerceIn(if (allowPageTwo) -widthPx * 0.95f else 0f, widthPx * 0.95f)
                     else -> (dragPx.value + delta).coerceIn(0f, widthPx * 0.95f)
                 }
                 dragPx.snapTo(next)
@@ -2052,7 +2112,7 @@ private fun InfiniteLoopTwoPageDashboard(
                         onPageChanged(0)
                         dragPx.snapTo(0f)
                     }
-                    currentPage == 1 && cur <= -thresholdPx -> {
+                    currentPage == 1 && allowPageTwo && cur <= -thresholdPx -> {
                         dragPx.animateTo(
                             targetValue = -widthPx,
                             animationSpec = tween(
@@ -2101,8 +2161,12 @@ private fun InfiniteLoopTwoPageDashboard(
         }
 
         var keepPageTwoAlive by remember { mutableStateOf(false) }
-        LaunchedEffect(currentPage) {
-            if (currentPage == 2) keepPageTwoAlive = true
+        LaunchedEffect(currentPage, allowPageTwo) {
+            if (!allowPageTwo) {
+                keepPageTwoAlive = false
+            } else if (currentPage == 2) {
+                keepPageTwoAlive = true
+            }
         }
 
         if (currentPage == 0 || (isDragging && currentPage == 1 && curDx > 0f)) {
@@ -2129,7 +2193,7 @@ private fun InfiniteLoopTwoPageDashboard(
             }
         }
 
-        if (currentPage == 2 || isDragging || keepPageTwoAlive) {
+        if (allowPageTwo && (currentPage == 2 || isDragging || keepPageTwoAlive)) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()

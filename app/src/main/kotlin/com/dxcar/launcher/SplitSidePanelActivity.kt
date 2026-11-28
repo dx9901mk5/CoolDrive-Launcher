@@ -6,8 +6,10 @@ import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,14 +21,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.BluetoothConnected
+import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Map
-import androidx.compose.material.icons.rounded.Phone
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Splitscreen
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
@@ -40,67 +44,86 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.dxcar.launcher.accessibility.DxCarAccessibilityService
 import com.dxcar.launcher.comms.CallActionCommand
 import com.dxcar.launcher.data.HomeExperimentMode
 import com.dxcar.launcher.data.ThemeMode
+import com.dxcar.launcher.layout.CoolwalkLayoutEngine
+import com.dxcar.launcher.layout.ResolvedDockPlacement
+import com.dxcar.launcher.layout.ScreenMetrics
+import com.dxcar.launcher.map.SharedLocationResolver
+import com.dxcar.launcher.overlay.PersistentDockOverlayService
 import com.dxcar.launcher.system.PermissionHelper
-import com.dxcar.launcher.theme.DxCarTheme
+import com.dxcar.launcher.system.RootHelperBridge
 import com.dxcar.launcher.theme.DayNightEngine
+import com.dxcar.launcher.theme.DxCarTheme
 import com.dxcar.launcher.theme.LocalDxCarColors
+import com.dxcar.launcher.ui.BuiltInShortcutTokens
 import com.dxcar.launcher.ui.IncomingCallBanner
 import com.dxcar.launcher.ui.IncomingMessageBanner
 import com.dxcar.launcher.ui.MediaControlCard
+import com.dxcar.launcher.ui.SharedLocationBanner
 import com.dxcar.launcher.ui.bouncyClickable
+import com.dxcar.launcher.ui.buildRecentDockSlots
 import kotlinx.coroutines.delay
 
 /**
- * Dedicated resizable non-Home Activity built specifically to run side-by-side with
- * REAL native Google Maps (`com.google.android.apps.maps`) in Android Native Split-Screen!
- *
- * Why a separate Activity?
- * Android WindowManager blocks `CATEGORY_HOME` tasks from entering native Split-Screen on many
- * Android 10-14 AI Box ROMs. By hosting DX-Car Launcher's AA Media + Quick Status panel in this
- * dedicated resizable Activity, Android lets real Google Maps run on one side and DX-Car Launcher's
- * AA Media/Comms side-panel on the other!
+ * Dedicated resizable non-Home Activity serving as:
+ * 1) Plan B UI 1 Right 30% Media Split App (runs natively side-by-side with Left 70% Google Maps!
+ *    Houses ALL Plan A right-side elements: Media Player + Album Cover + Weather + 6 Shortcuts + Integrated Bottom Dock,
+ *    where clicking any Dock App launches directly into the Right 30% Split Window without disturbing Google Maps!)
+ * 2) Plan A / Standard native AOSP Split-Screen side panel alongside Google Maps.
  */
 class SplitSidePanelActivity : ComponentActivity() {
 
     private val isSplitMode = mutableStateOf(false)
+    private val isPlanBSplitHost = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        hideSystemBars()
         isSplitMode.value = isInMultiWindowMode
 
-        val autoSplit = intent.getBooleanExtra(EXTRA_AUTO_LAUNCH_MAPS, true)
-        val navPkg = intent.getStringExtra(EXTRA_NAV_PACKAGE)?.takeIf { it.isNotBlank() }
         val app = application as DxCarApp
+        val autoSplit = intent.getBooleanExtra(EXTRA_AUTO_LAUNCH_MAPS, false)
+        val planBIntentFlag = intent.getBooleanExtra(EXTRA_PLAN_B_MODE, false) ||
+            app.preferences.config.value.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED
+        isPlanBSplitHost.value = planBIntentFlag
+        val navPkg = intent.getStringExtra(EXTRA_NAV_PACKAGE)?.takeIf { it.isNotBlank() }
 
         setContent {
             val config by app.preferences.config.collectAsState()
             val sysStatus by app.systemStatusMonitor.status.collectAsState()
             val media by app.mediaControlBridge.mediaState.collectAsState()
+            val weather by app.weatherRepository.weather.collectAsState()
+            val installedApps by app.installedAppsRepository.apps.collectAsState()
+            val liveRecentPackages by app.installedAppsRepository.recentPackages.collectAsState()
             val activeCall by app.notificationCenter.activeCall.collectAsState()
             val popupMessage by app.notificationCenter.popupMessage.collectAsState()
-            val messages by app.notificationCenter.messages.collectAsState()
+            val sharedLocation by app.notificationCenter.sharedLocation.collectAsState()
             val accConnected by DxCarAccessibilityService.isConnected.collectAsState()
             val inSplit by isSplitMode
+            val isPlanB = isPlanBSplitHost.value || config.homeExperimentMode == HomeExperimentMode.PLAN_D_ROOT_RESERVED
             val targetNavPkg = navPkg ?: config.planCNavPackage.ifBlank { "com.google.android.apps.maps" }
 
             var splitTriggered by remember { mutableStateOf(false) }
 
-            // Automatically enter AOSP Draggable Split-Screen (Nav on Left, Media Side-Panel on Right!)
-            LaunchedEffect(autoSplit, accConnected, targetNavPkg) {
-                if (autoSplit && !splitTriggered && !isInMultiWindowMode) {
+            // Only run AOSP Accessibility auto-split when explicitly requested in non-Plan-B mode!
+            LaunchedEffect(autoSplit, isPlanB, accConnected, targetNavPkg) {
+                if (autoSplit && !isPlanB && !splitTriggered && !isInMultiWindowMode) {
                     splitTriggered = true
                     delay(320L)
                     val acc = DxCarAccessibilityService.instance
                     if (acc != null) {
-                        // Put Navigation on Left Primary Stage and SplitSidePanelActivity on Right Secondary Stage!
                         app.installedAppsRepository.launchAppFullscreen(targetNavPkg, forceFullscreenWindowMode = false)
                         val deadline = System.currentTimeMillis() + 1_800L
                         while (System.currentTimeMillis() < deadline) {
@@ -125,10 +148,94 @@ class SplitSidePanelActivity : ComponentActivity() {
                 }
             }
 
+            val dm = resources.displayMetrics
+            val screenMetrics = remember(dm.widthPixels, dm.heightPixels, dm.densityDpi) {
+                ScreenMetrics(dm.widthPixels, dm.heightPixels, dm.densityDpi)
+            }
+            val layoutSpec = remember(screenMetrics, config.dockPositionMode, config.rightHandDrive, config.primarySplitRatio) {
+                CoolwalkLayoutEngine.compute(
+                    metrics = screenMetrics,
+                    dockMode = config.dockPositionMode,
+                    rightHandDrive = config.rightHandDrive,
+                    customPrimaryRatio = config.primarySplitRatio
+                )
+            }
+            val dockSlots = remember(liveRecentPackages, config.recentDockPackages, config.pinnedDockPackages, installedApps) {
+                buildRecentDockSlots(
+                    recentPackages = (liveRecentPackages + config.recentDockPackages).distinct(),
+                    fallbackPackages = config.pinnedDockPackages,
+                    installedApps = installedApps,
+                    activePackage = ""
+                )
+            }
+
+            fun launchIntoRight30Split(targetPackage: String) {
+                if (targetPackage.isBlank()) return
+                val helperCfg = RootHelperBridge.readPlanBConfig(this@SplitSidePanelActivity)
+                val dockPx = (layoutSpec.dockThicknessDp * screenMetrics.density).toInt().coerceAtLeast(0)
+                val launchedViaHelper = if (isPlanB && RootHelperBridge.isRootHelperInstalled(this@SplitSidePanelActivity)) {
+                    RootHelperBridge.launchPlanBRightPaneApp(
+                        context = this@SplitSidePanelActivity,
+                        packageName = targetPackage,
+                        screenWidth = screenMetrics.widthPx,
+                        screenHeight = screenMetrics.heightPx,
+                        dockOffsetLeft = if (layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0,
+                        dockOffsetRight = if (layoutSpec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
+                        dockOffsetTop = if (layoutSpec.dockPlacement == ResolvedDockPlacement.TOP) dockPx else 0,
+                        dockOffsetBottom = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0,
+                        ui1Ratio = if (helperCfg.planBEnabled) helperCfg.ui1SplitRatio else config.primarySplitRatio,
+                        ui1Swapped = config.page1Swapped
+                    )
+                } else {
+                    false
+                }
+                if (launchedViaHelper) {
+                    app.installedAppsRepository.recordRecent(targetPackage)
+                } else {
+                    app.installedAppsRepository.launchAppFullscreen(targetPackage, forceFullscreenWindowMode = false)
+                }
+            }
+
+            fun dispatchPlanBSwapOrPage(targetPage: Int) {
+                val helperCfg = RootHelperBridge.readPlanBConfig(this@SplitSidePanelActivity)
+                val dockPx = (layoutSpec.dockThicknessDp * screenMetrics.density).toInt().coerceAtLeast(0)
+                PersistentDockOverlayService.planBActivePage.value = targetPage
+                PersistentDockOverlayService.planBInFullscreenApp.value = false
+                RootHelperBridge.applyPlanBPage(
+                    context = this@SplitSidePanelActivity,
+                    page = targetPage,
+                    screenWidth = screenMetrics.widthPx,
+                    screenHeight = screenMetrics.heightPx,
+                    dockOffsetLeft = if (layoutSpec.dockPlacement == ResolvedDockPlacement.LEFT) dockPx else 0,
+                    dockOffsetRight = if (layoutSpec.dockPlacement == ResolvedDockPlacement.RIGHT) dockPx else 0,
+                    dockOffsetTop = if (layoutSpec.dockPlacement == ResolvedDockPlacement.TOP) dockPx else 0,
+                    dockOffsetBottom = if (layoutSpec.dockPlacement == ResolvedDockPlacement.BOTTOM) dockPx else 0,
+                    ui1Ratio = if (helperCfg.planBEnabled) helperCfg.ui1SplitRatio else config.primarySplitRatio,
+                    ui1Swapped = app.preferences.config.value.page1Swapped,
+                    ui2Ratio = if (helperCfg.planBEnabled) helperCfg.ui2SplitRatio else config.page2SplitRatio,
+                    ui2Swapped = app.preferences.config.value.page2Swapped
+                )
+            }
+
+            fun openMainLauncherWithAction(extraAction: String?) {
+                if (isPlanB) {
+                    RootHelperBridge.parkPlanBWindows(
+                        this@SplitSidePanelActivity,
+                        screenMetrics.widthPx,
+                        screenMetrics.heightPx
+                    )
+                }
+                startActivity(
+                    Intent(this@SplitSidePanelActivity, MainActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                        if (extraAction != null) putExtra(MainActivity.EXTRA_ACTION, extraAction)
+                    }
+                )
+            }
+
             val systemIsDark =
                 (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
             val isNight = DayNightEngine.isNightNow(config, sysStatus.now, systemIsDark)
-            val unreadCount = remember(messages) { messages.count { !it.isRead } }
 
             DxCarTheme(
                 isNight = isNight,
@@ -142,99 +249,39 @@ class SplitSidePanelActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxSize()
                         .background(colors.canvasBackground)
-                        .padding(10.dp)
+                        .padding(8.dp)
                 ) {
                     Column(
                         modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Top Compact Action Header
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Surface(
-                                color = colors.cardSurface,
-                                shape = RoundedCornerShape(16.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .border(1.dp, colors.cardBorder, RoundedCornerShape(16.dp))
-                                    .bouncyClickable {
-                                        val acc = DxCarAccessibilityService.instance
-                                        if (!isInMultiWindowMode && acc != null) {
-                                            acc.toggleSplitScreen()
-                                        }
-                                        app.installedAppsRepository.launchPackageAdjacent(targetNavPkg)
-                                    }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(Icons.Rounded.Map, contentDescription = null, tint = colors.accent, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        text = if (inSplit) "重開導航 App" else "啟動分割導航",
-                                        color = colors.primaryText,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1
-                                    )
-                                }
-                            }
-
-                            Surface(
-                                color = colors.accent,
-                                shape = RoundedCornerShape(16.dp),
-                                modifier = Modifier.bouncyClickable {
-                                    startActivity(
-                                        Intent(this@SplitSidePanelActivity, MainActivity::class.java)
-                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                                    )
-                                    finish()
-                                }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(Icons.Rounded.Home, contentDescription = null, tint = colors.onAccent, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(5.dp))
-                                    Text("回首頁", color = colors.onAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-
-                        // Hint banner if Accessibility isn't enabled yet & not in split-screen
-                        if (!inSplit && !accConnected) {
+                        if (!isPlanB && !inSplit && !accConnected) {
                             Surface(
                                 color = colors.cardSurfaceElevated,
-                                shape = RoundedCornerShape(16.dp),
+                                shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .border(1.dp, colors.accent.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+                                    .border(1.dp, colors.accent.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
                                     .bouncyClickable {
                                         PermissionHelper.openAccessibilitySettings(this@SplitSidePanelActivity)
                                     }
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(12.dp),
+                                    modifier = Modifier.padding(10.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(Icons.Rounded.Splitscreen, contentDescription = null, tint = colors.accent)
-                                    Spacer(Modifier.width(10.dp))
+                                    Spacer(Modifier.width(8.dp))
                                     Text(
-                                        text = "點此開啟「DX-Car Launcher 無障礙服務」即可一鍵自動與真實 Google 地圖分割；也可直接用車機原生分割鈕配對 Google 地圖！",
+                                        text = "開啟無障礙服務即可自動分割；或用系統分割配對 Google 地圖",
                                         color = colors.primaryText,
-                                        fontSize = 12.sp
+                                        fontSize = 11.5.sp
                                     )
                                 }
                             }
                         }
 
-                        // Full AA Media Control Card
+                        // FULL PLAN-A-STYLE MEDIA CONTROL CARD (Album Cover + Weather + 6 Shortcuts!)
                         Box(
                             modifier = Modifier
                                 .weight(1f)
@@ -244,9 +291,20 @@ class SplitSidePanelActivity : ComponentActivity() {
                         ) {
                             MediaControlCard(
                                 media = media,
-                                isPrimary = true,
-                                pureMusicMode = config.homeExperimentMode == HomeExperimentMode.PLAN_C_APP_AND_MEDIA,
-                                showSwapButton = false,
+                                weather = weather,
+                                isPrimary = false,
+                                pureMusicMode = false,
+                                showSwapButton = true,
+                                showSixShortcuts = config.showSixShortcutsInMediaPanel,
+                                customShortcutSlots = config.customShortcutSlots,
+                                installedApps = installedApps,
+                                splitShortcuts = config.splitShortcuts,
+                                onWeatherClick = {
+                                    app.weatherRepository.openGoogleWeatherApp(
+                                        this@SplitSidePanelActivity,
+                                        config.weatherAppPackage
+                                    )
+                                },
                                 onPlayPause = { app.mediaControlBridge.togglePlayPause() },
                                 onNext = { app.mediaControlBridge.skipNext() },
                                 onPrevious = { app.mediaControlBridge.skipPrevious() },
@@ -254,69 +312,125 @@ class SplitSidePanelActivity : ComponentActivity() {
                                 onSelectSession = { app.mediaControlBridge.selectSession(it) },
                                 onOpenMediaApp = {
                                     val pkg = media.packageName
-                                    if (pkg.isNotBlank()) app.installedAppsRepository.launchAppFullscreen(pkg)
+                                    if (pkg.isNotBlank()) launchIntoRight30Split(pkg)
                                 },
                                 onOpenYoutubeFullscreen = {
                                     val yt = app.installedAppsRepository.findBestYoutubePackage()
-                                    if (yt != null) app.installedAppsRepository.launchAppFullscreen(yt)
+                                    if (yt != null) launchIntoRight30Split(yt)
                                 },
                                 onSwapRequested = {
-                                    app.installedAppsRepository.launchPackageAdjacent(targetNavPkg)
+                                    if (isPlanB) {
+                                        app.preferences.update { it.copy(page1Swapped = !it.page1Swapped) }
+                                        dispatchPlanBSwapOrPage(1)
+                                    } else {
+                                        app.installedAppsRepository.launchPackageAdjacent(targetNavPkg)
+                                    }
+                                },
+                                onCustomSlotEmptyClick = {
+                                    openMainLauncherWithAction(MainActivity.EXTRA_GO_DASHBOARD)
+                                },
+                                onCustomSlotLaunch = { token ->
+                                    when {
+                                        token == BuiltInShortcutTokens.SETTINGS ->
+                                            openMainLauncherWithAction(MainActivity.EXTRA_OPEN_SETTINGS)
+                                        token == BuiltInShortcutTokens.DIALER ->
+                                            app.installedAppsRepository.launchDialer()
+                                        token == BuiltInShortcutTokens.DAY_NIGHT -> {
+                                            val next = if (isNight) ThemeMode.FORCE_DAY else ThemeMode.FORCE_NIGHT
+                                            app.preferences.update { it.copy(themeMode = next) }
+                                        }
+                                        token == BuiltInShortcutTokens.YOUTUBE -> {
+                                            val yt = app.installedAppsRepository.findBestYoutubePackage()
+                                            if (yt != null) launchIntoRight30Split(yt)
+                                        }
+                                        !token.startsWith("__") -> launchIntoRight30Split(token)
+                                    }
                                 }
                             )
                         }
 
-                        // Compact Bottom Status Card
+                        // INTEGRATED PLAN B BOTTOM DOCK BAR (Clicking any Dock App launches directly in Right 30% Split Window!)
                         Surface(
                             color = colors.cardSurface,
-                            shape = cardShape,
+                            shape = RoundedCornerShape(18.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(72.dp)
-                                .border(colors.cardBorderWidthDp.dp, colors.cardBorder, cardShape)
+                                .height(62.dp)
+                                .border(colors.cardBorderWidthDp.dp, colors.cardBorder, RoundedCornerShape(18.dp))
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(horizontal = 14.dp),
+                                    .padding(horizontal = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
+                                // App Drawer button
+                                Surface(
+                                    color = colors.accent.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier
-                                        .weight(1f)
-                                        .bouncyClickable { app.installedAppsRepository.launchDialer() }
+                                        .size(44.dp)
+                                        .bouncyClickable { openMainLauncherWithAction(MainActivity.EXTRA_OPEN_DRAWER) }
                                 ) {
-                                    Icon(
-                                        imageVector = if (sysStatus.bluetoothConnected) Icons.Rounded.BluetoothConnected else Icons.Rounded.Phone,
-                                        contentDescription = null,
-                                        tint = if (sysStatus.bluetoothConnected) colors.accent else colors.secondaryText,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                    Column {
-                                        Text(
-                                            text = sysStatus.connectedBtName.ifBlank { "藍牙電話" },
-                                            color = colors.primaryText,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = "${sysStatus.time24h} · ${if (unreadCount > 0) "$unreadCount 則未讀" else "真實地圖分割中"}",
-                                            color = colors.secondaryText,
-                                            fontSize = 11.sp
-                                        )
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Rounded.Apps, contentDescription = "應用程式", tint = colors.accent, modifier = Modifier.size(22.dp))
                                     }
                                 }
 
+                                // Scrollable Dock App Icons -> Directly launch into Right 30% Split Window!
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    dockSlots.forEach { slot ->
+                                        val iconBmp = slot.installedApp?.icon
+                                        Surface(
+                                            color = colors.cardSurfaceElevated,
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier
+                                                .size(44.dp)
+                                                .border(1.dp, colors.cardBorder, RoundedCornerShape(12.dp))
+                                                .bouncyClickable {
+                                                    when {
+                                                        slot.packageName == "ACTION_DIAL" -> app.installedAppsRepository.launchDialer()
+                                                        !slot.packageName.isNullOrBlank() -> launchIntoRight30Split(slot.packageName)
+                                                        slot.id == "youtube" -> {
+                                                            app.installedAppsRepository.findBestYoutubePackage()?.let { launchIntoRight30Split(it) }
+                                                        }
+                                                        else -> openMainLauncherWithAction(MainActivity.EXTRA_OPEN_DRAWER)
+                                                    }
+                                                }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize().padding(5.dp)) {
+                                                if (iconBmp != null) {
+                                                    Image(
+                                                        bitmap = iconBmp.asImageBitmap(),
+                                                        contentDescription = slot.label,
+                                                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp))
+                                                    )
+                                                } else {
+                                                    Icon(
+                                                        imageVector = slot.fallbackIcon,
+                                                        contentDescription = slot.label,
+                                                        tint = slot.fallbackTint,
+                                                        modifier = Modifier.size(22.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Quick Settings / Day-Night / Home
                                 Surface(
                                     color = colors.cardSurfaceElevated,
-                                    shape = RoundedCornerShape(14.dp),
+                                    shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier
-                                        .size(42.dp)
+                                        .size(40.dp)
                                         .bouncyClickable {
                                             val next = if (isNight) ThemeMode.FORCE_DAY else ThemeMode.FORCE_NIGHT
                                             app.preferences.update { it.copy(themeMode = next) }
@@ -325,19 +439,33 @@ class SplitSidePanelActivity : ComponentActivity() {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             imageVector = if (isNight) Icons.Rounded.DarkMode else Icons.Rounded.LightMode,
-                                            contentDescription = "切換日夜",
+                                            contentDescription = "日夜切換",
                                             tint = colors.primaryText,
-                                            modifier = Modifier.size(20.dp)
+                                            modifier = Modifier.size(19.dp)
                                         )
+                                    }
+                                }
+
+                                Surface(
+                                    color = colors.cardSurfaceElevated,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .bouncyClickable { openMainLauncherWithAction(MainActivity.EXTRA_OPEN_SETTINGS) }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Rounded.Settings, contentDescription = "設定", tint = colors.primaryText, modifier = Modifier.size(19.dp))
                                     }
                                 }
                             }
                         }
                     }
 
-                    // Floating Call / Message Banners inside split panel
+                    // Floating Call / Message / Shared Location Banners inside split panel
+                    val otherNavApps = remember { SharedLocationResolver.findInstalledOtherNavApps(this@SplitSidePanelActivity) }
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.align(Alignment.TopCenter)
                     ) {
                         IncomingCallBanner(
@@ -352,11 +480,54 @@ class SplitSidePanelActivity : ComponentActivity() {
                             quickReplies = config.quickReplies,
                             scale = config.notificationBannerScale,
                             scaleFactorOverride = config.notificationBannerScaleFloat,
+                            rightHandDrive = config.rightHandDrive,
                             onExpandQuickReplies = { app.notificationCenter.pausePopupDismiss() },
                             onReadAloud = { app.notificationCenter.readMessageAloud(it) },
                             onQuickReply = { item, reply -> app.notificationCenter.sendQuickReply(item, reply) },
                             onMarkRead = { app.notificationCenter.markMessageRead(it) },
                             onDismiss = { app.notificationCenter.dismissPopupMessage() }
+                        )
+                        SharedLocationBanner(
+                            locationItem = sharedLocation,
+                            scale = config.notificationBannerScale,
+                            scaleFactorOverride = config.notificationBannerScaleFloat,
+                            otherNavApps = otherNavApps,
+                            onOpenBuiltInMap = { loc ->
+                                app.notificationCenter.dismissSharedLocation()
+                                val curLoc = app.locationTracker.location.value
+                                val sLat = if (curLoc.latitude != 0.0) curLoc.latitude else config.lastKnownLat
+                                val sLon = if (curLoc.longitude != 0.0) curLoc.longitude else config.lastKnownLon
+                                app.builtInNavEngine.navigateByQuery(
+                                    query = loc.address.ifBlank { loc.label },
+                                    startLat = sLat,
+                                    startLon = sLon,
+                                    explicitDestLat = loc.latitude.takeIf { it != 0.0 },
+                                    explicitDestLon = loc.longitude.takeIf { it != 0.0 }
+                                )
+                                openMainLauncherWithAction(MainActivity.EXTRA_GO_DASHBOARD)
+                            },
+                            onOpenGoogleMaps = { loc ->
+                                app.notificationCenter.dismissSharedLocation()
+                                SharedLocationResolver.openInGoogleMaps(
+                                    this@SplitSidePanelActivity,
+                                    loc.label,
+                                    loc.address,
+                                    loc.latitude,
+                                    loc.longitude
+                                )
+                            },
+                            onOpenOtherMap = { loc, pkg ->
+                                app.notificationCenter.dismissSharedLocation()
+                                SharedLocationResolver.openInOtherMapChooser(
+                                    this@SplitSidePanelActivity,
+                                    pkg,
+                                    loc.label,
+                                    loc.address,
+                                    loc.latitude,
+                                    loc.longitude
+                                )
+                            },
+                            onDismiss = { app.notificationCenter.dismissSharedLocation() }
                         )
                     }
                 }
@@ -364,19 +535,41 @@ class SplitSidePanelActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_PLAN_B_MODE, false)) {
+            isPlanBSplitHost.value = true
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        hideSystemBars()
+    }
+
     override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: Configuration) {
         super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig)
         isSplitMode.value = isInMultiWindowMode
     }
 
+    private fun hideSystemBars() {
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+    }
+
     companion object {
-        private const val EXTRA_AUTO_LAUNCH_MAPS = "extra_auto_launch_maps"
-        private const val EXTRA_NAV_PACKAGE = "extra_nav_package"
+        const val EXTRA_AUTO_LAUNCH_MAPS = "extra_auto_launch_maps"
+        const val EXTRA_NAV_PACKAGE = "extra_nav_package"
+        const val EXTRA_PLAN_B_MODE = "extra_plan_b_mode"
 
         fun launchWithRealGoogleMaps(context: Context, navPackage: String? = null) {
             val intent = Intent(context, SplitSidePanelActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 putExtra(EXTRA_AUTO_LAUNCH_MAPS, true)
+                putExtra(EXTRA_PLAN_B_MODE, false)
                 if (!navPackage.isNullOrBlank()) {
                     putExtra(EXTRA_NAV_PACKAGE, navPackage)
                 }

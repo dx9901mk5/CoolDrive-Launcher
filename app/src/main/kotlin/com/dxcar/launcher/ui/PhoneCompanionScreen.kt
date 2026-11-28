@@ -785,6 +785,118 @@ fun PhoneCompanionScreen(
                 )
             }
 
+            // ==================== SEND ADDRESS / LOCATION TO CAR CARD ====================
+            run {
+                var shareQuery by remember { mutableStateOf("") }
+                var shareSending by remember { mutableStateOf(false) }
+                var shareResultTip by remember { mutableStateOf("") }
+                val shareScope = rememberCoroutineScope()
+
+                Surface(
+                    color = colors.cardSurface,
+                    shape = RoundedCornerShape(22.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.2.dp, Color(0xFF38BDF8).copy(alpha = 0.65f), RoundedCornerShape(22.dp))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = str(
+                                "📍 分享地址／關鍵字傳送到車機導航",
+                                "📍 分享地址／关键词发送到车机导航",
+                                "📍 Send Address or Place to Car Map",
+                                "📍 住所・スポットを車載機へ送信"
+                            ),
+                            color = colors.primaryText,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = str(
+                                "可在任何 App（LINE / Google 地圖 / 瀏覽器）點「分享 → DX-Car」，或直接在此輸入地址、店名或地圖連結；手機會自動解析實際地址並送到車機，讓您選擇用內建地圖、Google 地圖或其他地圖開啟。",
+                                "可在任意 App（微信 / Google 地图 / 浏览器）点「分享 → DX-Car」，或直接在此输入地址、店名或地图链接；手机自动解析实际地址并发送到车机，供您选择打开的地图。",
+                                "Share from any app (Google Maps / LINE / Browser -> DX-Car) or enter an address/keyword below. Phone resolves the real address and lets you pick which map opens it on the Car.",
+                                "他アプリから「共有 → DX-Car」または下に住所・店名を入力すると、スマホが住所を解析して車載機へ送信します。"
+                            ),
+                            color = colors.secondaryText,
+                            fontSize = 12.sp
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = shareQuery,
+                                onValueChange = { shareQuery = it },
+                                singleLine = true,
+                                placeholder = {
+                                    Text(
+                                        str("輸入地址、地標關鍵字或貼上地圖連結…", "输入地址、地标关键词或粘贴地图链接…", "Address, place name, or Maps link…", "住所・店名・マップURLを入力…"),
+                                        fontSize = 12.sp
+                                    )
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                            Button(
+                                enabled = !shareSending && shareQuery.isNotBlank(),
+                                onClick = {
+                                    val q = shareQuery.trim()
+                                    if (q.isBlank()) return@Button
+                                    shareSending = true
+                                    shareResultTip = DxCarI18n.tr("🔍 正在解析實際地址…", "🔍 正在解析实际地址…", "🔍 Resolving address…", "🔍 住所を解析中…")
+                                    shareScope.launch {
+                                        val app = com.dxcar.launcher.DxCarApp.instance
+                                        val curLoc = app?.locationTracker?.location?.value
+                                        val biasLat = if (curLoc != null && curLoc.latitude != 0.0) curLoc.latitude else config.lastKnownLat
+                                        val biasLon = if (curLoc != null && curLoc.longitude != 0.0) curLoc.longitude else config.lastKnownLon
+                                        val resolved = if (app != null) {
+                                            com.dxcar.launcher.map.SharedLocationResolver.resolveSharedText(
+                                                context = context,
+                                                navEngine = app.builtInNavEngine,
+                                                rawText = q,
+                                                biasLat = biasLat,
+                                                biasLon = biasLon
+                                            )
+                                        } else {
+                                            com.dxcar.launcher.map.ResolvedSharedLocation(q, q, 0.0, 0.0)
+                                        }
+                                        val sent = BluetoothCompanionService.sendPacketFromPhone(
+                                            BridgePacket(
+                                                type = PacketType.SHARED_LOCATION,
+                                                id = UUID.randomUUID().toString(),
+                                                sender = resolved.label,
+                                                text = resolved.address,
+                                                latitude = resolved.latitude,
+                                                longitude = resolved.longitude
+                                            )
+                                        )
+                                        shareSending = false
+                                        shareResultTip = if (sent) {
+                                            "✓ 已傳送給車機：${resolved.label}（${resolved.address}）"
+                                        } else {
+                                            "⚠️ 已解析「${resolved.address}」並排入傳送，請確認已連上車機"
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = colors.accent, contentColor = colors.onAccent),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(str("傳送", "发送", "Send", "送信"), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        if (shareResultTip.isNotBlank()) {
+                            Text(shareResultTip, color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+
             // ==================== CATEGORY 3: 藍牙目標與通知過濾設定 ====================
             PhoneCategoryLabel(
                 title = str(
@@ -903,10 +1015,10 @@ fun PhoneCompanionScreen(
                         Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                             Text(
                                 text = str(
-                                    "電話通知擷取（預設關閉 · 走原車藍牙電話）",
-                                    "电话通知捕获（默认关闭 · 走原车蓝牙电话）",
-                                    "Phone Call Capture (Default Off)",
-                                    "電話着信キャプチャ（既定オフ）"
+                                    "電話通知擷取（預設開啟 · 同步來電至車機）",
+                                    "电话通知捕获（默认开启 · 同步来电至车机）",
+                                    "Phone Call Capture (Default On)",
+                                    "電話着信キャプチャ（既定オン）"
                                 ),
                                 color = colors.primaryText,
                                 fontSize = 13.sp,
@@ -914,10 +1026,10 @@ fun PhoneCompanionScreen(
                             )
                             Text(
                                 text = str(
-                                    "開啟後才會轉傳來電至車機並攔截原車通知；未勾選的系統 App 一律不轉傳",
-                                    "开启后才会转发来电至车机并拦截原车通知；未勾选的系统 App 一律不转发",
-                                    "Enable only if you want DX-Car to forward calls & intercept stock alerts",
-                                    "ON 時のみ着信転送・純正通知ブロックを行います"
+                                    "即時轉傳聯絡人名稱與未知來電號碼至車機，通話結束自動消失；未勾選的系統 App 不轉傳",
+                                    "实时转发联系人名称与未知来电号码至车机，通话结束自动消失；未勾选的系统 App 不转发",
+                                    "Forwards caller name & unknown numbers to Car in real time and auto-clears when ended",
+                                    "発信者名・番号を車載機へリアルタイム転送し、通話終了時に自動消去します"
                                 ),
                                 color = colors.secondaryText,
                                 fontSize = 11.sp

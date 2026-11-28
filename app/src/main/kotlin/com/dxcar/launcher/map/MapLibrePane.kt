@@ -588,84 +588,217 @@ fun LiveMapCard(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (builtInNavState.isNavigating || builtInNavState.isSearching || builtInNavState.isRouting) {
-                Surface(
-                    color = colors.navGreenBanner,
-                    shape = RoundedCornerShape(18.dp),
-                    shadowElevation = 10.dp,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
+                var showEtaArrivalTime by remember { mutableStateOf(false) }
+                val remKmText = if (builtInNavState.remainingDistanceMeters >= 1000) {
+                    "%.1f km".format(builtInNavState.remainingDistanceMeters / 1000f)
+                } else {
+                    "${builtInNavState.remainingDistanceMeters} m"
+                }
+                val remTotalMin = (builtInNavState.remainingDurationSeconds / 60).coerceAtLeast(1)
+                val remDurationText = if (remTotalMin >= 60) {
+                    val h = remTotalMin / 60
+                    val m = remTotalMin % 60
+                    str("$h 小時 $m 分", "$h 小时 $m 分", "${h}h ${m}m", "${h}時間${m}分")
+                } else {
+                    str("$remTotalMin 分鐘", "$remTotalMin 分钟", "$remTotalMin min", "$remTotalMin 分")
+                }
+                val etaClockStr = remember(builtInNavState.remainingDurationSeconds) {
+                    val arrivalMs = System.currentTimeMillis() + builtInNavState.remainingDurationSeconds * 1000L
+                    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(arrivalMs))
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Surface(
+                        color = if (builtInNavState.isHighwayEarlyAlert) Color(0xFF065F46) else colors.navGreenBanner,
+                        shape = RoundedCornerShape(18.dp),
+                        shadowElevation = 10.dp,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 11.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .then(
+                                if (builtInNavState.isHighwayEarlyAlert) {
+                                    Modifier.border(1.5.dp, Color(0xFF34D399), RoundedCornerShape(18.dp))
+                                } else {
+                                    Modifier
+                                }
+                            )
                     ) {
-                        if (builtInNavState.isSearching || builtInNavState.isRouting) {
-                            CircularProgressIndicator(
-                                color = Color.White,
-                                strokeWidth = 3.dp,
-                                modifier = Modifier.size(28.dp)
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Rounded.TurnRight,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(34.dp)
-                            )
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            val distTxt = if (builtInNavState.distanceToNextTurnMeters >= 1000) {
-                                "%.1f km".format(builtInNavState.distanceToNextTurnMeters / 1000f)
-                            } else {
-                                "${builtInNavState.distanceToNextTurnMeters} m"
-                            }
-                            Text(
-                                text = when {
-                                    builtInNavState.isSearching -> str(
-                                        "✨ 正在於內建地圖搜尋目的地…",
-                                        "✨ 正在于内置地图搜索目的地…",
-                                        "✨ Searching destination on built-in map…",
-                                        "✨ 内蔵マップで目的地を検索中…"
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (builtInNavState.isSearching || builtInNavState.isRouting) {
+                                    CircularProgressIndicator(
+                                        color = Color.White,
+                                        strokeWidth = 3.dp,
+                                        modifier = Modifier.size(28.dp)
                                     )
-                                    builtInNavState.isRouting -> str(
-                                        "🗺️ 正在規劃內建地圖導航藍線…",
-                                        "🗺️ 正在规划内置地图导航路线…",
-                                        "🗺️ Calculating route on built-in map…",
-                                        "🗺️ 内蔵マップでルートを計算中…"
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Rounded.TurnRight,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(34.dp)
                                     )
-                                    else -> "$distTxt · ${builtInNavState.currentInstructionZh}"
-                                },
-                                color = Color.White,
-                                fontSize = if (isPrimary) 18.sp else 14.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            if (builtInNavState.isNavigating) {
-                                val remKm = "%.1f km".format(builtInNavState.remainingDistanceMeters / 1000f)
-                                val remMin = (builtInNavState.remainingDurationSeconds / 60).coerceAtLeast(1)
-                                Text(
-                                    text = str(
-                                        "目的地：${builtInNavState.destinationName} · 剩餘 $remKm · 約 $remMin 分鐘",
-                                        "目的地：${builtInNavState.destinationName} · 剩余 $remKm · 约 $remMin 分钟",
-                                        "Dest: ${builtInNavState.destinationName} · $remKm left · ~$remMin min",
-                                        "目的地：${builtInNavState.destinationName} · 残り $remKm · 約 $remMin 分"
-                                    ),
-                                    color = Color(0xFFD1FAE5),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                }
+                                Spacer(Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    val distTxt = if (builtInNavState.distanceToNextTurnMeters >= 1000) {
+                                        "%.1f km".format(builtInNavState.distanceToNextTurnMeters / 1000f)
+                                    } else {
+                                        "${builtInNavState.distanceToNextTurnMeters} m"
+                                    }
+                                    Text(
+                                        text = when {
+                                            builtInNavState.isSearching -> str(
+                                                "✨ 正在於內建地圖搜尋目的地…",
+                                                "✨ 正在于内置地图搜索目的地…",
+                                                "✨ Searching destination on built-in map…",
+                                                "✨ 内蔵マップで目的地を検索中…"
+                                            )
+                                            builtInNavState.isRouting -> str(
+                                                "🗺️ 正在規劃最快導航路線…",
+                                                "🗺️ 正在规划最快导航路线…",
+                                                "🗺️ Calculating fastest route…",
+                                                "🗺️ 最速ルートを計算中…"
+                                            )
+                                            else -> "$distTxt · ${builtInNavState.currentInstructionZh}"
+                                        },
+                                        color = Color.White,
+                                        fontSize = if (isPrimary) 18.sp else 14.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (builtInNavState.isNavigating) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            modifier = Modifier.padding(top = 2.dp)
+                                        ) {
+                                            // Tap to toggle Remaining Time <-> Estimated Arrival Time (ETA)
+                                            Surface(
+                                                color = Color.Black.copy(alpha = 0.24f),
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier.bouncyClickable {
+                                                    showEtaArrivalTime = !showEtaArrivalTime
+                                                }
+                                            ) {
+                                                Text(
+                                                    text = if (showEtaArrivalTime) {
+                                                        str(
+                                                            "🕒 預計 $etaClockStr 抵達 · 剩餘 $remKmText ⇄",
+                                                            "🕒 预计 $etaClockStr 抵达 · 剩余 $remKmText ⇄",
+                                                            "🕒 ETA $etaClockStr · $remKmText left ⇄",
+                                                            "🕒 到着予定 $etaClockStr · 残り $remKmText ⇄"
+                                                        )
+                                                    } else {
+                                                        str(
+                                                            "⏱ 剩餘 $remDurationText · $remKmText ⇄",
+                                                            "⏱ 剩余 $remDurationText · $remKmText ⇄",
+                                                            "⏱ $remDurationText · $remKmText left ⇄",
+                                                            "⏱ 残り $remDurationText · $remKmText ⇄"
+                                                        )
+                                                    },
+                                                    color = Color(0xFFD1FAE5),
+                                                    fontSize = 12.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                                )
+                                            }
+                                            // Fastest (avoid eco-detour) vs Shortest Distance toggle
+                                            Surface(
+                                                color = Color.White.copy(alpha = 0.16f),
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier.bouncyClickable {
+                                                    val eng = com.dxcar.launcher.DxCarApp.instance?.builtInNavEngine
+                                                    eng?.toggleRoutePreferenceAndReroute(!builtInNavState.preferShortestDistance)
+                                                }
+                                            ) {
+                                                Text(
+                                                    text = if (builtInNavState.preferShortestDistance) {
+                                                        str("📏 最短距離", "📏 最短距离", "📏 Shortest", "📏 最短距離")
+                                                    } else {
+                                                        str("⚡ 最快路線(避繞路)", "⚡ 最快路线(避绕路)", "⚡ Fastest", "⚡ 最速ルート")
+                                                    },
+                                                    color = Color.White,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                IconButton(onClick = onVoiceNavClick) {
+                                    Icon(Icons.Rounded.Mic, contentDescription = str("語音換目的地", "语音换目的地", "Voice change destination", "音声で目的地を変更"), tint = Color.White)
+                                }
+                                IconButton(onClick = onStopBuiltInNav) {
+                                    Icon(Icons.Rounded.Close, contentDescription = str("結束導航", "结束导航", "Stop navigation", "ナビ終了"), tint = Color.White)
+                                }
                             }
-                        }
-                        IconButton(onClick = onVoiceNavClick) {
-                            Icon(Icons.Rounded.Mic, contentDescription = str("語音換目的地", "语音换目的地", "Voice change destination", "音声で目的地を変更"), tint = Color.White)
-                        }
-                        IconButton(onClick = onStopBuiltInNav) {
-                            Icon(Icons.Rounded.Close, contentDescription = str("結束導航", "结束导航", "Stop navigation", "ナビ終了"), tint = Color.White)
+
+                            // Highway Early Interchange Alert + Simulated Lane Guidance Icons + Next Step Preview
+                            if (builtInNavState.isNavigating &&
+                                (builtInNavState.upcomingLanes.isNotEmpty() || builtInNavState.isHighwayEarlyAlert || builtInNavState.upcomingExitLabel.isNotBlank())
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color.Black.copy(alpha = 0.28f))
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    if (builtInNavState.upcomingLanes.isNotEmpty()) {
+                                        SimulatedLaneGuidanceStrip(lanes = builtInNavState.upcomingLanes)
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        if (builtInNavState.isHighwayEarlyAlert || builtInNavState.upcomingExitLabel.isNotBlank()) {
+                                            Text(
+                                                text = if (builtInNavState.upcomingExitLabel.isNotBlank()) {
+                                                    "🛣 ${builtInNavState.upcomingExitLabel}"
+                                                } else {
+                                                    str(
+                                                        "🛣 高速／交流道提前變換車道提醒",
+                                                        "🛣 高速／匝道提前变换车道提醒",
+                                                        "🛣 Highway lane change ahead",
+                                                        "🛣 高速・出口の車線変更予告"
+                                                    )
+                                                },
+                                                color = Color(0xFFFDE68A),
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        if (builtInNavState.nextStepInstructionZh.isNotBlank()) {
+                                            Text(
+                                                text = str(
+                                                    "接下來：${builtInNavState.nextStepInstructionZh}",
+                                                    "接下来：${builtInNavState.nextStepInstructionZh}",
+                                                    "Then: ${builtInNavState.nextStepInstructionZh}",
+                                                    "その先：${builtInNavState.nextStepInstructionZh}"
+                                                ),
+                                                color = Color.White.copy(alpha = 0.88f),
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -2482,4 +2615,119 @@ private fun extractMapsShortcutDestination(rawUri: String): String? {
 private fun isGenericHomeWorkWord(value: String): Boolean {
     val low = value.trim().lowercase()
     return low in setOf("home", "work", "回家", "住家", "公司", "自宅", "職場")
+}
+
+/**
+ * Simulated Multi-Lane Guidance Strip (Android Auto / Google Maps style)
+ * Highlights recommended lanes in bright white/emerald and dims non-active lanes.
+ */
+@Composable
+private fun SimulatedLaneGuidanceStrip(
+    lanes: List<NavLaneGuide>,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0x55000000))
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        lanes.take(6).forEachIndexed { idx, lane ->
+            val primaryDir = lane.indications.firstOrNull()?.lowercase().orEmpty()
+            val arrowColor = if (lane.valid) Color(0xFF6EE7B7) else Color.White.copy(alpha = 0.34f)
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(width = 24.dp, height = 28.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (lane.valid) Color(0x3310B981) else Color.Transparent)
+            ) {
+                Canvas(modifier = Modifier.size(18.dp)) {
+                    val w = size.width
+                    val h = size.height
+                    val strokeW = if (lane.valid) 3.4f else 2.2f
+                    val cx = w * 0.5f
+
+                    when {
+                        primaryDir.contains("uturn") -> {
+                            drawLine(arrowColor, Offset(cx + w * 0.2f, h * 0.9f), Offset(cx + w * 0.2f, h * 0.35f), strokeW)
+                            drawLine(arrowColor, Offset(cx + w * 0.2f, h * 0.35f), Offset(cx - w * 0.2f, h * 0.35f), strokeW)
+                            drawLine(arrowColor, Offset(cx - w * 0.2f, h * 0.35f), Offset(cx - w * 0.2f, h * 0.72f), strokeW)
+                            val head = Path().apply {
+                                moveTo(cx - w * 0.2f, h * 0.85f)
+                                lineTo(cx - w * 0.38f, h * 0.62f)
+                                lineTo(cx - w * 0.02f, h * 0.62f)
+                                close()
+                            }
+                            drawPath(head, arrowColor)
+                        }
+                        primaryDir.contains("slight right") -> {
+                            drawLine(arrowColor, Offset(cx - w * 0.1f, h * 0.92f), Offset(cx - w * 0.1f, h * 0.52f), strokeW)
+                            drawLine(arrowColor, Offset(cx - w * 0.1f, h * 0.52f), Offset(cx + w * 0.26f, h * 0.18f), strokeW)
+                            val head = Path().apply {
+                                moveTo(cx + w * 0.34f, h * 0.10f)
+                                lineTo(cx + w * 0.06f, h * 0.16f)
+                                lineTo(cx + w * 0.28f, h * 0.38f)
+                                close()
+                            }
+                            drawPath(head, arrowColor)
+                        }
+                        primaryDir.contains("right") -> {
+                            drawLine(arrowColor, Offset(cx - w * 0.15f, h * 0.92f), Offset(cx - w * 0.15f, h * 0.40f), strokeW)
+                            drawLine(arrowColor, Offset(cx - w * 0.15f, h * 0.40f), Offset(cx + w * 0.24f, h * 0.40f), strokeW)
+                            val head = Path().apply {
+                                moveTo(cx + w * 0.38f, h * 0.40f)
+                                lineTo(cx + w * 0.14f, h * 0.22f)
+                                lineTo(cx + w * 0.14f, h * 0.58f)
+                                close()
+                            }
+                            drawPath(head, arrowColor)
+                        }
+                        primaryDir.contains("slight left") -> {
+                            drawLine(arrowColor, Offset(cx + w * 0.1f, h * 0.92f), Offset(cx + w * 0.1f, h * 0.52f), strokeW)
+                            drawLine(arrowColor, Offset(cx + w * 0.1f, h * 0.52f), Offset(cx - w * 0.26f, h * 0.18f), strokeW)
+                            val head = Path().apply {
+                                moveTo(cx - w * 0.34f, h * 0.10f)
+                                lineTo(cx - w * 0.06f, h * 0.16f)
+                                lineTo(cx - w * 0.28f, h * 0.38f)
+                                close()
+                            }
+                            drawPath(head, arrowColor)
+                        }
+                        primaryDir.contains("left") -> {
+                            drawLine(arrowColor, Offset(cx + w * 0.15f, h * 0.92f), Offset(cx + w * 0.15f, h * 0.40f), strokeW)
+                            drawLine(arrowColor, Offset(cx + w * 0.15f, h * 0.40f), Offset(cx - w * 0.24f, h * 0.40f), strokeW)
+                            val head = Path().apply {
+                                moveTo(cx - w * 0.38f, h * 0.40f)
+                                lineTo(cx - w * 0.14f, h * 0.22f)
+                                lineTo(cx - w * 0.14f, h * 0.58f)
+                                close()
+                            }
+                            drawPath(head, arrowColor)
+                        }
+                        else -> {
+                            drawLine(arrowColor, Offset(cx, h * 0.92f), Offset(cx, h * 0.26f), strokeW)
+                            val head = Path().apply {
+                                moveTo(cx, h * 0.08f)
+                                lineTo(cx - w * 0.26f, h * 0.36f)
+                                lineTo(cx + w * 0.26f, h * 0.36f)
+                                close()
+                            }
+                            drawPath(head, arrowColor)
+                        }
+                    }
+                }
+            }
+            if (idx < lanes.take(6).lastIndex) {
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(18.dp)
+                        .background(Color.White.copy(alpha = 0.22f))
+                )
+            }
+        }
+    }
 }
