@@ -50,7 +50,7 @@ object RootShell {
     private fun runWithBinary(suBin: String, command: String, timeoutSec: Long): ShellResult {
         val attempts = listOf(
             listOf(suBin, "-c", command),
-            listOf(suBin, "0", "sh", "-c", command)
+            listOf(suBin, "0", "/system/bin/sh", "-c", command)
         )
         var lastRes = ShellResult(-1, "", "su execution failed")
         for (argv in attempts) {
@@ -222,8 +222,8 @@ object RootShell {
             .joinToString("\n")
             // Redact Bluetooth/Wi-Fi MAC addresses (e.g. AA:BB:CC:DD:EE:FF -> XX:XX:XX:XX:EE:FF)
             .replace(Regex("([0-9A-Fa-f]{2}:){4}([0-9A-Fa-f]{2}:[0-9A-Fa-f]{2})"), "XX:XX:XX:XX:$2")
-            // Redact high-precision decimal coordinates (e.g. 25.033964 -> [REDACTED_COORD])
-            .replace(Regex("\\b-?\\d{1,3}\\.\\d{5,}\\b"), "[REDACTED_NUM]")
+            // Redact GPS coordinate pairs (e.g. 25.033964, 121.564472) without masking FPS/refreshRate/brightness floats
+            .replace(Regex("\\b-?\\d{1,2}\\.\\d{5,}\\s*,\\s*-?\\d{1,3}\\.\\d{5,}\\b"), "[REDACTED_COORD]")
     }
 
     suspend fun collectDiagnosticReport(context: Context): File = withContext(Dispatchers.IO) {
@@ -234,17 +234,17 @@ object RootShell {
         val commands = listOf(
             "BASIC" to "id; magisk -v; uname -a",
             "BUILD" to "getprop ro.product.model; getprop ro.build.version.release; getprop ro.board.platform; getprop ro.boot.slot_suffix; getprop persist.splitscreen.percent",
-            "BT_PACKAGES" to "pm list packages | grep -iE 'blue|bt|goc|nfore|suding|carlink|zlink|speedplay|phone|dialer|call'",
-            "BT_PROCESSES_AND_SERVICES" to "ps -A | grep -iE 'blue|bt|goc|nfore|suding|carlink|zlink|speedplay'; echo '---SERVICES---'; dumpsys activity services | grep -iE 'ServiceRecord.*(blue|bt|goc|nfore|suding|carlink|zlink|speedplay)' | head -n 60",
-            "BT_PROPS" to "getprop | grep -iE 'bt|blue|goc|nfore|suding' | head -n 80",
-            "BT_MANAGER_DUMPSYS" to "dumpsys bluetooth_manager | grep -viE 'address:|name:|bonded' | head -n 140",
-            "BT_OEM_INTENTS" to "for p in \$(pm list packages | cut -d: -f2 | grep -iE 'goc|nfore|suding.*bt|suding.*blue|btphone|bluetooth' | grep -v '^com.android.bluetooth\$' | head -n 6); do echo \"=== PKG: \$p ===\"; dumpsys package \$p | grep -iE 'Action:|Service|Receiver|Activity' | head -n 40; done",
-            "DISPLAY" to "dumpsys display | grep -iE 'mBaseDisplayInfo|supportedModes|renderFrameRate|refreshRate|DisplayMode' | head -n 40",
-            "SURFACEFLINGER" to "dumpsys SurfaceFlinger | grep -iE 'refresh|fps|mode|vsync|Display' | head -n 50",
-            "CONTAINERS" to "dumpsys activity containers | grep -E 'Task=|ActivityRecord|mode=|bounds=' | head -n 50",
-            "SUDING_CONFIG" to "cat /system/etc/sudingConfig.ini 2>/dev/null; echo '---VENDOR---'; cat /mnt/vendor/qcache/FactoryConfig/sudingConfig.ini 2>/dev/null",
-            "OTA_AND_OEM_PKGS" to "pm list packages | grep -iE 'ota|fota|update|suding|carsyso|sd\\.'",
-            "LOGCAT_SYSTEM_FILTERED" to "logcat -d -t 250 -s AndroidRuntime:E SystemServiceManager:I ActivityTaskManager:I BluetoothManagerService:I BluetoothAdapter:I | grep -viE 'location|gps|lat|lon|nmea|ssid|bssid'"
+            "BT_PACKAGES" to "(pm list packages | grep -iE 'blue|bt|goc|nfore|suding|carlink|zlink|speedplay|phone|dialer|call') || true",
+            "BT_PROCESSES_AND_SERVICES" to "(ps -A | grep -iE 'blue|bt|goc|nfore|suding|carlink|zlink|speedplay'; echo '---SERVICES---'; dumpsys activity services | grep -iE 'ServiceRecord.*(blue|bt|goc|nfore|suding|carlink|zlink|speedplay)' | head -n 60) || true",
+            "BT_PROPS" to "(getprop | grep -iE 'bt|blue|goc|nfore|suding' | head -n 90) || true",
+            "BT_MANAGER_DUMPSYS" to "(dumpsys bluetooth_manager | grep -viE 'address:|name:|bonded|\\[■\\]|\\[ \\]' | head -n 140) || true",
+            "BT_OEM_INTENTS" to "(for p in \$(pm list packages | cut -d: -f2 | grep -iE 'goc|nfore|suding.*bt|suding.*blue|btphone|bluetooth' | grep -v '^com.android.bluetooth\$' | head -n 6); do echo \"=== PKG: \$p ===\"; dumpsys package \$p | grep -iE 'Action:|Service|Receiver|Activity' | head -n 40; done) || true",
+            "DISPLAY" to "(dumpsys display | grep -iE 'mBaseDisplayInfo|supportedModes|renderFrameRate|refreshRate|DisplayMode' | head -n 45) || true",
+            "SURFACEFLINGER" to "(dumpsys SurfaceFlinger | grep -iE 'refresh|fps|mode|vsync|Display' | head -n 50) || true",
+            "CONTAINERS" to "(dumpsys activity containers | grep -E 'DefaultTaskDisplayArea|Task=|ActivityRecord|mAppBounds' | head -n 60) || true",
+            "SUDING_CONFIG" to "(cat /system/etc/sudingConfig.ini 2>/dev/null; echo '---VENDOR---'; cat /mnt/vendor/qcache/FactoryConfig/sudingConfig.ini 2>/dev/null) || true",
+            "OTA_AND_OEM_PKGS" to "(pm list packages | grep -iE 'ota|fota|update|suding|carsyso|sd\\.') || true",
+            "LOGCAT_SYSTEM_FILTERED" to "(logcat -d -t 250 -s AndroidRuntime:E SystemServiceManager:I ActivityTaskManager:I BluetoothManagerService:I BluetoothAdapter:I | grep -viE 'location|gps|lat|lon|nmea|ssid|bssid') || true"
         )
 
         val sb = StringBuilder()

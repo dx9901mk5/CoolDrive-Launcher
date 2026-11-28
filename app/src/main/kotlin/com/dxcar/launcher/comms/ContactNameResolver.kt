@@ -4,9 +4,14 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Bundle
 import android.provider.CallLog
 import android.provider.ContactsContract
+import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.RemoteViews
+import android.widget.TextView
 import androidx.core.content.ContextCompat
 
 data class ResolvedCallerInfo(
@@ -192,13 +197,90 @@ object ContactNameResolver {
     }
 
     /**
-     * Extracts text labels from custom OEM InCallUI RemoteViews (vivo OriginOS / Xiaomi / Samsung)
-     * when Notification.EXTRA_TITLE / EXTRA_TEXT are left blank!
+     * Formats Taiwan/international phone numbers cleanly for Car HUD readability
+     * (e.g. "+886912345678" / "0912345678" -> "0912-345-678").
      */
-    fun extractRemoteViewsStrings(vararg views: RemoteViews?): List<String> {
-        val results = mutableListOf<String>()
+    fun formatPhoneNumberDisplay(raw: String?): String {
+        val t = raw?.trim().orEmpty()
+        if (t.isEmpty()) return ""
+        val digits = t.filter { it.isDigit() || it == '+' }
+        val localTw = when {
+            digits.startsWith("+8869") && digits.length == 13 -> "0" + digits.removePrefix("+886")
+            digits.startsWith("8869") && digits.length == 12 -> "0" + digits.removePrefix("886")
+            else -> digits
+        }
+        if (localTw.startsWith("09") && localTw.length == 10 && localTw.all { it.isDigit() }) {
+            return "${localTw.substring(0, 4)}-${localTw.substring(4, 7)}-${localTw.substring(7, 10)}"
+        }
+        return t
+    }
+
+    /**
+     * Collects all readable CharSequence / String values inside a Notification's extras Bundle,
+     * catching OEM-specific caller name/number extras on vivo OriginOS, Xiaomi HyperOS, Samsung OneUI.
+     */
+    fun extractAllStringsFromExtras(extras: Bundle?): List<String> {
+        if (extras == null || extras.isEmpty) return emptyList()
+        val out = LinkedHashSet<String>()
+        runCatching {
+            for (key in extras.keySet()) {
+                val keyLow = key.lowercase()
+                if (keyLow.contains("icon") || keyLow.contains("bitmap") || keyLow.contains("template") ||
+                    keyLow.contains("channel") || keyLow.contains("sort") || keyLow.contains("group")
+                ) continue
+                @Suppress("DEPRECATION")
+                val v = extras.get(key)
+                when (v) {
+                    is CharSequence -> {
+                        val s = v.toString().trim()
+                        if (s.isNotBlank() && s.length <= 96) out.add(s)
+                    }
+                    is Array<*> -> {
+                        v.forEach { el ->
+                            if (el is CharSequence) {
+                                val s = el.toString().trim()
+                                if (s.isNotBlank() && s.length <= 96) out.add(s)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return out.toList()
+    }
+
+    /**
+     * Extracts text labels from custom OEM InCallUI RemoteViews (vivo OriginOS / Xiaomi / Samsung)
+     * when Notification.EXTRA_TITLE / EXTRA_TEXT are left blank or generic!
+     * Uses public SDK RemoteViews inflation first (works reliably on Android 14/15/16 where mActions reflection is blocked),
+     * then falls back to reflection on older devices.
+     */
+    fun extractRemoteViewsStrings(
+        context: Context? = null,
+        sourcePackage: String? = null,
+        vararg views: RemoteViews?
+    ): List<String> {
+        val results = LinkedHashSet<String>()
         for (rv in views) {
             if (rv == null) continue
+
+            // Strategy 1: Public SDK inflation into an offscreen FrameLayout (Android 14/15/16 safe!)
+            if (context != null) {
+                runCatching {
+                    val pkgCtx = if (!sourcePackage.isNullOrBlank()) {
+                        runCatching {
+                            context.createPackageContext(sourcePackage, Context.CONTEXT_IGNORE_SECURITY)
+                        }.getOrDefault(context)
+                    } else {
+                        context
+                    }
+                    val container = FrameLayout(pkgCtx)
+                    val inflated = rv.apply(pkgCtx, container)
+                    collectTextFromViewTree(inflated, results)
+                }
+            }
+
+            // Strategy 2: Legacy reflection fallback for Android 9-13 custom RemoteViews
             runCatching {
                 val actionsField = RemoteViews::class.java.getDeclaredField("mActions").apply {
                     isAccessible = true
@@ -220,7 +302,26 @@ object ContactNameResolver {
                 }
             }
         }
-        return results.distinct()
+        return results.toList()
+    }
+
+    private fun collectTextFromViewTree(view: View?, out: MutableSet<String>) {
+        if (view == null) return
+        if (view is TextView) {
+            val txt = view.text?.toString()?.trim().orEmpty()
+            if (txt.isNotBlank() && txt.length <= 80) {
+                out.add(txt)
+            }
+        }
+        val desc = view.contentDescription?.toString()?.trim().orEmpty()
+        if (desc.isNotBlank() && desc.length <= 80) {
+            out.add(desc)
+        }
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                collectTextFromViewTree(view.getChildAt(i), out)
+            }
+        }
     }
 
     /**

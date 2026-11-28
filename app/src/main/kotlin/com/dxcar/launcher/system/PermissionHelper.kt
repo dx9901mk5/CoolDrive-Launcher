@@ -25,6 +25,8 @@ data class PermissionHealth(
     val hasPhoneState: Boolean,
     val hasContacts: Boolean = false,
     val hasCallLog: Boolean = true,
+    val hasCallPhone: Boolean = false,
+    val hasCallScreeningRole: Boolean = false,
     val hasWriteSettings: Boolean,
     val hasIgnoreBatteryOpt: Boolean,
     val hasPostNotifications: Boolean
@@ -113,6 +115,20 @@ object PermissionHelper {
             true
         }
 
+        val hasCallPhone = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CALL_PHONE
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val hasCallScreeningRole = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            runCatching {
+                val rm = context.getSystemService(android.app.role.RoleManager::class.java)
+                rm?.isRoleHeld(android.app.role.RoleManager.ROLE_CALL_SCREENING) == true
+            }.getOrDefault(false)
+        } else {
+            true
+        }
+
         val hasWriteSettings = Settings.System.canWrite(context)
 
         val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -137,6 +153,8 @@ object PermissionHelper {
             hasPhoneState = hasPhoneState,
             hasContacts = hasContacts,
             hasCallLog = hasCallLog,
+            hasCallPhone = hasCallPhone,
+            hasCallScreeningRole = hasCallScreeningRole,
             hasWriteSettings = hasWriteSettings,
             hasIgnoreBatteryOpt = hasIgnoreBattery,
             hasPostNotifications = hasPostNotif
@@ -233,5 +251,19 @@ object PermissionHelper {
                 ComponentName(context, BoxNotificationListenerService::class.java)
             )
         }
+    }
+
+    fun buildCallScreeningRoleIntent(context: Context): Intent? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        return runCatching {
+            val rm = context.getSystemService(android.app.role.RoleManager::class.java) ?: return null
+            if (rm.isRoleAvailable(android.app.role.RoleManager.ROLE_CALL_SCREENING) &&
+                !rm.isRoleHeld(android.app.role.RoleManager.ROLE_CALL_SCREENING)
+            ) {
+                rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_CALL_SCREENING)
+            } else {
+                null
+            }
+        }.getOrNull()
     }
 }

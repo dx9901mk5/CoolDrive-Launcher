@@ -26,34 +26,75 @@ object PlanBWindowEngine {
     @Volatile
     private var cachedSafeTopBottom: Pair<Int, Int>? = null
 
+    @Volatile
+    private var cachedPhysicalDisplaySize: Pair<Int, Int>? = null
+
     /**
-     * Reads the display's real usable app vertical bounds (e.g. status bar top=36, taskbar bottom=990 on Android 14 Tablet;
-     * 0..screenH on frameless car head units) so Freeform windows NEVER clip off the bottom edge!
+     * Resolves Display 0's true physical pixel dimensions via `wm size` so even if a caller
+     * inside a split/freeform Activity passes its local pane bounds, Plan B ALWAYS lays out against
+     * the full screen (e.g. 1920x720 on car head units, 1920x1080 on tablets).
      */
-    private suspend fun resolveSafeVerticalBounds(screenH: Int): Pair<Int, Int> {
+    private suspend fun resolvePhysicalDisplaySize(fallbackW: Int, fallbackH: Int): Pair<Int, Int> {
+        cachedPhysicalDisplaySize?.let { (w, h) ->
+            if (w >= 640 && h >= 400) return w to h
+        }
+        val res = RootShell.execSu("wm size", 3L)
+        val overrideMatch = Regex("""Override size:\s*(\d+)x(\d+)""").find(res.stdout)
+        val physicalMatch = Regex("""Physical size:\s*(\d+)x(\d+)""").find(res.stdout)
+        val m = overrideMatch ?: physicalMatch
+        if (m != null) {
+            val w = m.groupValues[1].toIntOrNull() ?: fallbackW
+            val h = m.groupValues[2].toIntOrNull() ?: fallbackH
+            if (w >= 640 && h >= 400) {
+                // Keep landscape orientation consistent if caller is landscape
+                val pair = if (fallbackW > fallbackH && h > w) h to w else w to h
+                cachedPhysicalDisplaySize = pair
+                return pair
+            }
+        }
+        return fallbackW.coerceAtLeast(800) to fallbackH.coerceAtLeast(480)
+    }
+
+    /**
+     * Reads Display 0's real usable vertical bounds so Freeform windows NEVER clip off the bottom edge
+     * on tablets with a persistent Taskbar, while NEVER accidentally clamping to secondary private displays
+     * (e.g. Display 2 = 360x360 on Car AI Boxes, which would otherwise crush 1920x720 windows to half height!).
+     */
+    private suspend fun resolveSafeVerticalBounds(screenW: Int, screenH: Int): Pair<Int, Int> {
         cachedSafeTopBottom?.let { (t, b) ->
-            if (b in 320..screenH && t in 0 until (b - 240)) return t to b
+            if (b in (screenH * 0.80f).toInt()..screenH && t in 0 until (b - 240)) return t to b
         }
         val res = RootShell.execSu(
-            "dumpsys window displays | grep -oE 'mAppBounds=Rect\\([0-9]+, [0-9]+ - [0-9]+, [0-9]+\\)' | head -n 1; " +
-                "dumpsys window windows | grep -A 4 'ScreenDecorOverlay\\|StatusBar' | grep -oE 'frame=\\[0,0\\]\\[[0-9]+,[0-9]+\\]' | head -n 1",
+            "dumpsys window displays | awk '/Display: mDisplayId=0/,/Display: mDisplayId=[1-9]/' | grep -oE 'mAppBounds=Rect\\([0-9]+, [0-9]+ - [0-9]+, [0-9]+\\)' | head -n 4; " +
+                "echo '===NAV==='; getprop persist.suding.hasnavibar",
             3L
         )
         var safeTop = 0
         var safeBottom = screenH
-        val appBoundsMatch = Regex("""mAppBounds=Rect\(\d+,\s*(\d+)\s*-\s*\d+,\s*(\d+)\)""").find(res.stdout)
-        if (appBoundsMatch != null) {
-            val t = appBoundsMatch.groupValues[1].toIntOrNull() ?: 0
-            val b = appBoundsMatch.groupValues[2].toIntOrNull() ?: screenH
-            if (b in 320..screenH) safeBottom = b
-            if (t in 0..160) safeTop = maxOf(safeTop, t)
+        val minValidW = (screenW * 0.85f).toInt()
+        val minValidBottom = (screenH * 0.80f).toInt()
+
+        val rectRegex = Regex("""mAppBounds=Rect\((\d+),\s*(\d+)\s*-\s*(\d+),\s*(\d+)\)""")
+        for (m in rectRegex.findAll(res.stdout)) {
+            val l = m.groupValues[1].toIntOrNull() ?: continue
+            val t = m.groupValues[2].toIntOrNull() ?: continue
+            val r = m.groupValues[3].toIntOrNull() ?: continue
+            val b = m.groupValues[4].toIntOrNull() ?: continue
+            val w = r - l
+            // Strictly reject secondary/sub-container rects (like 360x360 Display 2!) whose width/height doesn't match Display 0
+            if (w >= minValidW && b in minValidBottom..screenH) {
+                safeBottom = b
+                if (t in 0..120) safeTop = t
+                break
+            }
         }
-        val statusBarMatch = Regex("""frame=\[0,0\]\[\d+,(\d+)\]""").find(res.stdout)
-        if (statusBarMatch != null) {
-            val sbH = statusBarMatch.groupValues[1].toIntOrNull() ?: 0
-            if (sbH in 16..140) safeTop = maxOf(safeTop, sbH)
+        // On frameless car head units (persist.suding.hasnavibar=false or 1920x720 wide aspect), always use full 0..screenH!
+        val noNaviBar = res.stdout.substringAfter("===NAV===", "").trim().equals("false", ignoreCase = true)
+        if (noNaviBar || (screenW >= 1600 && screenH <= 800)) {
+            safeTop = 0
+            safeBottom = screenH
         }
-        if (safeBottom - safeTop < 300) {
+        if (safeBottom - safeTop < (screenH * 0.78f).toInt()) {
             safeTop = 0
             safeBottom = screenH
         }
@@ -214,13 +255,14 @@ object PlanBWindowEngine {
     ) {
         val cfg = RootHelperConfigStore.load(context)
         ensureMultiWindowGlobals()
-        val (safeTop, safeBottom) = resolveSafeVerticalBounds(screenH)
+        val (realW, realH) = resolvePhysicalDisplaySize(screenW, screenH)
+        val (safeTop, safeBottom) = resolveSafeVerticalBounds(realW, realH)
 
         val effLeft = if (cfg.dockPinnedRightShift) dockLeft else 0
         val effRight = if (cfg.dockPinnedRightShift) dockRight else 0
         val effTop = maxOf(safeTop, if (cfg.dockPinnedRightShift) dockTop else 0)
-        val effBottomEdge = minOf(safeBottom, screenH - if (cfg.dockPinnedRightShift) dockBottom else 0)
-        val availW = (screenW - effLeft - effRight).coerceAtLeast(480)
+        val effBottomEdge = minOf(safeBottom, realH - if (cfg.dockPinnedRightShift) dockBottom else 0)
+        val availW = (realW - effLeft - effRight).coerceAtLeast(480)
         val availH = (effBottomEdge - effTop).coerceAtLeast(320)
 
         when (page) {
@@ -314,13 +356,14 @@ object PlanBWindowEngine {
     ) {
         val cfg = RootHelperConfigStore.load(context)
         ensureMultiWindowGlobals()
-        val (safeTop, safeBottom) = resolveSafeVerticalBounds(screenH)
+        val (realW, realH) = resolvePhysicalDisplaySize(screenW, screenH)
+        val (safeTop, safeBottom) = resolveSafeVerticalBounds(realW, realH)
 
         val effLeft = if (cfg.dockPinnedRightShift) dockLeft else 0
         val effRight = if (cfg.dockPinnedRightShift) dockRight else 0
         val effTop = maxOf(safeTop, if (cfg.dockPinnedRightShift) dockTop else 0)
-        val effBottomEdge = minOf(safeBottom, screenH - if (cfg.dockPinnedRightShift) dockBottom else 0)
-        val availW = (screenW - effLeft - effRight).coerceAtLeast(480)
+        val effBottomEdge = minOf(safeBottom, realH - if (cfg.dockPinnedRightShift) dockBottom else 0)
+        val availW = (realW - effLeft - effRight).coerceAtLeast(480)
         val availH = (effBottomEdge - effTop).coerceAtLeast(320)
 
         val navPkg = cfg.ui1NavPackage.ifBlank { "com.google.android.apps.maps" }

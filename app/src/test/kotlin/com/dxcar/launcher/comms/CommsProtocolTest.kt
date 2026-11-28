@@ -111,6 +111,18 @@ class CommsProtocolTest {
         assertFalse(ContactNameResolver.isGenericOrNumberOnly("王小明"))
         assertEquals("0912-345-678", ContactNameResolver.extractPlausiblePhoneNumber("來電 0912-345-678"))
         assertEquals("0988123456", ContactNameResolver.extractPlausiblePhoneNumber("tel:0988123456"))
+        assertEquals("0912-345-678", ContactNameResolver.formatPhoneNumberDisplay("+886912345678"))
+        assertEquals("0912-345-678", ContactNameResolver.formatPhoneNumberDisplay("0912345678"))
+    }
+
+    @Test
+    fun `shared location resolver separates direct map addresses from non-address text for Gemini`() {
+        assertTrue(com.dxcar.launcher.map.SharedLocationResolver.isDirectMapOrAddress("https://maps.app.goo.gl/abc123"))
+        assertTrue(com.dxcar.launcher.map.SharedLocationResolver.isDirectMapOrAddress("高雄市鳳山區中山路165號"))
+        assertTrue(com.dxcar.launcher.map.SharedLocationResolver.isDirectMapOrAddress("geo:22.6273,120.3014"))
+        assertTrue(com.dxcar.launcher.map.SharedLocationResolver.isDirectMapOrAddress("22.6273, 120.3014"))
+        assertFalse(com.dxcar.launcher.map.SharedLocationResolver.isDirectMapOrAddress("這篇脆文介紹超好吃的牛肉麵 https://www.threads.net/@foodie/post/123"))
+        assertFalse(com.dxcar.launcher.map.SharedLocationResolver.isDirectMapOrAddress("明天中午要不要去吃拉麵"))
     }
 
     @Test

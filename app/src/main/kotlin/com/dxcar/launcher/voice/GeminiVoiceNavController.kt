@@ -312,6 +312,85 @@ object GeminiVoiceNavController {
         val spokenReply: String
     )
 
+    data class GeminiSharedAnalysis(
+        val isPlaceOrAddress: Boolean,
+        val label: String,
+        val address: String,
+        val lat: Double,
+        val lon: Double,
+        val summary: String
+    )
+
+    /**
+     * Uses Gemini 2.5 Flash to inspect arbitrary shared non-address text (social media post, LINE chat,
+     * article snippet, restaurant recommendation, etc.) and determine whether it refers to a destination/address.
+     */
+    fun analyzeSharedTextWithGemini(
+        apiKey: String,
+        sharedText: String,
+        curLat: Double,
+        curLon: Double
+    ): GeminiSharedAnalysis? {
+        if (apiKey.isBlank() || sharedText.isBlank()) return null
+        return runCatching {
+            val endpoint =
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${Uri.encode(apiKey.trim())}"
+            val prompt = """
+                你是車機導航智慧助理。目前使用者位置約在 ($curLat, $curLon)。
+                使用者從手機分享了以下文字或連結：
+                「$sharedText」
+                請判斷這段內容是否包含明確的店家、地標、景點或地址可以導航：
+                - 若包含可導航地點，請回傳純 JSON（盡量提供最完整的台灣/當地地址與店名，確定經緯度則填入 lat/lon，否則填 0）：
+                  {"isPlaceOrAddress":true,"label":"簡短店名或地點名","address":"完整地址或可搜尋關鍵字","lat":0.0,"lon":0.0,"summary":"簡短說明"}
+                - 若不是地點或地址（例如純聊天、新聞、無關網址或問題），請回傳純 JSON：
+                  {"isPlaceOrAddress":false,"label":"","address":"","lat":0.0,"lon":0.0,"summary":"簡短繁體中文回覆或摘要"}
+                只輸出 JSON，不要加 markdown 語法。
+            """.trimIndent()
+
+            val bodyObj = buildJsonObject {
+                put("contents", buildJsonArray {
+                    add(buildJsonObject {
+                        put("parts", buildJsonArray {
+                            add(buildJsonObject { put("text", prompt) })
+                        })
+                    })
+                })
+            }
+
+            val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 6000
+                readTimeout = 8000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            }
+            conn.outputStream.use { it.write(bodyObj.toString().toByteArray(Charsets.UTF_8)) }
+            if (conn.responseCode !in 200..299) return null
+            val respText = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val root = json.parseToJsonElement(respText).jsonObject
+            val candidateText = root["candidates"]?.jsonArray?.firstOrNull()
+                ?.jsonObject?.get("content")
+                ?.jsonObject?.get("parts")?.jsonArray?.firstOrNull()
+                ?.jsonObject?.get("text")?.jsonPrimitive?.contentOrNull
+                ?.trim()
+                ?.removePrefix("```json")
+                ?.removePrefix("```")
+                ?.removeSuffix("```")
+                ?.trim()
+                ?: return null
+
+            val parsedJson = json.parseToJsonElement(candidateText).jsonObject
+            GeminiSharedAnalysis(
+                isPlaceOrAddress = parsedJson["isPlaceOrAddress"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false,
+                label = parsedJson["label"]?.jsonPrimitive?.contentOrNull.orEmpty().trim(),
+                address = parsedJson["address"]?.jsonPrimitive?.contentOrNull.orEmpty().trim(),
+                lat = parsedJson["lat"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.0,
+                lon = parsedJson["lon"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.0,
+                summary = parsedJson["summary"]?.jsonPrimitive?.contentOrNull.orEmpty().trim()
+            )
+        }.getOrNull()
+    }
+
     private fun parseDestinationWithGeminiCloud(
         apiKey: String,
         userSpeech: String,

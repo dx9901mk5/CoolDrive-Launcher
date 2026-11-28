@@ -226,11 +226,18 @@ fun IncomingCallBanner(
 
                     Spacer(Modifier.width((10f * s).coerceIn(6f, 16f).dp))
 
-                    val displayTitle = callState.callerName.ifBlank {
-                        callState.callerNumber.ifBlank { str("藍牙來電", "蓝牙来电", "Incoming Call", "Bluetooth着信") }
+                    val formattedNum = remember(callState.callerNumber) {
+                        com.dxcar.launcher.comms.ContactNameResolver.formatPhoneNumberDisplay(callState.callerNumber)
                     }
-                    val showDistinctNumber = callState.callerNumber.isNotBlank() &&
-                        !callState.callerNumber.equals(displayTitle, ignoreCase = true)
+                    val displayTitle = callState.callerName.ifBlank {
+                        formattedNum.ifBlank { str("藍牙來電", "蓝牙来电", "Incoming Call", "Bluetooth着信") }
+                    }
+                    val normalizedTitleDigits = displayTitle.filter { it.isDigit() }
+                    val normalizedNumDigits = formattedNum.filter { it.isDigit() }
+                    val showDistinctNumber = formattedNum.isNotBlank() &&
+                        !formattedNum.equals(displayTitle, ignoreCase = true) &&
+                        !(normalizedNumDigits.length >= 6 && normalizedTitleDigits == normalizedNumDigits)
+                    val numSubSp = (12.5f * s).coerceIn(10f, 21f).sp
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
@@ -241,11 +248,19 @@ fun IncomingCallBanner(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        if (showDistinctNumber) {
+                            Text(
+                                text = formattedNum,
+                                color = colors.primaryText.copy(alpha = 0.84f),
+                                fontSize = numSubSp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                         val subtitle = when (callState.status) {
-                            CallStatus.RINGING -> {
-                                val numPart = if (showDistinctNumber) " · ${callState.callerNumber}" else ""
-                                "${callState.sourceApp} · ${str("來電中", "来电中", "Incoming", "着信中")}$numPart"
-                            }
+                            CallStatus.RINGING ->
+                                "${callState.sourceApp} · ${str("來電中", "来电中", "Incoming", "着信中")}"
                             CallStatus.ACTIVE -> {
                                 val timer = "%02d:%02d".format(elapsedSec / 60, elapsedSec % 60)
                                 "${callState.sourceApp} · ${str("通話中", "通话中", "In Call", "通話中")} $timer"

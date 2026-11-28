@@ -154,6 +154,9 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(liveCfg.prefer60FpsEnabled) {
                 applyPreferredRefreshRate(liveCfg.prefer60FpsEnabled)
             }
+            LaunchedEffect(liveCfg.deviceRole) {
+                com.dxcar.launcher.comms.CarDialerBridgeActivity.syncComponentEnabled(this@MainActivity, liveCfg.deviceRole)
+            }
             DxCarRootScreen(
                 app = app,
                 externalNavCommand = externalNavCommand.value,
@@ -186,6 +189,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         val app = application as DxCarApp
         app.setLauncherForeground(true)
+        com.dxcar.launcher.comms.CarDialerBridgeActivity.syncComponentEnabled(this, app.preferences.config.value.deviceRole)
         app.systemStatusMonitor.refreshAll()
         app.locationTracker.startIfPermitted()
         app.mediaControlBridge.refreshSessions()
@@ -226,57 +230,151 @@ class MainActivity : ComponentActivity() {
             }
             if (combined.isNotBlank()) {
                 val app = application as DxCarApp
+                val cfg = app.preferences.config.value
                 val curLoc = app.locationTracker.location.value
-                val biasLat = if (curLoc.latitude != 0.0) curLoc.latitude else app.preferences.config.value.lastKnownLat
-                val biasLon = if (curLoc.longitude != 0.0) curLoc.longitude else app.preferences.config.value.lastKnownLon
-                val isPhoneRole = app.preferences.config.value.deviceRole == com.dxcar.launcher.data.DeviceRole.PHONE_COMPANION
+                val biasLat = if (curLoc.latitude != 0.0) curLoc.latitude else cfg.lastKnownLat
+                val biasLon = if (curLoc.longitude != 0.0) curLoc.longitude else cfg.lastKnownLon
+                val isPhoneRole = cfg.deviceRole == com.dxcar.launcher.data.DeviceRole.PHONE_COMPANION
+                val directAddress = isGeoView || com.dxcar.launcher.map.SharedLocationResolver.isDirectMapOrAddress(combined)
+
                 if (isPhoneRole) {
                     BluetoothCompanionService.startOrReconnect(this)
                 }
-                android.widget.Toast.makeText(
-                    this,
-                    "📍 正在解析地址並自動傳送至車機…",
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
-                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main.immediate).launch {
-                    val resolved = com.dxcar.launcher.map.SharedLocationResolver.resolveSharedText(
-                        context = this@MainActivity,
-                        navEngine = app.builtInNavEngine,
-                        rawText = combined,
-                        biasLat = biasLat,
-                        biasLon = biasLon
-                    )
-                    if (isPhoneRole) {
-                        val sent = BluetoothCompanionService.sendPacketFromPhone(
-                            com.dxcar.launcher.comms.BridgePacket(
-                                type = com.dxcar.launcher.comms.PacketType.SHARED_LOCATION,
-                                id = UUID.randomUUID().toString(),
-                                sender = resolved.label,
-                                text = resolved.address,
-                                latitude = resolved.latitude,
-                                longitude = resolved.longitude
-                            )
+
+                if (directAddress) {
+                    android.widget.Toast.makeText(
+                        this,
+                        "📍 已偵測地圖地址，直接發送車機啟動地圖搜尋…",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main.immediate).launch {
+                        val resolved = com.dxcar.launcher.map.SharedLocationResolver.resolveSharedText(
+                            context = this@MainActivity,
+                            navEngine = app.builtInNavEngine,
+                            rawText = combined,
+                            biasLat = biasLat,
+                            biasLon = biasLon
                         )
-                        val msg = if (sent) {
-                            "✓ 已自動丟到車機導航：${resolved.label}"
+                        if (isPhoneRole) {
+                            val sent = BluetoothCompanionService.sendPacketFromPhone(
+                                com.dxcar.launcher.comms.BridgePacket(
+                                    type = com.dxcar.launcher.comms.PacketType.SHARED_LOCATION,
+                                    id = UUID.randomUUID().toString(),
+                                    sender = resolved.label,
+                                    text = resolved.address,
+                                    latitude = resolved.latitude,
+                                    longitude = resolved.longitude
+                                )
+                            )
+                            val msg = if (sent) {
+                                "✓ 已傳送至車機並啟動地圖搜尋：${resolved.label}"
+                            } else {
+                                "📍 已排入傳送（連上車機立即啟動搜尋）：${resolved.label}"
+                            }
+                            android.widget.Toast.makeText(this@MainActivity, msg, android.widget.Toast.LENGTH_LONG).show()
+                            externalHudToast.value = msg
+                            kotlinx.coroutines.delay(500L)
+                            runCatching { moveTaskToBack(true) }
                         } else {
-                            "📍 已自動排入傳送（連上車機即觸發）：${resolved.label}"
-                        }
-                        android.widget.Toast.makeText(this@MainActivity, msg, android.widget.Toast.LENGTH_LONG).show()
-                        externalHudToast.value = msg
-                        // Smoothly return user to Google Maps after auto-sending via Share Sheet!
-                        kotlinx.coroutines.delay(550L)
-                        runCatching { moveTaskToBack(true) }
-                    } else {
-                        app.notificationCenter.postSharedLocation(
-                            com.dxcar.launcher.comms.SharedLocationItem(
-                                id = UUID.randomUUID().toString(),
-                                label = resolved.label,
-                                address = resolved.address,
-                                latitude = resolved.latitude,
-                                longitude = resolved.longitude
+                            app.notificationCenter.postSharedLocation(
+                                com.dxcar.launcher.comms.SharedLocationItem(
+                                    id = UUID.randomUUID().toString(),
+                                    label = resolved.label,
+                                    address = resolved.address,
+                                    latitude = resolved.latitude,
+                                    longitude = resolved.longitude
+                                )
                             )
-                        )
+                        }
+                    }
+                } else {
+                    // NOT a direct map link / street address -> trigger Gemini to analyze!
+                    android.widget.Toast.makeText(
+                        this,
+                        "✨ 非標準地址，已交由 Gemini 進行判斷…",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main.immediate).launch {
+                        val apiKey = cfg.geminiApiKey.trim()
+                        val geminiResult = if (apiKey.isNotBlank()) {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                GeminiVoiceNavController.analyzeSharedTextWithGemini(
+                                    apiKey = apiKey,
+                                    sharedText = combined,
+                                    curLat = biasLat,
+                                    curLon = biasLon
+                                )
+                            }
+                        } else {
+                            null
+                        }
+
+                        if (geminiResult != null && geminiResult.isPlaceOrAddress &&
+                            (geminiResult.address.isNotBlank() || geminiResult.label.isNotBlank())
+                        ) {
+                            val queryForGeo = geminiResult.address.ifBlank { geminiResult.label }
+                            val resolved = if (geminiResult.lat != 0.0 && geminiResult.lon != 0.0) {
+                                com.dxcar.launcher.map.ResolvedSharedLocation(
+                                    label = geminiResult.label.ifBlank { queryForGeo }.take(64),
+                                    address = queryForGeo.take(140),
+                                    latitude = geminiResult.lat,
+                                    longitude = geminiResult.lon
+                                )
+                            } else {
+                                com.dxcar.launcher.map.SharedLocationResolver.resolveSharedText(
+                                    context = this@MainActivity,
+                                    navEngine = app.builtInNavEngine,
+                                    rawText = queryForGeo,
+                                    biasLat = biasLat,
+                                    biasLon = biasLon
+                                )
+                            }
+                            if (isPhoneRole) {
+                                val sent = BluetoothCompanionService.sendPacketFromPhone(
+                                    com.dxcar.launcher.comms.BridgePacket(
+                                        type = com.dxcar.launcher.comms.PacketType.SHARED_LOCATION,
+                                        id = UUID.randomUUID().toString(),
+                                        sender = resolved.label,
+                                        text = resolved.address,
+                                        latitude = resolved.latitude,
+                                        longitude = resolved.longitude
+                                    )
+                                )
+                                val msg = if (sent) {
+                                    "✨ Gemini 已辨識地點並送往車機搜尋：${resolved.label}"
+                                } else {
+                                    "✨ Gemini 已辨識「${resolved.label}」（連上車機自動搜尋）"
+                                }
+                                android.widget.Toast.makeText(this@MainActivity, msg, android.widget.Toast.LENGTH_LONG).show()
+                                externalHudToast.value = msg
+                                kotlinx.coroutines.delay(500L)
+                                runCatching { moveTaskToBack(true) }
+                            } else {
+                                app.notificationCenter.postSharedLocation(
+                                    com.dxcar.launcher.comms.SharedLocationItem(
+                                        id = UUID.randomUUID().toString(),
+                                        label = resolved.label,
+                                        address = resolved.address,
+                                        latitude = resolved.latitude,
+                                        longitude = resolved.longitude
+                                    )
+                                )
+                            }
+                        } else {
+                            // Hand off directly to Google Gemini App to interpret non-address content!
+                            val geminiPrompt = "請幫我判斷這段內容是否包含地點或地址；若是地點請整理出完整地址，若否請直接解析內容：\n$combined"
+                            val launchedGemini = GeminiVoiceNavController.launchGeminiVoiceAssistantDirect(
+                                context = this@MainActivity,
+                                query = geminiPrompt
+                            )
+                            val msg = when {
+                                launchedGemini -> "✨ 已交由 Google Gemini 進行判斷"
+                                geminiResult != null && geminiResult.summary.isNotBlank() -> "✨ Gemini：${geminiResult.summary}"
+                                else -> "⚠️ 未安裝 Google Gemini App，且未設定 Gemini API Key"
+                            }
+                            android.widget.Toast.makeText(this@MainActivity, msg, android.widget.Toast.LENGTH_LONG).show()
+                            externalHudToast.value = msg
+                        }
                     }
                 }
             }
@@ -320,6 +418,7 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.ANSWER_PHONE_CALLS,
+            Manifest.permission.CALL_PHONE,
             Manifest.permission.READ_CONTACTS
         )
         if (BuildConfig.ENABLE_GITHUB_AUTO_UPDATE) {

@@ -102,23 +102,60 @@ class BluetoothCallReceiver : BroadcastReceiver() {
                 }
                 val role = app?.preferences?.config?.value?.deviceRole
 
-                fun dispatchPhoneCallSnapshot(knownNum: String) {
-                    var effNum = knownNum
-                    var resolvedContact = if (status != CallStatus.IDLE && effNum.isNotBlank()) {
-                        ContactNameResolver.resolveDisplayName(context, effNum)
+                fun resolveCallerMultiSource(ctx: Context, knownNum: String): ResolvedCallerInfo? {
+                    var effNum = knownNum.trim()
+                    var resolvedContact = if (effNum.isNotBlank()) {
+                        ContactNameResolver.resolveDisplayName(ctx, effNum)
                     } else {
                         null
                     }
-                    if (status != CallStatus.IDLE && effNum.isBlank()) {
-                        val recentLog = ContactNameResolver.queryRecentCallLogCaller(context)
+                    // Source 2: Android 10+ Play-compliant CallScreeningService (exact incoming handle!)
+                    if (effNum.isBlank() || resolvedContact == null) {
+                        val screened = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                            PhoneCallScreeningService.recentScreenedCaller()
+                        } else null
+                        if (screened != null) {
+                            if (effNum.isBlank() && screened.phoneNumber.isNotBlank()) effNum = screened.phoneNumber
+                            if (resolvedContact == null && !ContactNameResolver.isGenericOrNumberOnly(screened.displayName)) {
+                                resolvedContact = screened.displayName
+                            }
+                        }
+                    }
+                    // Source 3: Active OEM dialer notification (including inflated RemoteViews on vivo/Samsung/Xiaomi!)
+                    if (effNum.isBlank() || resolvedContact == null) {
+                        val notifCaller = BoxNotificationListenerService.instance?.scanActiveCallNotificationOnPhone()
+                        if (notifCaller != null) {
+                            if (effNum.isBlank() && notifCaller.phoneNumber.isNotBlank()) effNum = notifCaller.phoneNumber
+                            if (resolvedContact == null && !ContactNameResolver.isGenericOrNumberOnly(notifCaller.displayName)) {
+                                resolvedContact = notifCaller.displayName
+                            }
+                        }
+                    }
+                    // Source 4: Recent CallLog (Direct APK flavor when READ_CALL_LOG is granted)
+                    if (effNum.isBlank() || resolvedContact == null) {
+                        val recentLog = ContactNameResolver.queryRecentCallLogCaller(ctx)
                         if (recentLog != null) {
-                            effNum = recentLog.phoneNumber
-                            if (!ContactNameResolver.isGenericOrNumberOnly(recentLog.displayName)) {
+                            if (effNum.isBlank() && recentLog.phoneNumber.isNotBlank()) effNum = recentLog.phoneNumber
+                            if (resolvedContact == null && !ContactNameResolver.isGenericOrNumberOnly(recentLog.displayName)) {
                                 resolvedContact = recentLog.displayName
                             }
                         }
                     }
-                    val bestDisplay = resolvedContact ?: effNum.ifBlank { "行動電話來電" }
+                    // Cross-fill: Name <-> Number via ContactsContract
+                    if (resolvedContact == null && effNum.isNotBlank()) {
+                        resolvedContact = ContactNameResolver.resolveDisplayName(ctx, effNum)
+                    }
+                    if (effNum.isBlank() && !resolvedContact.isNullOrBlank()) {
+                        effNum = ContactNameResolver.findPhoneNumberByContactName(ctx, resolvedContact)?.second.orEmpty()
+                    }
+                    val bestDisplay = resolvedContact ?: effNum
+                    return if (bestDisplay.isNotBlank()) ResolvedCallerInfo(bestDisplay, effNum) else null
+                }
+
+                fun dispatchPhoneCallSnapshot(knownNum: String): Boolean {
+                    val info = if (status != CallStatus.IDLE) resolveCallerMultiSource(context, knownNum) else null
+                    val effNum = info?.phoneNumber.orEmpty()
+                    val bestDisplay = info?.displayName?.ifBlank { effNum } ?: "行動電話來電"
                     BluetoothCompanionService.sendPacketFromPhone(
                         BridgePacket(
                             type = PacketType.CALL_STATE,
@@ -129,13 +166,17 @@ class BluetoothCallReceiver : BroadcastReceiver() {
                             callStatus = status
                         )
                     )
+                    return effNum.isNotBlank() || !ContactNameResolver.isPureGenericPlaceholder(bestDisplay)
                 }
 
                 if (role == DeviceRole.PHONE_COMPANION) {
                     val callCaptureOn = app.preferences.config.value.phoneCallCaptureEnabled
                     if (status != CallStatus.IDLE && !callCaptureOn) return
                     lastPhoneTelephonyStatus = status
-                    dispatchPhoneCallSnapshot(rawExtraNum)
+                    if (status == CallStatus.IDLE && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        PhoneCallScreeningService.clearScreenedCaller()
+                    }
+                    val resolvedImmediately = dispatchPhoneCallSnapshot(rawExtraNum)
                     if (status == CallStatus.IDLE) {
                         // Send a second delayed IDLE so late OEM dialer / missed-call notifications can never re-stick the Car banner!
                         Handler(Looper.getMainLooper()).postDelayed({
@@ -150,25 +191,29 @@ class BluetoothCallReceiver : BroadcastReceiver() {
                             }
                         }, 650L)
                     }
-                    // If Android's first broadcast arrived before EXTRA_INCOMING_NUMBER / CallLog write, re-probe after 650ms!
-                    if (status == CallStatus.RINGING && rawExtraNum.isBlank()) {
+                    // If Android's first broadcast arrived before dialer notification / CallScreening / CallLog populated,
+                    // re-probe at 450ms AND 1200ms so caller name + phone number ALWAYS show up!
+                    if (status == CallStatus.RINGING && !resolvedImmediately) {
                         val appCtx = context.applicationContext
-                        Handler(Looper.getMainLooper()).postDelayed({
-                            if (lastPhoneTelephonyStatus != CallStatus.RINGING) return@postDelayed
-                            val recentLog = ContactNameResolver.queryRecentCallLogCaller(appCtx)
-                            if (recentLog != null) {
-                                BluetoothCompanionService.sendPacketFromPhone(
-                                    BridgePacket(
-                                        type = PacketType.CALL_STATE,
-                                        id = UUID.randomUUID().toString(),
-                                        sender = recentLog.displayName,
-                                        phoneNumber = recentLog.phoneNumber,
-                                        appName = "行動電話",
-                                        callStatus = CallStatus.RINGING
+                        val handler = Handler(Looper.getMainLooper())
+                        for (delayMs in listOf(450L, 1200L)) {
+                            handler.postDelayed({
+                                if (lastPhoneTelephonyStatus != CallStatus.RINGING) return@postDelayed
+                                val delayed = resolveCallerMultiSource(appCtx, "")
+                                if (delayed != null) {
+                                    BluetoothCompanionService.sendPacketFromPhone(
+                                        BridgePacket(
+                                            type = PacketType.CALL_STATE,
+                                            id = UUID.randomUUID().toString(),
+                                            sender = delayed.displayName,
+                                            phoneNumber = delayed.phoneNumber,
+                                            appName = "行動電話",
+                                            callStatus = CallStatus.RINGING
+                                        )
                                     )
-                                )
-                            }
-                        }, 650L)
+                                }
+                            }, delayMs)
+                        }
                     }
                 } else {
                     val callCaptureOn = app?.preferences?.config?.value?.phoneCallCaptureEnabled == true

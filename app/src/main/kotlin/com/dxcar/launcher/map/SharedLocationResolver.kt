@@ -32,7 +32,30 @@ data class ExternalNavAppOption(
 object SharedLocationResolver {
 
     private val URL_REGEX = Regex("""https?://[^\s<>"]+""", RegexOption.IGNORE_CASE)
+    private val MAP_URL_REGEX = Regex(
+        """https?://(?:maps\.app\.goo\.gl|goo\.gl/maps|g\.page|maps\.google\.[^\s/]+|(?:www\.)?google\.[^\s/]+/maps|maps\.apple\.com|(?:www\.)?waze\.com|map\.baidu\.com|uri\.amap\.com|surl\.amap\.com)[^\s<>"]*""",
+        RegexOption.IGNORE_CASE
+    )
+    private val RAW_COORDS_REGEX = Regex("""-?\d{1,2}\.\d{3,}\s*[,，\s]\s*-?\d{1,3}\.\d{3,}""")
+    private val ADDRESS_MARKER_REGEX = Regex("""[縣市區鄉鎮村里路街大道段巷弄號樓]|(?:\b(?:Rd|Road|St|Street|Ave|Avenue|Blvd|Ln|Lane|Way|Dr|Drive|Hwy|Highway)\b)""", RegexOption.IGNORE_CASE)
     private val AT_COORDS_REGEX = Regex("""@(-?\d+\.\d+),(-?\d+\.\d+)""")
+
+    /**
+     * Distinguishes a direct map link / street address / coordinates from arbitrary shared text
+     * (social posts, chat paragraphs, articles, questions) that should be handed to Gemini first.
+     */
+    fun isDirectMapOrAddress(rawText: String): Boolean {
+        val trimmed = rawText.trim()
+        if (trimmed.isBlank()) return false
+        if (trimmed.startsWith("geo:", ignoreCase = true)) return true
+        if (MAP_URL_REGEX.containsMatchIn(trimmed)) return true
+        if (RAW_COORDS_REGEX.containsMatchIn(trimmed)) return true
+        // Non-map web links (Threads, FB, IG, YouTube, News, etc.) are NOT direct addresses -> let Gemini judge!
+        if (URL_REGEX.containsMatchIn(trimmed)) return false
+        // Very long prose / multi-sentence chat messages -> let Gemini judge!
+        if (trimmed.length > 75 || trimmed.count { it == '\n' } >= 3) return false
+        return ADDRESS_MARKER_REGEX.containsMatchIn(trimmed)
+    }
     private val BANG_COORDS_REGEX = Regex("""!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)""")
     private val Q_COORDS_REGEX = Regex("""[?&](?:q|query|ll|daddr)=(-?\d+\.\d+)[,%2C+]+(-?\d+\.\d+)""", RegexOption.IGNORE_CASE)
     private val PLACE_PATH_REGEX = Regex("""/maps/place/([^/?#]+)""")

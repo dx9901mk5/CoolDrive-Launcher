@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.captionBarPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -149,8 +150,21 @@ class SplitSidePanelActivity : ComponentActivity() {
             }
 
             val dm = resources.displayMetrics
-            val screenMetrics = remember(dm.widthPixels, dm.heightPixels, dm.densityDpi) {
-                ScreenMetrics(dm.widthPixels, dm.heightPixels, dm.densityDpi)
+            // IMPORTANT: Inside a Freeform/Split window on Android 12-15, resources.displayMetrics reflects the
+            // split pane width (e.g. 576px), NOT the full physical screen (1920x720)! Always read full display bounds for RootHelper!
+            val (fullDisplayW, fullDisplayH) = remember(dm.widthPixels, dm.heightPixels) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    val b = windowManager.maximumWindowMetrics.bounds
+                    maxOf(b.width(), dm.widthPixels) to maxOf(b.height(), dm.heightPixels)
+                } else {
+                    val pt = android.graphics.Point()
+                    @Suppress("DEPRECATION")
+                    windowManager.defaultDisplay.getRealSize(pt)
+                    maxOf(pt.x, dm.widthPixels) to maxOf(pt.y, dm.heightPixels)
+                }
+            }
+            val screenMetrics = remember(fullDisplayW, fullDisplayH, dm.densityDpi) {
+                ScreenMetrics(fullDisplayW, fullDisplayH, dm.densityDpi)
             }
             val layoutSpec = remember(screenMetrics, config.dockPositionMode, config.rightHandDrive, config.primarySplitRatio) {
                 CoolwalkLayoutEngine.compute(
@@ -249,6 +263,7 @@ class SplitSidePanelActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxSize()
                         .background(colors.canvasBackground)
+                        .captionBarPadding()
                         .padding(8.dp)
                 ) {
                     Column(

@@ -859,16 +859,26 @@ class BluetoothCompanionService : Service() {
                     }
                     val bestName = resolvedOnBox
                         ?: packet.sender.ifBlank { packet.phoneNumber.ifBlank { "來電" } }
+                    val bestNum = packet.phoneNumber.ifBlank {
+                        if (!ContactNameResolver.isGenericOrNumberOnly(bestName)) {
+                            ContactNameResolver.findPhoneNumberByContactName(
+                                this@BluetoothCompanionService,
+                                bestName
+                            )?.second.orEmpty()
+                        } else {
+                            ""
+                        }
+                    }
                     app.notificationCenter.updateCallState(
                         CarCallState(
                             status = packet.callStatus,
                             callerName = bestName,
-                            callerNumber = packet.phoneNumber,
+                            callerNumber = bestNum,
                             sourceApp = packet.appName.ifBlank { "手機來電" },
                             fromPhoneBridge = true
                         )
                     )
-                    appendLog("來電狀態：${packet.callStatus.name} $bestName")
+                    appendLog("來電狀態：${packet.callStatus.name} $bestName ($bestNum)")
                 }
             }
             PacketType.REPLY_COMMAND -> {
@@ -904,27 +914,12 @@ class BluetoothCompanionService : Service() {
                         longitude = packet.longitude,
                         timestampMs = packet.timestampMs
                     )
-                    val triggerMode = app.preferences.config.value.sharedLocationNavTrigger
+                    val cfg = app.preferences.config.value
+                    val triggerMode = cfg.sharedLocationNavTrigger
+                    val curLoc = app.locationTracker.location.value
+                    val sLat = if (curLoc.latitude != 0.0) curLoc.latitude else cfg.lastKnownLat
+                    val sLon = if (curLoc.longitude != 0.0) curLoc.longitude else cfg.lastKnownLon
                     when {
-                        triggerMode == "BUILTIN" -> {
-                            val curLoc = app.locationTracker.location.value
-                            val cfg = app.preferences.config.value
-                            val sLat = if (curLoc.latitude != 0.0) curLoc.latitude else cfg.lastKnownLat
-                            val sLon = if (curLoc.longitude != 0.0) curLoc.longitude else cfg.lastKnownLon
-                            app.builtInNavEngine.navigateByQuery(
-                                query = item.address.ifBlank { item.label },
-                                startLat = sLat,
-                                startLon = sLon,
-                                explicitDestLat = item.latitude.takeIf { it != 0.0 },
-                                explicitDestLon = item.longitude.takeIf { it != 0.0 }
-                            )
-                            val launchHome = Intent(this@BluetoothCompanionService, MainActivity::class.java).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                                putExtra(MainActivity.EXTRA_ACTION, MainActivity.EXTRA_GO_DASHBOARD)
-                            }
-                            runCatching { startActivity(launchHome) }
-                            appendLog("🧭 已自動以內建地圖導航：$label")
-                        }
                         triggerMode == "GOOGLE_MAPS" -> {
                             com.dxcar.launcher.map.SharedLocationResolver.openInGoogleMaps(
                                 this@BluetoothCompanionService,
@@ -947,9 +942,50 @@ class BluetoothCompanionService : Service() {
                             )
                             appendLog("📍 已自動以指定地圖導航：$label")
                         }
+                        triggerMode == "BUILTIN" -> {
+                            app.builtInNavEngine.navigateByQuery(
+                                query = item.address.ifBlank { item.label },
+                                startLat = sLat,
+                                startLon = sLon,
+                                explicitDestLat = item.latitude.takeIf { it != 0.0 },
+                                explicitDestLon = item.longitude.takeIf { it != 0.0 }
+                            )
+                            val launchHome = Intent(this@BluetoothCompanionService, MainActivity::class.java).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                                putExtra(MainActivity.EXTRA_ACTION, MainActivity.EXTRA_GO_DASHBOARD)
+                            }
+                            runCatching { startActivity(launchHome) }
+                            appendLog("🧭 已自動以內建地圖導航：$label")
+                        }
                         else -> {
-                            app.notificationCenter.postSharedLocation(item)
-                            appendLog("📍 收到手機分享地址（請選擇導航 App）：$label")
+                            // Default direct map search startup! Launch active plan's primary map search right away
+                            // AND keep the quick switch banner so driver can 1-tap switch to Google Maps / other nav app.
+                            if (cfg.homeExperimentMode == com.dxcar.launcher.data.HomeExperimentMode.PLAN_D_ROOT_RESERVED) {
+                                com.dxcar.launcher.map.SharedLocationResolver.openInGoogleMaps(
+                                    this@BluetoothCompanionService,
+                                    item.label,
+                                    item.address,
+                                    item.latitude,
+                                    item.longitude
+                                )
+                                app.notificationCenter.postSharedLocation(item)
+                                appendLog("🗺 已自動啟動 Google 地圖搜尋：$label")
+                            } else {
+                                app.builtInNavEngine.navigateByQuery(
+                                    query = item.address.ifBlank { item.label },
+                                    startLat = sLat,
+                                    startLon = sLon,
+                                    explicitDestLat = item.latitude.takeIf { it != 0.0 },
+                                    explicitDestLon = item.longitude.takeIf { it != 0.0 }
+                                )
+                                val launchHome = Intent(this@BluetoothCompanionService, MainActivity::class.java).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                                    putExtra(MainActivity.EXTRA_ACTION, MainActivity.EXTRA_GO_DASHBOARD)
+                                }
+                                runCatching { startActivity(launchHome) }
+                                app.notificationCenter.postSharedLocation(item)
+                                appendLog("🧭 已自動啟動車機地圖搜尋：$label")
+                            }
                         }
                     }
                 }
@@ -967,39 +1003,31 @@ class BluetoothCompanionService : Service() {
         val directNum = explicitNumber.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
         val resolved = if (directNum.count { it.isDigit() } >= 3) {
             targetNameOrQuery.ifBlank { directNum } to directNum
-        } else {
+        } else if (targetNameOrQuery.isNotBlank()) {
             ContactNameResolver.findPhoneNumberByContactName(this, targetNameOrQuery)
+        } else {
+            null
         }
 
         if (resolved == null) {
-            appendLog("⚠️ 找不到聯絡人「$targetNameOrQuery」，已開啟手機撥號盤")
-            runCatching {
-                val dialFallback = Intent(Intent.ACTION_DIAL).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                startActivity(dialFallback)
-            }
+            appendLog(
+                if (targetNameOrQuery.isBlank()) "📞 已開啟手機原始電話撥號盤"
+                else "⚠️ 找不到聯絡人「$targetNameOrQuery」，已開啟手機原始撥號盤"
+            )
+            launchNativePhoneDialer(this, rawPhone = "", directCall = false)
             return
         }
 
         val (matchedName, rawPhone) = resolved
         val cleanPhone = rawPhone.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
-        val telUri = android.net.Uri.parse("tel:${android.net.Uri.encode(cleanPhone)}")
         val hasCallPerm = ContextCompat.checkSelfPermission(
             this,
             Manifest.permission.CALL_PHONE
         ) == PackageManager.PERMISSION_GRANTED
-        val action = if (hasCallPerm) Intent.ACTION_CALL else Intent.ACTION_DIAL
-        val ok = runCatching {
-            val intent = Intent(action, telUri).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            startActivity(intent)
-            true
-        }.getOrDefault(false)
+        val ok = launchNativePhoneDialer(this, rawPhone = cleanPhone, directCall = hasCallPerm)
         appendLog(
-            if (ok) "📞 已透過手機${if (hasCallPerm) "直接撥打" else "開啟撥號"}：$matchedName ($cleanPhone)"
-            else "⚠️ 無法啟動撥號：$matchedName ($cleanPhone)"
+            if (ok) "📞 已透過手機原始電話${if (hasCallPerm) "直接撥打" else "開啟撥號"}：$matchedName ($cleanPhone)"
+            else "⚠️ 無法啟動手機原始電話：$matchedName ($cleanPhone)"
         )
     }
 
@@ -1435,6 +1463,67 @@ class BluetoothCompanionService : Service() {
             val svc = activeService ?: return false
             if (!svc.hasOpenTransport()) return false
             return svc.enqueueOutbound(normalized)
+        }
+
+        /**
+         * Places a call or opens the dialer strictly using the device's ORIGINAL system/default Phone App
+         * (explicitly excluding `com.dxcar.launcher` so it NEVER loops back into CarDialerBridgeActivity!).
+         * Prefers `TelecomManager.placeCall` when CALL_PHONE is granted so background/lockscreen calls succeed on Android 14-16.
+         */
+        @SuppressLint("MissingPermission")
+        fun launchNativePhoneDialer(context: Context, rawPhone: String, directCall: Boolean): Boolean {
+            val cleanPhone = rawPhone.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
+            val telUri = if (cleanPhone.isNotBlank()) {
+                android.net.Uri.parse("tel:${android.net.Uri.encode(cleanPhone)}")
+            } else {
+                null
+            }
+
+            // 1. Best path on Smartphone: TelecomManager.placeCall (routes directly to system Phone App even from background!)
+            if (directCall && telUri != null && ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.CALL_PHONE
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                val telecom = context.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
+                if (telecom != null) {
+                    val placed = runCatching {
+                        telecom.placeCall(telUri, android.os.Bundle())
+                        true
+                    }.getOrDefault(false)
+                    if (placed) return true
+                }
+            }
+
+            // 2. Resolve native/original dialer package (excluding com.dxcar.launcher)
+            val pm = context.packageManager
+            val telecomDefaultPkg = runCatching {
+                (context.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager)?.defaultDialerPackage
+            }.getOrNull()?.takeIf { it.isNotBlank() && it != context.packageName }
+
+            val probeIntent = Intent(Intent.ACTION_DIAL, telUri ?: android.net.Uri.parse("tel:"))
+            @Suppress("DEPRECATION")
+            val resolvedNativePkg = telecomDefaultPkg ?: pm.queryIntentActivities(probeIntent, 0)
+                .mapNotNull { it.activityInfo?.packageName }
+                .firstOrNull { it != context.packageName }
+
+            val actionsToTry = if (directCall && telUri != null) {
+                listOf(Intent.ACTION_CALL, Intent.ACTION_DIAL)
+            } else {
+                listOf(Intent.ACTION_DIAL)
+            }
+            for (act in actionsToTry) {
+                val intent = Intent(act, telUri).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    if (!resolvedNativePkg.isNullOrBlank()) {
+                        setPackage(resolvedNativePkg)
+                    }
+                }
+                if (runCatching { context.startActivity(intent); true }.getOrDefault(false)) {
+                    return true
+                }
+            }
+            return false
         }
     }
 }

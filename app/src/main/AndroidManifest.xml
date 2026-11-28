@@ -139,6 +139,58 @@
             android:taskAffinity="com.dxcar.launcher.splitpanel"
             android:theme="@style/Theme.DxCarLauncher" />
 
+        <!-- Car-Side Dialer Capability: Lets Car Gemini / Steering-Wheel Voice Place Calls -> Forwarded to Smartphone's Original Phone App -->
+        <activity
+            android:name=".comms.CarDialerBridgeActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.CALL" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tel" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.CALL" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="vnd.android.cursor.item/phone_v2" />
+                <data android:mimeType="vnd.android.cursor.item/phone" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tel" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.DIAL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tel" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.CALL_BUTTON" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- Play-Compliant Android 10+ CallScreeningService: Captures Exact Caller Number on Smartphone Without READ_CALL_LOG -->
+        <service
+            android:name=".comms.PhoneCallScreeningService"
+            android:exported="true"
+            android:permission="android.permission.BIND_SCREENING_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.CallScreeningService" />
+            </intent-filter>
+        </service>
+
         <!-- Notification Listener: Media Sessions, Google Maps Turn-by-Turn, Local Box & Phone Companion Messages -->
         <service
             android:name=".comms.BoxNotificationListenerService"

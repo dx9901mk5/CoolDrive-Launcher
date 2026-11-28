@@ -56,6 +56,7 @@ class DxCarApp : Application() {
 
         preferences = LauncherPreferences(this)
         val cfg = preferences.config.value
+        com.dxcar.launcher.comms.CarDialerBridgeActivity.syncComponentEnabled(this, cfg.deviceRole)
         systemStatusMonitor = SystemStatusMonitor(this).apply { start() }
         installedAppsRepository = InstalledAppsRepository(this).apply { start() }
         locationTracker = LocationTracker(this, preferences).apply { startIfPermitted() }

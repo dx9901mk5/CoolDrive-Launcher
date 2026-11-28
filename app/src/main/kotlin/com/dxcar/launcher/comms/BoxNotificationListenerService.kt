@@ -170,16 +170,21 @@ class BoxNotificationListenerService : NotificationListenerService() {
             return
         }
 
+        val templateName = extras.getString(Notification.EXTRA_TEMPLATE).orEmpty()
+        val isCallStyleNotif = templateName.contains("CallStyle", ignoreCase = true)
         val isCallNotif = notif.category == Notification.CATEGORY_CALL ||
+            isCallStyleNotif ||
             handle.answerAction != null ||
             (notif.fullScreenIntent != null && isDialerOrVoipCall(pkg, rawTitle, rawText)) ||
             isDialerOrVoipCall(pkg, rawTitle, rawText)
 
-        // Extract custom OEM InCallUI RemoteViews strings (vivo OriginOS / Xiaomi / Samsung)
-        // whenever standard title is blank OR generic ("來電" / "Incoming call") so real caller/number is captured!
+        // Extract custom OEM InCallUI RemoteViews strings (vivo OriginOS / Xiaomi / Samsung) AND all extras strings
+        // on EVERY call notification so both Contact Name AND Phone Number are reliably captured on Android 14/15/16!
         @Suppress("DEPRECATION")
-        val remoteViewStrings = if (isCallNotif && (ContactNameResolver.isGenericOrNumberOnly(rawTitle) || callPersonName.isBlank())) {
+        val remoteViewStrings = if (isCallNotif) {
             ContactNameResolver.extractRemoteViewsStrings(
+                context = this,
+                sourcePackage = pkg,
                 notif.headsUpContentView,
                 notif.bigContentView,
                 notif.contentView
@@ -187,10 +192,20 @@ class BoxNotificationListenerService : NotificationListenerService() {
         } else {
             emptyList()
         }
-        val rvCandidateTitle = remoteViewStrings.firstOrNull {
-            !ContactNameResolver.isPureGenericPlaceholder(it) && !isCallActionLabel(it)
-        }.orEmpty()
-        val rvCandidateNum = remoteViewStrings.firstNotNullOfOrNull {
+        val extraBundleStrings = if (isCallNotif) {
+            ContactNameResolver.extractAllStringsFromExtras(extras)
+        } else {
+            emptyList()
+        }
+        val allCallStrings = (remoteViewStrings + extraBundleStrings).distinct()
+        val rvCandidateTitle = allCallStrings.firstOrNull {
+            !ContactNameResolver.isGenericOrNumberOnly(it) && !isCallActionLabel(it)
+        }.orEmpty().ifBlank {
+            allCallStrings.firstOrNull {
+                !ContactNameResolver.isPureGenericPlaceholder(it) && !isCallActionLabel(it)
+            }.orEmpty()
+        }
+        val rvCandidateNum = allCallStrings.firstNotNullOfOrNull {
             ContactNameResolver.extractPlausiblePhoneNumber(it).takeIf { n -> n.isNotBlank() }
         }.orEmpty()
         val infoText = extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString().orEmpty()
@@ -302,6 +317,18 @@ class BoxNotificationListenerService : NotificationListenerService() {
                 null
             }
             val nonGenericTitle = title.takeIf { !ContactNameResolver.isPureGenericPlaceholder(it) }.orEmpty()
+            // Merge PhoneCallScreeningService exact number if notification lacked raw digits
+            val screened = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                PhoneCallScreeningService.recentScreenedCaller()
+            } else {
+                null
+            }
+            if (extractedNum.isBlank() && screened != null && screened.phoneNumber.isNotBlank()) {
+                extractedNum = screened.phoneNumber
+            }
+            if (resolvedName == null && screened != null && !ContactNameResolver.isGenericOrNumberOnly(screened.displayName)) {
+                resolvedName = screened.displayName
+            }
             if (resolvedName == null && nonGenericTitle.isBlank() && extractedNum.isBlank()) {
                 val recentLog = ContactNameResolver.queryRecentCallLogCaller(this)
                 if (recentLog != null) {
@@ -311,9 +338,15 @@ class BoxNotificationListenerService : NotificationListenerService() {
                     }
                 }
             }
-            // Contacts show Contact Name + Number; Non-contacts show pure Phone Number!
+            // Contacts show Contact Name + Phone Number underneath; backfill phone number from Contacts if we only got the name!
             val finalCallerName = resolvedName
                 ?: nonGenericTitle.ifBlank { extractedNum.ifBlank { "未知來電" } }
+            if (extractedNum.isBlank() && !ContactNameResolver.isGenericOrNumberOnly(finalCallerName)) {
+                val byName = ContactNameResolver.findPhoneNumberByContactName(this, finalCallerName)
+                if (byName != null && byName.second.isNotBlank()) {
+                    extractedNum = byName.second
+                }
+            }
             val ok = BluetoothCompanionService.sendPacketFromPhone(
                 BridgePacket(
                     type = PacketType.CALL_STATE,
@@ -526,6 +559,7 @@ class BoxNotificationListenerService : NotificationListenerService() {
         val pkgLower = pkg.lowercase()
         val combined = "$pkgLower ${title.lowercase()} ${text.lowercase()}"
         return combined.contains("來電") ||
+            combined.contains("来电") ||
             combined.contains("incoming call") ||
             combined.contains("語音通話") ||
             combined.contains("免費通話") ||
@@ -533,8 +567,82 @@ class BoxNotificationListenerService : NotificationListenerService() {
             pkgLower.contains("dialer") ||
             pkgLower.contains("telecom") ||
             pkgLower == "com.android.phone" ||
+            pkgLower == "com.android.contacts" ||
+            pkgLower == "com.carsyso.bluetooth" ||
             pkgLower.contains("vivo.phone") ||
+            pkgLower.contains("vivo.dialer") ||
+            pkgLower.contains("bbk.incallui") ||
+            pkgLower.contains("iqoo.dialer") ||
             pkgLower.contains("btphone")
+    }
+
+    /**
+     * Actively scans all current status bar notifications for an active incoming/ongoing call
+     * (used by BluetoothCallReceiver when PHONE_STATE fires before/without EXTRA_INCOMING_NUMBER on Play flavor).
+     */
+    fun scanActiveCallNotificationOnPhone(): ResolvedCallerInfo? {
+        val list = runCatching { activeNotifications }.getOrNull() ?: return null
+        for (sbn in list) {
+            val pkg = sbn.packageName ?: continue
+            if (pkg == packageName) continue
+            val notif = sbn.notification ?: continue
+            val extras = notif.extras ?: Bundle.EMPTY
+            val rawTitle = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()
+                ?: extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+                ?: ""
+            val rawText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+                ?: extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+                ?: ""
+            if (isMissedOrEndedCall(rawTitle, rawText)) continue
+            val templateName = extras.getString(Notification.EXTRA_TEMPLATE).orEmpty()
+            val handle = extractActionHandle(sbn.key, notif)
+            val isCall = notif.category == Notification.CATEGORY_CALL ||
+                templateName.contains("CallStyle", ignoreCase = true) ||
+                handle.answerAction != null ||
+                isDialerOrVoipCall(pkg, rawTitle, rawText)
+            if (!isCall) continue
+
+            var personUriNum = ""
+            val personName = runCatching {
+                val p = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    extras.getParcelable(Notification.EXTRA_CALL_PERSON, android.app.Person::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    extras.getParcelable("android.callPerson") as? android.app.Person
+                }
+                personUriNum = ContactNameResolver.extractPlausiblePhoneNumber(p?.uri)
+                p?.name?.toString()?.trim().orEmpty()
+            }.getOrDefault("")
+
+            @Suppress("DEPRECATION")
+            val rvStrings = ContactNameResolver.extractRemoteViewsStrings(
+                context = this,
+                sourcePackage = pkg,
+                notif.headsUpContentView,
+                notif.bigContentView,
+                notif.contentView
+            )
+            val allStrings = (listOf(rawTitle, rawText) + rvStrings + ContactNameResolver.extractAllStringsFromExtras(extras)).distinct()
+            var foundNum = personUriNum.ifBlank {
+                allStrings.firstNotNullOfOrNull {
+                    ContactNameResolver.extractPlausiblePhoneNumber(it).takeIf { n -> n.isNotBlank() }
+                }.orEmpty()
+            }
+            val foundName = personName.takeIf { !ContactNameResolver.isGenericOrNumberOnly(it) }
+                ?: rawTitle.takeIf { !ContactNameResolver.isGenericOrNumberOnly(it) && !isCallActionLabel(it) }
+                ?: allStrings.firstOrNull { !ContactNameResolver.isGenericOrNumberOnly(it) && !isCallActionLabel(it) }
+                ?: ContactNameResolver.resolveDisplayName(this, foundNum)
+                ?: ""
+
+            if (foundNum.isBlank() && foundName.isNotBlank()) {
+                foundNum = ContactNameResolver.findPhoneNumberByContactName(this, foundName)?.second.orEmpty()
+            }
+            val bestDisplay = foundName.ifBlank { foundNum }
+            if (bestDisplay.isNotBlank() && !ContactNameResolver.isPureGenericPlaceholder(bestDisplay)) {
+                return ResolvedCallerInfo(bestDisplay, foundNum)
+            }
+        }
+        return null
     }
 
     private fun resolveAppLabel(pkg: String): String {

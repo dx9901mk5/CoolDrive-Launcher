@@ -19,6 +19,8 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -853,6 +855,54 @@ fun PhoneCompanionScreen(
                                         val curLoc = app?.locationTracker?.location?.value
                                         val biasLat = if (curLoc != null && curLoc.latitude != 0.0) curLoc.latitude else config.lastKnownLat
                                         val biasLon = if (curLoc != null && curLoc.longitude != 0.0) curLoc.longitude else config.lastKnownLon
+                                        val isDirectAddr = com.dxcar.launcher.map.SharedLocationResolver.isDirectMapOrAddress(q)
+                                        if (!isDirectAddr) {
+                                            shareResultTip = "✨ 非標準地址，正在交由 Gemini 判斷…"
+                                            val apiKey = config.geminiApiKey.trim()
+                                            val gRes = if (apiKey.isNotBlank()) {
+                                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                    com.dxcar.launcher.voice.GeminiVoiceNavController.analyzeSharedTextWithGemini(
+                                                        apiKey = apiKey,
+                                                        sharedText = q,
+                                                        curLat = biasLat,
+                                                        curLon = biasLon
+                                                    )
+                                                }
+                                            } else {
+                                                null
+                                            }
+                                            if (gRes != null && gRes.isPlaceOrAddress && (gRes.address.isNotBlank() || gRes.label.isNotBlank())) {
+                                                val targetQ = gRes.address.ifBlank { gRes.label }
+                                                val resolved = if (gRes.lat != 0.0 && gRes.lon != 0.0) {
+                                                    com.dxcar.launcher.map.ResolvedSharedLocation(gRes.label.ifBlank { targetQ }, targetQ, gRes.lat, gRes.lon)
+                                                } else if (app != null) {
+                                                    com.dxcar.launcher.map.SharedLocationResolver.resolveSharedText(context, app.builtInNavEngine, targetQ, biasLat, biasLon)
+                                                } else {
+                                                    com.dxcar.launcher.map.ResolvedSharedLocation(targetQ, targetQ, 0.0, 0.0)
+                                                }
+                                                val sent = BluetoothCompanionService.sendPacketFromPhone(
+                                                    BridgePacket(
+                                                        type = PacketType.SHARED_LOCATION,
+                                                        id = UUID.randomUUID().toString(),
+                                                        sender = resolved.label,
+                                                        text = resolved.address,
+                                                        latitude = resolved.latitude,
+                                                        longitude = resolved.longitude
+                                                    )
+                                                )
+                                                shareSending = false
+                                                shareResultTip = if (sent) "✨ Gemini 辨識地點並送往車機搜尋：${resolved.label}" else "✨ Gemini 辨識「${resolved.label}」（待連線車機）"
+                                                return@launch
+                                            } else {
+                                                val opened = com.dxcar.launcher.voice.GeminiVoiceNavController.launchGeminiVoiceAssistantDirect(
+                                                    context,
+                                                    "請幫我判斷這段內容是否包含地點或地址：\n$q"
+                                                )
+                                                shareSending = false
+                                                shareResultTip = if (opened) "✨ 已交由 Google Gemini 進行判斷" else (gRes?.summary?.ifBlank { "⚠️ 非地址內容，請安裝 Google Gemini App 或設定 API Key" } ?: "⚠️ 非地址內容，請安裝 Google Gemini App")
+                                                return@launch
+                                            }
+                                        }
                                         val resolved = if (app != null) {
                                             com.dxcar.launcher.map.SharedLocationResolver.resolveSharedText(
                                                 context = context,
@@ -876,7 +926,7 @@ fun PhoneCompanionScreen(
                                         )
                                         shareSending = false
                                         shareResultTip = if (sent) {
-                                            "✓ 已傳送給車機：${resolved.label}（${resolved.address}）"
+                                            "✓ 已傳送給車機啟動地圖搜尋：${resolved.label}"
                                         } else {
                                             "⚠️ 已解析「${resolved.address}」並排入傳送，請確認已連上車機"
                                         }
@@ -1039,6 +1089,65 @@ fun PhoneCompanionScreen(
                             checked = config.phoneCallCaptureEnabled,
                             onCheckedChange = onTogglePhoneCallCapture
                         )
+                    }
+
+                    if (config.phoneCallCaptureEnabled && !permissionHealth.hasCallScreeningRole && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val callScreeningRoleLauncher = rememberLauncherForActivityResult(
+                            contract = ActivityResultContracts.StartActivityForResult()
+                        ) {
+                            onRefreshPairedDevices()
+                        }
+                        Surface(
+                            color = Color(0xFFF59E0B).copy(alpha = 0.16f),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, Color(0xFFF59E0B).copy(alpha = 0.65f), RoundedCornerShape(14.dp))
+                                .clickable {
+                                    val roleIntent = PermissionHelper.buildCallScreeningRoleIntent(context)
+                                    if (roleIntent != null) {
+                                        runCatching { callScreeningRoleLauncher.launch(roleIntent) }
+                                    } else {
+                                        PermissionHelper.openAppDetailsSettings(context)
+                                    }
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Security,
+                                    contentDescription = null,
+                                    tint = Color(0xFFF59E0B),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = str(
+                                            "點此授權「來電辨識服務」（100% 精準顯示來電號碼與聯絡人）",
+                                            "点此授权「来电识别服务」（100% 精准显示来电号码与联系人）",
+                                            "Enable Caller ID Screening (100% Reliable Caller Number)",
+                                            "発信者番号認識サービスを有効化（着信番号を確実に表示）"
+                                        ),
+                                        color = colors.primaryText,
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = str(
+                                            "解決 Android 15/16 及 vivo 系統隱藏來電號碼問題（不會阻擋任何來電）",
+                                            "解决 Android 15/16 及 vivo 系统隐藏来电号码问题（不会拦截任何来电）",
+                                            "Fixes Android 15/16 OEM hidden caller number issue (never blocks calls)",
+                                            "Android 15/16 の番号非表示問題を解決します（着信はブロックしません）"
+                                        ),
+                                        color = colors.secondaryText,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     Column(
