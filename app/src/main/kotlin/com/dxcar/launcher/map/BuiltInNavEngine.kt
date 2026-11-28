@@ -105,6 +105,16 @@ class BuiltInNavEngine(
 
     private var lastAnnouncedStepKey = ""
     private var lastRerouteTimeMs = 0L
+    @Volatile
+    private var cachedLocalAreaLat = 0.0
+    @Volatile
+    private var cachedLocalAreaLon = 0.0
+    @Volatile
+    private var cachedLocalCity = ""
+    @Volatile
+    private var cachedLocalDistrict = ""
+    @Volatile
+    private var cachedLocalAreaAtMs = 0L
 
     fun searchPlaces(query: String, biasLat: Double, biasLon: Double) {
         val trimmed = query.trim()
@@ -292,12 +302,166 @@ class BuiltInNavEngine(
     }
 
     private fun queryPlacesDualEngine(trimmed: String, biasLat: Double, biasLon: Double): List<NavSearchResult> {
+        val (effLat, effLon) = resolveFreshestStartCoords(biasLat, biasLon)
+        val hasGps = effLat != 0.0 && effLon != 0.0
         val localMatches = matchLocalRegisteredShortcuts(trimmed)
-        val combined = mutableListOf<NavSearchResult>()
-        val region = detectGeoRegion(biasLat, biasLon, trimmed)
+        val region = detectGeoRegion(effLat, effLon, trimmed)
         val isLikelyTaiwan = region?.code == "TW"
+        val userSpecifiedCity = containsExplicitCountyOrCity(trimmed)
 
-        // 1. Android System Geocoder (Google GMS — strictly bounded when inside an island country)
+        // Resolve user's current County/City (e.g. "高雄市") so nearby same-city matches ALWAYS win first!
+        val (localCity, localDistrict) = if (hasGps && !userSpecifiedCity) {
+            resolveCurrentLocalCityDistrict(effLat, effLon, isLikelyTaiwan)
+        } else {
+            "" to ""
+        }
+
+        val nearbyCandidates = mutableListOf<NavSearchResult>()
+
+        // ==================== STAGE 1: STRICTLY NEARBY & SAME-COUNTY FIRST ====================
+        // When user searches a keyword/road without naming another city, search tightly around
+        // the user's live GPS position & current county first!
+        if (hasGps && !userSpecifiedCity) {
+            val localDeltaLat = 0.32 // ~35 km
+            val localDeltaLon = 0.35 // ~35 km
+            val minNearLat = effLat - localDeltaLat
+            val maxNearLat = effLat + localDeltaLat
+            val minNearLon = effLon - localDeltaLon
+            val maxNearLon = effLon + localDeltaLon
+
+            fun isTrulyNearbyOrSameCity(item: NavSearchResult): Boolean {
+                if (!isWithinPolicy(item, region, effLat, effLon)) return false
+                val distKm = distanceMeters(effLat, effLon, item.latitude, item.longitude) / 1000.0
+                if (distKm <= 45.0) return true
+                if (localCity.isNotBlank()) {
+                    val normCity = normalizeCityAlias(localCity)
+                    val combinedText = normalizeCityAlias("${item.name} ${item.subtitle}")
+                    if (combinedText.contains(normCity)) return true
+                }
+                return false
+            }
+
+            // 1A. Android GMS Geocoder (strictly bounded to ~35km box around current GPS + localCity hint)
+            val ctx = appContext
+            if (ctx != null && runCatching { Geocoder.isPresent() }.getOrDefault(false)) {
+                runCatching {
+                    val locale = if (isLikelyTaiwan) Locale.TRADITIONAL_CHINESE else Locale.getDefault()
+                    val geocoder = Geocoder(ctx, locale)
+                    val nearQueries = buildList {
+                        if (localDistrict.isNotBlank() && localCity.isNotBlank()) add("$localCity$localDistrict$trimmed")
+                        if (localCity.isNotBlank()) add("$localCity$trimmed")
+                        add(trimmed)
+                    }.distinct()
+                    for (gq in nearQueries) {
+                        if (nearbyCandidates.size >= 5) break
+                        @Suppress("DEPRECATION")
+                        val addrs = geocoder.getFromLocationName(
+                            gq, 6,
+                            minNearLat, minNearLon, maxNearLat, maxNearLon
+                        )
+                        if (!addrs.isNullOrEmpty()) {
+                            for (a in addrs) {
+                                if (a.hasLatitude() && a.hasLongitude()) {
+                                    val candidate = addressToNavResult(a, trimmed)
+                                    if (isTrulyNearbyOrSameCity(candidate)) {
+                                        nearbyCandidates += candidate
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 1B. ArcGIS World Geocoding (strictly constrained to local searchExtent + proximity bias)
+            if (nearbyCandidates.size < 4) {
+                runCatching {
+                    val arcQueries = buildList {
+                        if (localCity.isNotBlank()) add("$localCity $trimmed")
+                        add(trimmed)
+                    }.distinct()
+                    val countryParam = if (region != null && region.arcGisCc.isNotBlank()) "&countryCode=${region.arcGisCc}" else ""
+                    val extentParam = "&searchExtent=$minNearLon,$minNearLat,$maxNearLon,$maxNearLat&location=$effLon,$effLat"
+                    for (aq in arcQueries) {
+                        if (nearbyCandidates.size >= 5) break
+                        val encoded = URLEncoder.encode(aq, "UTF-8")
+                        val arcUrl =
+                            "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates" +
+                                "?SingleLine=$encoded$countryParam$extentParam&maxLocations=6&outFields=Match_addr,Place_addr,Type&f=pjson"
+                        val req = Request.Builder()
+                            .url(arcUrl)
+                            .header("User-Agent", "DX-Car-Launcher/1.9.3 (Android Car HeadUnit)")
+                            .build()
+                        httpClient.newCall(req).execute().use { resp ->
+                            if (resp.isSuccessful) {
+                                nearbyCandidates += parseArcGisResults(resp.body?.string().orEmpty(), trimmed)
+                                    .filter { isTrulyNearbyOrSameCity(it) }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 1C. Nominatim strictly bounded to local viewbox (bounded=1)
+            if (nearbyCandidates.size < 4) {
+                val acceptLang = DxCarI18n.nominatimAcceptLanguage()
+                val ccParam = if (region != null && region.nominatimCc.isNotBlank()) "&countrycodes=${region.nominatimCc}" else ""
+                val localNomQueries = buildList {
+                    add(trimmed)
+                    if (localCity.isNotBlank()) add("$localCity $trimmed")
+                    val spaced = tokenizeCjkAddress(trimmed)
+                    if (spaced != trimmed) add(spaced)
+                }.distinct()
+                for (qCand in localNomQueries) {
+                    if (nearbyCandidates.size >= 5) break
+                    runCatching {
+                        val enc = URLEncoder.encode(qCand, "UTF-8")
+                        val nearUrl =
+                            "https://nominatim.openstreetmap.org/search?q=$enc&format=jsonv2&accept-language=$acceptLang$ccParam&viewbox=$minNearLon,$maxNearLat,$maxNearLon,$minNearLat&bounded=1&limit=6"
+                        val req = Request.Builder()
+                            .url(nearUrl)
+                            .header("User-Agent", "DX-Car-Launcher/1.9.3 (Android Car HeadUnit)")
+                            .build()
+                        httpClient.newCall(req).execute().use { resp ->
+                            if (resp.isSuccessful) {
+                                nearbyCandidates += parseNominatimResults(resp.body?.string().orEmpty())
+                                    .filter { isTrulyNearbyOrSameCity(it) }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 1D. Photon tightly bounded to local bbox
+            if (nearbyCandidates.isEmpty()) {
+                runCatching {
+                    val enc = URLEncoder.encode(trimmed, "UTF-8")
+                    val photonUrl =
+                        "https://photon.komoot.io/api/?q=$enc&lat=$effLat&lon=$effLon&bbox=$minNearLon,$minNearLat,$maxNearLon,$maxNearLat&limit=6"
+                    val req = Request.Builder()
+                        .url(photonUrl)
+                        .header("User-Agent", "DX-Car-Launcher/1.9.3")
+                        .build()
+                    httpClient.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            nearbyCandidates += parsePhotonResults(resp.body?.string().orEmpty())
+                                .filter { isTrulyNearbyOrSameCity(it) }
+                        }
+                    }
+                }
+            }
+
+            // If Stage 1 found suitable nearby / same-county results, return ONLY those sorted by nearest distance!
+            if (nearbyCandidates.isNotEmpty() || localMatches.isNotEmpty()) {
+                return finalizeAndRankResults(localMatches, nearbyCandidates, effLat, effLon)
+            }
+        }
+
+        // ==================== STAGE 2: OTHER COUNTIES / NATIONWIDE FALLBACK ====================
+        // Runs ONLY when no suitable nearby match exists OR when user explicitly typed a city/county!
+        val wideCandidates = mutableListOf<NavSearchResult>()
+
+        // 2A. Android System Geocoder (full country / island bounds)
         val ctx = appContext
         if (ctx != null && runCatching { Geocoder.isPresent() }.getOrDefault(false)) {
             runCatching {
@@ -309,35 +473,22 @@ class BuiltInNavEngine(
                     listOf(trimmed)
                 }
                 for (gq in geoQueries) {
-                    if (combined.size >= 3) break
+                    if (wideCandidates.size >= 4) break
                     @Suppress("DEPRECATION")
                     val addrs = if (region != null && region.isIsland) {
                         geocoder.getFromLocationName(
-                            gq, 5,
+                            gq, 6,
                             region.minLat, region.minLon, region.maxLat, region.maxLon
                         )
                     } else {
-                        geocoder.getFromLocationName(gq, 5)
+                        geocoder.getFromLocationName(gq, 6)
                     }
                     if (!addrs.isNullOrEmpty()) {
                         for (a in addrs) {
                             if (a.hasLatitude() && a.hasLongitude()) {
-                                val line = a.getAddressLine(0).orEmpty().trim()
-                                val title = a.featureName?.takeIf { it.isNotBlank() && !it.all(Char::isDigit) }
-                                    ?: line.ifBlank { trimmed }
-                                val sub = line.takeIf { it.isNotBlank() && it != title }
-                                    ?: listOfNotNull(a.adminArea, a.subAdminArea, a.locality, a.thoroughfare)
-                                        .distinct()
-                                        .joinToString("")
-                                        .ifBlank { "%.5f, %.5f".format(a.latitude, a.longitude) }
-                                val candidate = NavSearchResult(
-                                    name = title,
-                                    subtitle = sub,
-                                    latitude = a.latitude,
-                                    longitude = a.longitude
-                                )
-                                if (isWithinPolicy(candidate, region, biasLat, biasLon)) {
-                                    combined += candidate
+                                val candidate = addressToNavResult(a, trimmed)
+                                if (isWithinPolicy(candidate, region, effLat, effLon)) {
+                                    wideCandidates += candidate
                                 }
                             }
                         }
@@ -346,30 +497,30 @@ class BuiltInNavEngine(
             }
         }
 
-        // 2. ArcGIS World Geocoding Service (Zero-Key, locked to countryCode when in island region)
-        if (combined.size < 2) {
+        // 2B. ArcGIS World Geocoding Service (country-wide with proximity bias)
+        if (wideCandidates.size < 3) {
             runCatching {
                 val encoded = URLEncoder.encode(trimmed, "UTF-8")
                 val countryParam = if (region != null && region.arcGisCc.isNotBlank()) "&countryCode=${region.arcGisCc}" else ""
-                val locParam = if (biasLat != 0.0 && biasLon != 0.0) "&location=$biasLon,$biasLat" else ""
+                val locParam = if (hasGps) "&location=$effLon,$effLat" else ""
                 val arcUrl =
                     "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates" +
-                        "?SingleLine=$encoded$countryParam$locParam&maxLocations=5&outFields=Match_addr,Place_addr,Type&f=pjson"
+                        "?SingleLine=$encoded$countryParam$locParam&maxLocations=6&outFields=Match_addr,Place_addr,Type&f=pjson"
                 val req = Request.Builder()
                     .url(arcUrl)
-                    .header("User-Agent", "DX-Car-Launcher/1.8.6 (Android Car HeadUnit)")
+                    .header("User-Agent", "DX-Car-Launcher/1.9.3 (Android Car HeadUnit)")
                     .build()
                 httpClient.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
-                        combined += parseArcGisResults(resp.body?.string().orEmpty(), trimmed)
-                            .filter { isWithinPolicy(it, region, biasLat, biasLon) }
+                        wideCandidates += parseArcGisResults(resp.body?.string().orEmpty(), trimmed)
+                            .filter { isWithinPolicy(it, region, effLat, effLon) }
                     }
                 }
             }
         }
 
-        // 3. Nominatim (zh-TW) with countrycodes lock when in island country
-        if (combined.size < 3) {
+        // 2C. Nominatim nationwide
+        if (wideCandidates.size < 3) {
             val queriesToTry = buildList {
                 add(trimmed)
                 val spaced = tokenizeCjkAddress(trimmed)
@@ -383,50 +534,27 @@ class BuiltInNavEngine(
             val acceptLang = DxCarI18n.nominatimAcceptLanguage()
             val ccParam = if (region != null && region.nominatimCc.isNotBlank()) "&countrycodes=${region.nominatimCc}" else ""
             for (qCandidate in queriesToTry) {
-                if (combined.size >= 3) break
+                if (wideCandidates.size >= 4) break
                 val enc = URLEncoder.encode(qCandidate, "UTF-8")
-                // Local viewbox first
-                if (biasLat != 0.0 && biasLon != 0.0) {
-                    runCatching {
-                        val left = biasLon - 0.55
-                        val right = biasLon + 0.55
-                        val top = biasLat + 0.50
-                        val bottom = biasLat - 0.50
-                        val nearUrl =
-                            "https://nominatim.openstreetmap.org/search?q=$enc&format=jsonv2&accept-language=$acceptLang$ccParam&viewbox=$left,$top,$right,$bottom&bounded=1&limit=4"
-                        val req = Request.Builder()
-                            .url(nearUrl)
-                            .header("User-Agent", "DX-Car-Launcher/1.8.6 (Android Car HeadUnit)")
-                            .build()
-                        httpClient.newCall(req).execute().use { resp ->
-                            if (resp.isSuccessful) {
-                                combined += parseNominatimResults(resp.body?.string().orEmpty())
-                                    .filter { isWithinPolicy(it, region, biasLat, biasLon) }
-                            }
-                        }
-                    }
-                }
-                if (combined.size < 2) {
-                    runCatching {
-                        val wideUrl =
-                            "https://nominatim.openstreetmap.org/search?q=$enc&format=jsonv2&accept-language=$acceptLang$ccParam&limit=5"
-                        val req = Request.Builder()
-                            .url(wideUrl)
-                            .header("User-Agent", "DX-Car-Launcher/1.8.6 (Android Car HeadUnit)")
-                            .build()
-                        httpClient.newCall(req).execute().use { resp ->
-                            if (resp.isSuccessful) {
-                                combined += parseNominatimResults(resp.body?.string().orEmpty())
-                                    .filter { isWithinPolicy(it, region, biasLat, biasLon) }
-                            }
+                runCatching {
+                    val wideUrl =
+                        "https://nominatim.openstreetmap.org/search?q=$enc&format=jsonv2&accept-language=$acceptLang$ccParam&limit=6"
+                    val req = Request.Builder()
+                        .url(wideUrl)
+                        .header("User-Agent", "DX-Car-Launcher/1.9.3 (Android Car HeadUnit)")
+                        .build()
+                    httpClient.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            wideCandidates += parseNominatimResults(resp.body?.string().orEmpty())
+                                .filter { isWithinPolicy(it, region, effLat, effLon) }
                         }
                     }
                 }
             }
         }
 
-        // 4. Komoot Photon fallback (strictly bbox-locked when in island country)
-        if (combined.isEmpty()) {
+        // 2D. Komoot Photon nationwide fallback
+        if (wideCandidates.isEmpty()) {
             runCatching {
                 val fallbackQ = tokenizeCjkAddress(stripDoorNumber(trimmed).ifBlank { trimmed })
                 val enc = URLEncoder.encode(fallbackQ, "UTF-8")
@@ -435,36 +563,117 @@ class BuiltInNavEngine(
                 } else {
                     ""
                 }
-                val photonUrl = "https://photon.komoot.io/api/?q=$enc&lat=$biasLat&lon=$biasLon$bboxParam&limit=5"
+                val photonUrl = "https://photon.komoot.io/api/?q=$enc&lat=$effLat&lon=$effLon$bboxParam&limit=6"
                 val req = Request.Builder()
                     .url(photonUrl)
-                    .header("User-Agent", "DX-Car-Launcher/1.8.6")
+                    .header("User-Agent", "DX-Car-Launcher/1.9.3")
                     .build()
                 httpClient.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
-                        combined += parsePhotonResults(resp.body?.string().orEmpty())
-                            .filter { isWithinPolicy(it, region, biasLat, biasLon) }
+                        wideCandidates += parsePhotonResults(resp.body?.string().orEmpty())
+                            .filter { isWithinPolicy(it, region, effLat, effLon) }
                     }
                 }
             }
         }
 
-        // Sort external results by distance from user's GPS position, then prepend local registered shortcuts
-        val sortedExternal = if (biasLat != 0.0 && biasLon != 0.0) {
-            combined.sortedBy { distanceMeters(biasLat, biasLon, it.latitude, it.longitude) }
-        } else {
-            combined
-        }
+        return finalizeAndRankResults(localMatches, wideCandidates, effLat, effLon)
+    }
 
+    private fun addressToNavResult(a: android.location.Address, fallbackQuery: String): NavSearchResult {
+        val line = a.getAddressLine(0).orEmpty().trim()
+        val title = a.featureName?.takeIf { it.isNotBlank() && !it.all(Char::isDigit) }
+            ?: line.ifBlank { fallbackQuery }
+        val sub = line.takeIf { it.isNotBlank() && it != title }
+            ?: listOfNotNull(a.adminArea, a.subAdminArea, a.locality, a.thoroughfare)
+                .distinct()
+                .joinToString("")
+                .ifBlank { "%.5f, %.5f".format(a.latitude, a.longitude) }
+        return NavSearchResult(
+            name = title,
+            subtitle = sub,
+            latitude = a.latitude,
+            longitude = a.longitude
+        )
+    }
+
+    private fun finalizeAndRankResults(
+        localMatches: List<NavSearchResult>,
+        external: List<NavSearchResult>,
+        effLat: Double,
+        effLon: Double
+    ): List<NavSearchResult> {
+        val hasGps = effLat != 0.0 && effLon != 0.0
+        val sortedExternal = if (hasGps) {
+            external.sortedBy { distanceMeters(effLat, effLon, it.latitude, it.longitude) }
+        } else {
+            external
+        }
         val deduped = mutableListOf<NavSearchResult>()
         for (item in (localMatches + sortedExternal)) {
             val dup = deduped.any {
                 kotlin.math.abs(it.latitude - item.latitude) < 0.0005 &&
                     kotlin.math.abs(it.longitude - item.longitude) < 0.0005
             }
-            if (!dup) deduped += item
+            if (!dup) {
+                val annotated = if (hasGps && !item.subtitle.contains("km ·") && !item.subtitle.contains("m ·")) {
+                    val distM = distanceMeters(effLat, effLon, item.latitude, item.longitude).roundToInt()
+                    val distTag = if (distM >= 1000) "%.1f km".format(distM / 1000f) else "$distM m"
+                    item.copy(subtitle = "$distTag · ${item.subtitle}")
+                } else {
+                    item
+                }
+                deduped += annotated
+            }
         }
         return deduped.take(7)
+    }
+
+    private fun containsExplicitCountyOrCity(query: String): Boolean {
+        val cityPattern = Regex(
+            "(台北|臺北|新北|基隆|桃園|新竹|苗栗|台中|臺中|彰化|南投|雲林|嘉義|台南|臺南|高雄|屏東|宜蘭|花蓮|台東|臺東|澎湖|金門|馬祖|連江|東京|大阪|京都|北海道|沖繩|福岡|名古屋|橫濱)"
+        )
+        return cityPattern.containsMatchIn(query)
+    }
+
+    private fun normalizeCityAlias(text: String): String {
+        return text.replace("臺", "台").replace("市", "").replace("縣", "").trim()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun resolveCurrentLocalCityDistrict(lat: Double, lon: Double, isTaiwan: Boolean): Pair<String, String> {
+        val now = System.currentTimeMillis()
+        if (cachedLocalCity.isNotBlank() &&
+            (now - cachedLocalAreaAtMs) < 300_000L &&
+            distanceMeters(lat, lon, cachedLocalAreaLat, cachedLocalAreaLon) < 2500.0
+        ) {
+            return cachedLocalCity to cachedLocalDistrict
+        }
+        val ctx = appContext
+        if (ctx != null && runCatching { Geocoder.isPresent() }.getOrDefault(false)) {
+            val found = runCatching {
+                val geocoder = Geocoder(ctx, if (isTaiwan) Locale.TRADITIONAL_CHINESE else Locale.getDefault())
+                val addr = geocoder.getFromLocation(lat, lon, 1)?.firstOrNull()
+                if (addr != null) {
+                    val city = addr.adminArea?.trim().orEmpty()
+                        .ifBlank { addr.locality?.trim().orEmpty() }
+                        .ifBlank { addr.subAdminArea?.trim().orEmpty() }
+                    val district = addr.subLocality?.trim().orEmpty()
+                        .ifBlank { addr.subAdminArea?.trim().orEmpty().takeIf { it != city }.orEmpty() }
+                        .ifBlank { addr.locality?.trim().orEmpty().takeIf { it != city }.orEmpty() }
+                    city to district
+                } else null
+            }.getOrNull()
+            if (found != null && found.first.isNotBlank()) {
+                cachedLocalAreaLat = lat
+                cachedLocalAreaLon = lon
+                cachedLocalCity = found.first
+                cachedLocalDistrict = found.second
+                cachedLocalAreaAtMs = now
+                return found
+            }
+        }
+        return cachedLocalCity to cachedLocalDistrict
     }
 
     private fun tokenizeCjkAddress(raw: String): String {
